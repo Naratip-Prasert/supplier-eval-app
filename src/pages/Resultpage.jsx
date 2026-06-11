@@ -4,6 +4,7 @@
 //  Radar Chart, Score Detail, Performance Level Guide
 // ============================================================
 
+import { useState } from "react";
 import { Header, GreenButton } from "../components";
 import { CRITERIA, GRADE_MAP, GRADE_GUIDE } from "../constants";
 
@@ -34,6 +35,23 @@ export default function ResultPage({ formData, result, onBack }) {
   const allItems = CRITERIA.flatMap((s) => s.items);
 
   const BAR_COLORS = ["#4fc3f7","#ef5350","#ffd600","#aed581","#ba68c8"];
+
+  const [saveStatus, setSaveStatus] = useState("idle"); // "idle" | "saving" | "saved" | "error"
+
+  const saveToDatabase = async () => {
+    setSaveStatus("saving");
+    try {
+      await fetch("http://localhost:5000/api/evaluations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...formData, ...result }),
+      });
+      setSaveStatus("saved");
+    } catch (err) {
+      console.error("Save error:", err);
+      setSaveStatus("error");
+    }
+  };
 
   return (
     <div style={{ minHeight: "100vh", background: "#fff", fontFamily: "Sarabun, sans-serif" }}>
@@ -203,7 +221,19 @@ export default function ResultPage({ formData, result, onBack }) {
           </div>
         </div>
 
-        <GreenButton fullWidth onClick={onBack}>Done</GreenButton>
+        <div style={{ display: "flex", gap: 12 }}>
+          <GreenButton
+            fullWidth
+            onClick={saveToDatabase}
+            disabled={saveStatus === "saving" || saveStatus === "saved"}
+          >
+            {saveStatus === "idle"   && "บันทึกผล"}
+            {saveStatus === "saving" && "กำลังบันทึก..."}
+            {saveStatus === "saved"  && "✅ บันทึกแล้ว"}
+            {saveStatus === "error"  && "❌ ลองใหม่"}
+          </GreenButton>
+          <GreenButton fullWidth onClick={onBack}>Done</GreenButton>
+        </div>
       </div>
     </div>
   );
