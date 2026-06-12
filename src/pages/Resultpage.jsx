@@ -1,15 +1,30 @@
+// ============================================================
+//  pages/Resultpage.jsx
+//  - Confirmation dialog before save (Req 10)
+//  - Sends new payload format to backend
+//  - Loads evaluation history for this supplier (Req 6)
+//  - VITE_API_URL from .env (Req 13)
+// ============================================================
+
 import { useState, useRef, useEffect } from "react";
 import { Header, GreenButton } from "../components";
 import { CRITERIA, GRADE_MAP, GRADE_GUIDE } from "../constants";
-import jsPDF from "jspdf";
+import jsPDF     from "jspdf";
 import html2canvas from "html2canvas";
 import * as XLSX from "xlsx";
 
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+
+// Helper: get score/note/weight from new format { "1.1": {score, weight, note} }
+const getScore  = (scores, no) => scores?.[no]?.score  ?? null;
+const getNote   = (scores, no) => scores?.[no]?.note   ?? "";
+const getWeight = (scores, no, fallback) => scores?.[no]?.weight ?? fallback;
+
 export default function ResultPage({ formData, result, onBack }) {
-  const { totalScore, grade, scores = {}, notes = {} } = result;
+  const { totalScore, grade, scores = {} } = result;
   const gradeColor = GRADE_MAP[grade];
   const subtitle   = `${formData.empId || "BJC-XXXXX"}|${formData.dept || "ฝ่าย"}|${formData.job || "งาน"}`;
-  const evalLabel  = formData.evalType === "post-Evaluation" ? "Post" : "Pre";
+  const evalLabel  = formData.evalType === "re_evaluation" ? "Post" : "Pre";
 
   const now     = new Date();
   const dateStr = `${String(now.getDate()).padStart(2,"0")}/${String(now.getMonth()+1).padStart(2,"0")}/${now.getFullYear()}`;
@@ -17,10 +32,11 @@ export default function ResultPage({ formData, result, onBack }) {
   const fileBase = `SPE-${(formData.supplierName || "supplier").replace(/\s+/g, "_")}-${dateTag}`;
 
   const sectionSummary = CRITERIA.map((sec) => {
-    const maxTotal = sec.items.reduce((s, i) => s + i.weight, 0);
+    const maxTotal = sec.items.reduce((s, i) => s + getWeight(scores, i.no, i.weight), 0);
     const gotTotal = sec.items.reduce((s, i) => {
-      const lv = scores[i.no];
-      return lv ? s + (lv / 5) * i.weight : s;
+      const lv = getScore(scores, i.no);
+      const w  = getWeight(scores, i.no, i.weight);
+      return lv ? s + (lv / 5) * w : s;
     }, 0);
     return { label: sec.section.split("/")[0].replace(/^\d+\./, "").trim(), got: gotTotal, max: maxTotal };
   });
@@ -30,20 +46,29 @@ export default function ResultPage({ formData, result, onBack }) {
   const allItems     = CRITERIA.flatMap((s) => s.items);
   const BAR_COLORS   = ["#4fc3f7","#ef5350","#ffd600","#aed581","#ba68c8"];
 
-  const [saveStatus, setSaveStatus] = useState("idle");
-  const [exportOpen, setExportOpen] = useState(false);
-  const [exporting,  setExporting]  = useState(false);
+  const [saveStatus,   setSaveStatus]   = useState("idle");
+  const [showConfirm,  setShowConfirm]  = useState(false);
+  const [exportOpen,   setExportOpen]   = useState(false);
+  const [exporting,    setExporting]    = useState(false);
+  const [history,      setHistory]      = useState([]);
 
-  const reportRef   = useRef(null);
-  const exportRef   = useRef(null);
+  const reportRef = useRef(null);
+  const exportRef = useRef(null);
 
-  // Close dropdown when clicking outside
+  // Load evaluation history for this supplier (Req 6)
+  useEffect(() => {
+    if (!formData.vendorCode) return;
+    fetch(`${API_URL}/api/sessions?vendorCode=${encodeURIComponent(formData.vendorCode)}`)
+      .then((r) => r.json())
+      .then((data) => setHistory(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, [formData.vendorCode]);
+
+  // Close export dropdown on outside click
   useEffect(() => {
     if (!exportOpen) return;
     const close = (e) => {
-      if (exportRef.current && !exportRef.current.contains(e.target)) {
-        setExportOpen(false);
-      }
+      if (exportRef.current && !exportRef.current.contains(e.target)) setExportOpen(false);
     };
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
@@ -55,18 +80,15 @@ export default function ResultPage({ formData, result, onBack }) {
     setExporting(true);
     try {
       const canvas = await html2canvas(reportRef.current, {
-        scale: 2,
-        backgroundColor: "#ffffff",
-        useCORS: true,
-        logging: false,
+        scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false,
       });
-      const imgData  = canvas.toDataURL("image/png");
-      const pdf      = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-      const pageW    = pdf.internal.pageSize.getWidth();
-      const pageH    = pdf.internal.pageSize.getHeight();
-      const imgH     = (canvas.height * pageW) / canvas.width;
-      let remaining  = imgH;
-      let yOffset    = 0;
+      const imgData = canvas.toDataURL("image/png");
+      const pdf     = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const pageW   = pdf.internal.pageSize.getWidth();
+      const pageH   = pdf.internal.pageSize.getHeight();
+      const imgH    = (canvas.height * pageW) / canvas.width;
+      let remaining = imgH;
+      let yOffset   = 0;
       while (remaining > 0) {
         pdf.addImage(imgData, "PNG", 0, -yOffset, pageW, imgH);
         remaining -= pageH;
@@ -83,10 +105,8 @@ export default function ResultPage({ formData, result, onBack }) {
     setExportOpen(false);
     const wb = XLSX.utils.book_new();
 
-    // Sheet 1 — Summary
     const summaryRows = [
-      ["Supplier Performance Evaluation Report"],
-      [],
+      ["Supplier Performance Evaluation Report"], [],
       ["Field", "Value"],
       ["Supplier Name",   formData.supplierName  || ""],
       ["Vendor Code",     formData.vendorCode    || ""],
@@ -104,10 +124,11 @@ export default function ResultPage({ formData, result, onBack }) {
       ["Section", "Score", "Max Weight", "% Achieved"],
     ];
     CRITERIA.forEach((sec) => {
-      const max = sec.items.reduce((s, i) => s + i.weight, 0);
+      const max = sec.items.reduce((s, i) => s + getWeight(scores, i.no, i.weight), 0);
       const got = sec.items.reduce((s, i) => {
-        const lv = scores[i.no];
-        return lv ? s + (lv / 5) * i.weight : s;
+        const lv = getScore(scores, i.no);
+        const w  = getWeight(scores, i.no, i.weight);
+        return lv ? s + (lv / 5) * w : s;
       }, 0);
       summaryRows.push([sec.section, +got.toFixed(2), max, +((got / max) * 100).toFixed(1)]);
     });
@@ -115,30 +136,27 @@ export default function ResultPage({ formData, result, onBack }) {
     ws1["!cols"] = [{ wch: 20 }, { wch: 40 }, { wch: 14 }, { wch: 14 }];
     XLSX.utils.book_append_sheet(wb, ws1, "Summary");
 
-    // Sheet 2 — Detail
     const detailRows = [
       ["No.", "Criteria", "Detail", "Weight(%)", "Score (1-5)", "Weighted Score", "Note"],
     ];
     CRITERIA.forEach((sec) => {
       detailRows.push([sec.section, "", "", "", "", "", ""]);
       sec.items.forEach((item) => {
-        const lv = scores[item.no];
+        const lv = getScore(scores, item.no);
+        const w  = getWeight(scores, item.no, item.weight);
         detailRows.push([
           item.no,
           item.title.replace(/\n/g, " "),
           item.detail,
-          item.weight,
+          w,
           lv || "",
-          lv ? +((lv / 5) * item.weight).toFixed(2) : "",
-          notes[item.no] || "",
+          lv ? +((lv / 5) * w).toFixed(2) : "",
+          getNote(scores, item.no),
         ]);
       });
     });
     const ws2 = XLSX.utils.aoa_to_sheet(detailRows);
-    ws2["!cols"] = [
-      { wch: 8 }, { wch: 30 }, { wch: 50 },
-      { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 30 },
-    ];
+    ws2["!cols"] = [{ wch: 8 }, { wch: 30 }, { wch: 50 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 30 }];
     XLSX.utils.book_append_sheet(wb, ws2, "Detail");
 
     XLSX.writeFile(wb, `${fileBase}.xlsx`);
@@ -149,40 +167,47 @@ export default function ResultPage({ formData, result, onBack }) {
     setExportOpen(false);
     const content = reportRef.current.innerHTML;
     const win = window.open("", "_blank", "width=1200,height=900");
-    win.document.write(`<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8"/>
-  <title>Supplier Evaluation — ${formData.supplierName || ""}</title>
-  <style>
-    * { box-sizing: border-box; }
-    body { font-family: Sarabun, Arial, sans-serif; margin: 0; padding: 16px; background: #fff; }
-    @media print { body { padding: 0; } }
-  </style>
-</head>
-<body>${content}</body>
-</html>`);
+    win.document.write(`<!DOCTYPE html><html><head>
+      <meta charset="utf-8"/>
+      <title>Supplier Evaluation — ${formData.supplierName || ""}</title>
+      <style>* { box-sizing: border-box; } body { font-family: Sarabun, Arial, sans-serif; margin: 0; padding: 16px; }</style>
+    </head><body>${content}</body></html>`);
     win.document.close();
     win.focus();
     setTimeout(() => { win.print(); }, 800);
   };
 
   // ── Save to DB ────────────────────────────────────────────────
-  const saveToDatabase = async () => {
+  const doSave = async () => {
+    setShowConfirm(false);
     setSaveStatus("saving");
     try {
-      const res = await fetch("http://localhost:5000/api/evaluations", {
-        method: "POST",
+      const payload = {
+        employeeId:   formData.empId,
+        vendorCode:   formData.vendorCode,
+        evalType:     formData.evalType,
+        period:       formData.period,
+        productType:  formData.productType,
+        scores,                               // { "1.1": {score, weight, note}, ... }
+      };
+      const res = await fetch(`${API_URL}/api/evaluations`, {
+        method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...formData, ...result }),
+        body:    JSON.stringify(payload),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         console.error("Save failed:", data);
         setSaveStatus("error");
+        alert(`บันทึกไม่สำเร็จ: ${data.message || "เกิดข้อผิดพลาด"}`);
         return;
       }
       setSaveStatus("saved");
+      // Reload history
+      fetch(`${API_URL}/api/sessions?vendorCode=${encodeURIComponent(formData.vendorCode)}`)
+        .then((r) => r.json())
+        .then((data) => setHistory(Array.isArray(data) ? data : []))
+        .catch(() => {});
     } catch (err) {
       console.error("Save error:", err);
       setSaveStatus("error");
@@ -198,8 +223,52 @@ export default function ResultPage({ formData, result, onBack }) {
 
   return (
     <div style={{ minHeight: "100vh", background: "#fff", fontFamily: "Sarabun, sans-serif" }}>
+      {/* Confirmation modal (Req 10) */}
+      {showConfirm && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999,
+        }}>
+          <div style={{
+            background: "#fff", borderRadius: 10, padding: "28px 32px",
+            maxWidth: 380, width: "90%", boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
+            textAlign: "center",
+          }}>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 10 }}>ยืนยันการบันทึก?</div>
+            <div style={{ fontSize: 13, color: "#555", marginBottom: 6 }}>
+              ซัพพลายเออร์: <b>{formData.supplierName}</b>
+            </div>
+            <div style={{ fontSize: 13, color: "#555", marginBottom: 20 }}>
+              คะแนนรวม: <b>{totalScore.toFixed(1)}</b> — เกรด:{" "}
+              <b style={{ color: gradeColor }}>{grade}</b>
+            </div>
+            <div style={{ display: "flex", gap: 12 }}>
+              <button
+                onClick={() => setShowConfirm(false)}
+                style={{
+                  flex: 1, padding: "10px", border: "1.5px solid #ccc",
+                  borderRadius: 8, fontSize: 14, cursor: "pointer", background: "#fff",
+                }}
+              >
+                ยกเลิก
+              </button>
+              <button
+                onClick={doSave}
+                style={{
+                  flex: 1, padding: "10px", border: "none",
+                  borderRadius: 8, fontSize: 14, fontWeight: 700,
+                  cursor: "pointer", background: "#2e7d32", color: "#fff",
+                }}
+              >
+                ยืนยันบันทึก
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Header
-        titleOverride={`Supplier Performance Evaluation - ${evalLabel} Evaluation`}
+        titleOverride={`Supplier Performance Evaluation — ${evalLabel} Evaluation`}
         subtitle={subtitle}
         backLabel="← กลับหน้าหลัก"
         onBack={onBack}
@@ -207,7 +276,7 @@ export default function ResultPage({ formData, result, onBack }) {
 
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: 16 }}>
 
-        {/* Completion banner */}
+        {/* Top banner */}
         <div style={{
           background: "#f9f9e8", border: "2px solid #ccc", borderRadius: 6,
           display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -242,7 +311,7 @@ export default function ResultPage({ formData, result, onBack }) {
           </div>
         </div>
 
-        {/* ── Report content (captured for PDF/Print) ── */}
+        {/* ── Report content ── */}
         <div ref={reportRef}>
 
           {/* Supplier info */}
@@ -256,18 +325,13 @@ export default function ResultPage({ formData, result, onBack }) {
               display: "flex", alignItems: "center", justifyContent: "center",
               fontSize: 30, gridRow: "1 / 4",
             }}>🏢</div>
-            <div style={{ fontSize: 15, fontWeight: 700 }}>
-              {formData.supplierName || "ABC Supply Co.,Ltd."}
-            </div>
-            <div style={{ fontSize: 13 }}>
-              Evaluated By : {formData.empId || "—"} | {formData.dept || "—"}
-            </div>
-            <div style={{ fontSize: 13 }}>Vendor Code : {formData.vendorCode || "SP-001"}</div>
-            <div style={{ fontSize: 13 }}>Evaluation Period : {dateStr} — (1 year)</div>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>{formData.supplierName || "—"}</div>
+            <div style={{ fontSize: 13 }}>Evaluated By : {formData.empId || "—"} | {formData.dept || "—"}</div>
+            <div style={{ fontSize: 13 }}>Vendor Code : {formData.vendorCode || "—"}</div>
             <div style={{ fontSize: 13 }}>Evaluation Date : {dateStr}</div>
           </div>
 
-          {/* Score dashboard grid */}
+          {/* Score dashboard */}
           <div style={{
             display: "grid", gridTemplateColumns: "200px 1fr 200px 1fr",
             border: "1.5px solid #bbb", borderRadius: 6, overflow: "hidden", marginBottom: 12,
@@ -338,13 +402,14 @@ export default function ResultPage({ formData, result, onBack }) {
                 </thead>
                 <tbody>
                   {allItems.map((item, i) => {
-                    const lv     = scores[item.no];
-                    const scored = lv ? ((lv / 5) * item.weight).toFixed(1) : "—";
+                    const lv     = getScore(scores, item.no);
+                    const w      = getWeight(scores, item.no, item.weight);
+                    const scored = lv ? ((lv / 5) * w).toFixed(1) : "—";
                     return (
                       <tr key={item.no} style={{ background: i % 2 === 0 ? "#f5f5dc" : "#fffff0" }}>
                         <td style={{ padding: "4px 6px", textAlign: "center" }}>{item.no}</td>
                         <td style={{ padding: "4px 6px", whiteSpace: "pre-line", fontSize: 10 }}>{item.title}</td>
-                        <td style={{ padding: "4px 6px", textAlign: "center" }}>{item.weight}%</td>
+                        <td style={{ padding: "4px 6px", textAlign: "center" }}>{w}%</td>
                         <td style={{ padding: "4px 6px", textAlign: "center", fontWeight: 700, color: lv ? "#1a6b1a" : "#bbb" }}>
                           {scored}
                         </td>
@@ -356,7 +421,7 @@ export default function ResultPage({ formData, result, onBack }) {
             </div>
           </div>
 
-          {/* Grade guide + Eval history */}
+          {/* Grade guide + History (Req 6) */}
           <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 12, marginBottom: 16 }}>
             <div style={{ border: "1.5px solid #bbb", borderRadius: 6, padding: 14, background: "#f9f9e8" }}>
               <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>Performance Level Guide</div>
@@ -368,29 +433,82 @@ export default function ResultPage({ formData, result, onBack }) {
                       width: 30, height: 30, borderRadius: 5,
                       display: "flex", alignItems: "center", justifyContent: "center",
                       fontWeight: 800, fontSize: 15, flexShrink: 0,
-                    }}>
-                      {g.g}
-                    </span>
+                    }}>{g.g}</span>
                     <span>{g.range} {g.label}</span>
                   </div>
                 ))}
               </div>
             </div>
 
+            {/* Evaluation History */}
             <div style={{ border: "1.5px solid #bbb", borderRadius: 6, padding: 14, background: "#f9f9e8" }}>
-              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>Evaluation History</div>
-              <div style={{ height: 36, background: "#fff", border: "1px solid #ddd", borderRadius: 4, marginBottom: 8 }} />
-              <div style={{ height: 36, background: "#e8e8e8", border: "1px solid #ddd", borderRadius: 4 }} />
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>
+                Evaluation History — {formData.supplierName}
+              </div>
+              {history.length === 0 ? (
+                <div style={{ color: "#999", fontSize: 13 }}>ยังไม่มีประวัติการประเมิน</div>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: "#e0e0e0" }}>
+                        <th style={{ padding: "4px 8px", textAlign: "left" }}>ประเภท</th>
+                        <th style={{ padding: "4px 8px", textAlign: "left" }}>รอบ</th>
+                        <th style={{ padding: "4px 8px", textAlign: "center" }}>คะแนน</th>
+                        <th style={{ padding: "4px 8px", textAlign: "center" }}>เกรด</th>
+                        <th style={{ padding: "4px 8px", textAlign: "center" }}>สถานะ</th>
+                        <th style={{ padding: "4px 8px", textAlign: "left" }}>วันที่</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {history.map((h, i) => (
+                        <tr key={h.sessionId} style={{ background: i % 2 === 0 ? "#fff" : "#f5f5f5" }}>
+                          <td style={{ padding: "4px 8px" }}>
+                            {h.evalType === "new_supplier" ? "New Supplier" : "Re-Evaluation"}
+                          </td>
+                          <td style={{ padding: "4px 8px" }}>{h.period}</td>
+                          <td style={{ padding: "4px 8px", textAlign: "center" }}>
+                            {h.finalScore != null ? h.finalScore.toFixed(1) : "—"}
+                          </td>
+                          <td style={{ padding: "4px 8px", textAlign: "center" }}>
+                            {h.finalGrade ? (
+                              <span style={{
+                                background: GRADE_MAP[h.finalGrade] || "#999",
+                                color: "#fff", borderRadius: 4, padding: "2px 8px", fontWeight: 700,
+                              }}>
+                                {h.finalGrade}
+                              </span>
+                            ) : "—"}
+                          </td>
+                          <td style={{ padding: "4px 8px", textAlign: "center", fontSize: 11 }}>
+                            <span style={{
+                              background: h.status === "completed" ? "#e8f5e9" : "#fff3e0",
+                              color: h.status === "completed" ? "#2e7d32" : "#e65100",
+                              border: `1px solid ${h.status === "completed" ? "#a5d6a7" : "#ffcc02"}`,
+                              borderRadius: 4, padding: "2px 6px",
+                            }}>
+                              {h.status === "completed" ? "เสร็จสิ้น"
+                                : h.status === "in_progress" ? "กำลังดำเนินการ" : "รอดำเนินการ"}
+                            </span>
+                          </td>
+                          <td style={{ padding: "4px 8px", fontSize: 11 }}>
+                            {new Date(h.createdAt).toLocaleDateString("th-TH")}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
-
         </div>
         {/* ── End report content ── */}
 
         <div style={{ display: "flex", gap: 12 }}>
           <GreenButton
             fullWidth
-            onClick={saveToDatabase}
+            onClick={() => setShowConfirm(true)}
             disabled={saveStatus === "saving" || saveStatus === "saved"}
           >
             {saveStatus === "idle"   && "บันทึกผล"}
@@ -418,15 +536,16 @@ function RadarChart({ values, labels }) {
   return (
     <svg viewBox="0 0 170 170" width={150} height={150}>
       {gridLevels.map((lv) => (
-        <polygon
-          key={lv}
+        <polygon key={lv}
           points={Array.from({ length: N }, (_, i) => pt(i, lv * rMax)).join(" ")}
           fill="none" stroke="#ccc" strokeWidth={0.6}
         />
       ))}
       {Array.from({ length: N }, (_, i) => (
-        <line key={i} x1={cx} y1={cy} x2={cx + rMax * Math.cos(angleFor(i))} y2={cy + rMax * Math.sin(angleFor(i))}
-          stroke="#ddd" strokeWidth={0.8} />
+        <line key={i} x1={cx} y1={cy}
+          x2={cx + rMax * Math.cos(angleFor(i))} y2={cy + rMax * Math.sin(angleFor(i))}
+          stroke="#ddd" strokeWidth={0.8}
+        />
       ))}
       <polygon
         points={values.map((v, i) => pt(i, (v || 0.1) * rMax)).join(" ")}
@@ -436,8 +555,7 @@ function RadarChart({ values, labels }) {
         const x = cx + (rMax + 14) * Math.cos(angleFor(i));
         const y = cy + (rMax + 14) * Math.sin(angleFor(i));
         return (
-          <text key={lbl} x={x} y={y} textAnchor="middle" dominantBaseline="middle"
-            fontSize={8} fill="#555">
+          <text key={lbl} x={x} y={y} textAnchor="middle" dominantBaseline="middle" fontSize={8} fill="#555">
             {lbl}
           </text>
         );

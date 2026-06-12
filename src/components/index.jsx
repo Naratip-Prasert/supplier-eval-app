@@ -1,6 +1,5 @@
 // ============================================================
-//  components/index.js
-//  Shared UI components ใช้ร่วมกันทุกหน้า
+//  components/index.jsx — Shared UI components
 // ============================================================
 
 import { useState, useEffect } from "react";
@@ -22,9 +21,6 @@ export function Clock() {
 }
 
 // ------ Header ----------------------------------------------
-// subtitle = "BJC-10101|ฝ่ายวิศวกรรม|JB-022" (optional)
-// backLabel / onBack = ปุ่มกลับ (optional)
-// title = override ชื่อ title ขวา (optional)
 export function Header({ subtitle, backLabel, onBack, titleOverride }) {
   return (
     <div style={{
@@ -63,11 +59,9 @@ export function Header({ subtitle, backLabel, onBack, titleOverride }) {
 }
 
 // ------ CustomSelect ----------------------------------------
-// สไตล์ dropdown สีเขียวอ่อน ตาม design
 export function CustomSelect({ label, required, options, value, onChange, disabled }) {
   const [open, setOpen] = useState(false);
 
-  // ปิด dropdown เมื่อคลิกนอก
   useEffect(() => {
     if (!open) return;
     const handler = () => setOpen(false);
@@ -79,8 +73,7 @@ export function CustomSelect({ label, required, options, value, onChange, disabl
     <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
       {label && (
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#222" }}>
-          {label}
-          {required && <span style={{ color: "#e53935" }}>*</span>}
+          {label}{required && <span style={{ color: "#e53935" }}>*</span>}
         </div>
       )}
       <div
@@ -91,8 +84,7 @@ export function CustomSelect({ label, required, options, value, onChange, disabl
           border: "1.5px solid #333", borderRadius: 8,
           padding: "8px 12px", cursor: disabled ? "default" : "pointer",
           fontSize: 14, color: value ? "#111" : "#666",
-          opacity: disabled ? 0.65 : 1,
-          userSelect: "none",
+          opacity: disabled ? 0.65 : 1, userSelect: "none",
         }}
       >
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -108,8 +100,7 @@ export function CustomSelect({ label, required, options, value, onChange, disabl
             position: "absolute", top: "100%", left: 0, right: 0, zIndex: 9999,
             background: "#d4f5c8", border: "1.5px solid #333",
             borderTop: "none", borderRadius: "0 0 8px 8px",
-            boxShadow: "0 4px 16px rgba(0,0,0,0.18)",
-            maxHeight: 240, overflowY: "auto",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.18)", maxHeight: 240, overflowY: "auto",
           }}
         >
           {options.map((opt) => (
@@ -134,44 +125,47 @@ export function CustomSelect({ label, required, options, value, onChange, disabl
 }
 
 // ------ GreenInput ------------------------------------------
-// Input field สไตล์เดียวกับ design (พื้นหลังเขียวอ่อน)
-export function GreenInput({ label, required, value, onChange, placeholder, disabled }) {
+export function GreenInput({ label, required, value, onChange, onBlur, placeholder, disabled, error }) {
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
       {label && (
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#222" }}>
-          {label}
-          {required && <span style={{ color: "#e53935" }}>*</span>}
+          {label}{required && <span style={{ color: "#e53935" }}>*</span>}
         </div>
       )}
       <input
         value={value}
         onChange={(e) => onChange && onChange(e.target.value)}
+        onBlur={onBlur}
         placeholder={placeholder || ""}
         disabled={disabled}
         style={{
           width: "100%", boxSizing: "border-box",
           background: disabled ? "#f0f0f0" : "#d4f5c8",
-          border: "1.5px solid #888", borderRadius: 8,
-          padding: "8px 14px", fontSize: 14, outline: "none",
+          border: `1.5px solid ${error ? "#e53935" : "#888"}`,
+          borderRadius: 8, padding: "8px 14px", fontSize: 14, outline: "none",
           opacity: disabled ? 0.65 : 1,
         }}
       />
+      {error && <div style={{ color: "#e53935", fontSize: 11, marginTop: 3 }}>{error}</div>}
     </div>
   );
 }
 
 // ------ GreenButton -----------------------------------------
-export function GreenButton({ children, onClick, color = "#2e7d32", fullWidth = false, style = {} }) {
+export function GreenButton({ children, onClick, color = "#2e7d32", fullWidth = false, disabled = false, style = {} }) {
   return (
     <button
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
       style={{
-        background: color, color: "#fff", border: "none",
-        borderRadius: 8, padding: "13px 36px",
-        fontSize: 15, fontWeight: 700, cursor: "pointer",
+        background: disabled ? "#9e9e9e" : color,
+        color: "#fff", border: "none", borderRadius: 8,
+        padding: "13px 36px", fontSize: 15, fontWeight: 700,
+        cursor: disabled ? "not-allowed" : "pointer",
         fontFamily: "monospace", letterSpacing: 1,
         width: fullWidth ? "100%" : undefined,
+        opacity: disabled ? 0.7 : 1,
         ...style,
       }}
     >

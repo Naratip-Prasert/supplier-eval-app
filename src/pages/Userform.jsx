@@ -1,34 +1,121 @@
 // ============================================================
-//  pages/UserForm.js
-//  หน้ากรอกข้อมูล — สลับ Tab User / GCP
-//  เมื่อเลือก evalType จะโชว์ฟิลด์ Supplier เพิ่ม
+//  pages/Userform.jsx
+//  - Employee ID validated on blur → auto-fills dept + job (Req 2, 11)
+//  - Vendor code validated on blur → auto-fills supplier name (Req 8)
+//  - Required-field alert before submit (Req 5)
+//  - eval_type: new_supplier / re_evaluation (Req 7)
+//  - VITE_API_URL from .env (Req 13)
 // ============================================================
 
 import { useState } from "react";
-import { Header, CustomSelect, GreenInput, GreenButton } from "../components";
-import {
-  DEPT_OPTIONS,
-  JOB_OPTIONS,
-  PRODUCT_TYPE_OPTIONS,
-  EVAL_PERIOD_OPTIONS,
-} from "../constants";
+import { Header, GreenInput, GreenButton, CustomSelect } from "../components";
+import { PRODUCT_TYPE_OPTIONS, EVAL_PERIOD_OPTIONS } from "../constants";
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+
+// Maps Thai display value → English value sent to API
+const PRODUCT_TYPE_TO_API = {
+  "สินค้า": "goods",
+  "บริการ": "services",
+  "สินค้าและบริการ": "both",
+};
+
+const EVAL_TYPE_OPTIONS = [
+  { value: "new_supplier",  label: "New Supplier / ซัพพลายเออร์ใหม่" },
+  { value: "re_evaluation", label: "Re-Evaluation / ประเมินซ้ำ" },
+];
 
 export default function UserForm({ role, onBack, onSubmit }) {
   const [activeTab, setActiveTab] = useState(role === "gcp" ? "gcp" : "user");
-  const [empId,        setEmpId]        = useState("");
-  const [dept,         setDept]         = useState("");
-  const [job,          setJob]          = useState("");
-  const [evalType,     setEvalType]     = useState(""); // "pre-Evaluation" | "post-Evaluation"
-  const [vendorCode,   setVendorCode]   = useState("");
-  const [supplierName, setSupplierName] = useState("");
-  const [productType,  setProductType]  = useState("");
-  const [period,       setPeriod]       = useState("");
 
-  const isGCP = activeTab === "gcp";
+  // Employee fields
+  const [empId,      setEmpId]      = useState("");
+  const [empInfo,    setEmpInfo]    = useState(null);   // { fullName, department, jobTitle, role }
+  const [empLoading, setEmpLoading] = useState(false);
+  const [empError,   setEmpError]   = useState(null);
+
+  // Eval type
+  const [evalType, setEvalType] = useState("");
+
+  // Supplier fields
+  const [vendorCode,        setVendorCode]        = useState("");
+  const [supplierName,      setSupplierName]      = useState("");
+  const [supplierValidated, setSupplierValidated] = useState(false);
+  const [supplierError,     setSupplierError]     = useState(null);
+  const [productType,       setProductType]       = useState("");
+  const [period,            setPeriod]            = useState("");
+
+  const isGCP       = activeTab === "gcp";
   const accentColor = isGCP ? "#1565c0" : "#1a6b1a";
 
+  // ── Employee ID validation ─────────────────────────────────
+  const handleEmpBlur = async () => {
+    if (!empId.trim()) return;
+    setEmpLoading(true);
+    setEmpError(null);
+    setEmpInfo(null);
+    try {
+      const res = await fetch(`${API_URL}/api/employees/${encodeURIComponent(empId.trim())}`);
+      if (!res.ok) {
+        setEmpError("ไม่พบรหัสพนักงานในระบบ");
+        return;
+      }
+      const data = await res.json();
+      setEmpInfo(data);
+    } catch {
+      setEmpError("ไม่สามารถตรวจสอบรหัสพนักงานได้");
+    } finally {
+      setEmpLoading(false);
+    }
+  };
+
+  // ── Vendor code validation ─────────────────────────────────
+  const handleVendorBlur = async () => {
+    if (!vendorCode.trim()) return;
+    setSupplierError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/suppliers`);
+      const all = await res.json();
+      const found = all.find((s) => s.vendorCode === vendorCode.trim());
+      if (found) {
+        setSupplierName(found.supplierName);
+        setSupplierValidated(true);
+      } else {
+        setSupplierError("ไม่พบรหัสผู้ขายในระบบ");
+        setSupplierValidated(false);
+      }
+    } catch {
+      setSupplierError("ไม่สามารถตรวจสอบรหัสผู้ขายได้");
+    }
+  };
+
+  // ── Submit ─────────────────────────────────────────────────
   const handleSubmit = () => {
-    onSubmit({ empId, dept, job, evalType, vendorCode, supplierName, productType, period, role: activeTab });
+    const missing = [];
+    if (!empId.trim())   missing.push("รหัสพนักงาน");
+    if (!empInfo)        missing.push("รหัสพนักงาน (ต้องตรวจสอบก่อน — คลิกออกจากช่อง)");
+    if (!evalType)       missing.push("ประเภทประเมิน");
+    if (!vendorCode.trim()) missing.push("รหัสผู้ขาย (Vendor Code)");
+    if (!supplierName.trim()) missing.push("ชื่อผู้ขาย");
+    if (!productType)    missing.push("ประเภทสินค้า");
+    if (!period)         missing.push("รอบการประเมิน");
+
+    if (missing.length > 0) {
+      alert(`กรุณากรอกข้อมูลให้ครบถ้วน:\n\n• ${missing.join("\n• ")}`);
+      return;
+    }
+
+    onSubmit({
+      empId:        empId.trim(),
+      dept:         empInfo.department,
+      job:          empInfo.jobTitle,
+      evalType,
+      vendorCode:   vendorCode.trim(),
+      supplierName: supplierName.trim(),
+      productType:  PRODUCT_TYPE_TO_API[productType] || productType,
+      period,
+      role:         empInfo.role,
+    });
   };
 
   return (
@@ -63,33 +150,17 @@ export default function UserForm({ role, onBack, onSubmit }) {
           <div style={{ background: accentColor, height: 8, borderRadius: "5px 5px 0 0" }} />
           <div style={{ padding: "20px 24px" }}>
 
-            {/* Title */}
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>
               สำหรับ{" "}
               <span style={{ color: accentColor }}>
-                {isGCP ? "GCP(เจ้าหน้าที่จัดซื้อ)" : "User(ผู้ใช้งานทั่วไป)"}
+                {isGCP ? "GCP (เจ้าหน้าที่จัดซื้อ)" : "User (ผู้ใช้งานทั่วไป)"}
               </span>
             </div>
             <div style={{ fontSize: 12, color: "#555", marginBottom: 16, fontFamily: "monospace" }}>
               {isGCP
-                ? "ประเมิน Supplier โดยเจ้าหน้าที่ GCP — สามารถกรอกข้อมูลและมองเห็นแบบประเมินทั้งหมด"
-                : "ประเมิน Supplier หรือประเมิน Buyer กรอกข้อมูลและเลือกแบบประเมินด้านล่าง"}
+                ? "ประเมิน Supplier โดยเจ้าหน้าที่ GCP"
+                : "ประเมิน Supplier — กรอกข้อมูลและเลือกแบบประเมินด้านล่าง"}
             </div>
-
-            {/* GCP notice */}
-            {isGCP && (
-              <div style={{
-                background: "#e3f2fd", border: "1.5px solid #90caf9",
-                borderRadius: 8, padding: "10px 14px", marginBottom: 16,
-                fontSize: 12, display: "flex", gap: 8, alignItems: "flex-start", color: "#1565c0",
-              }}>
-                <span style={{ fontSize: 16, fontWeight: 700, flexShrink: 0 }}>ℹ</span>
-                <span>
-                  เจ้าหน้าที่ GCP จะเห็นแบบประเมินทั้งหมด แต่สามารถกรอกได้เฉพาะส่วนของฝ่ายจัดซื้อเท่านั้น
-                  ส่วนอื่นจะแสดงเป็น Read-only
-                </span>
-              </div>
-            )}
 
             {/* รหัสพนักงาน */}
             <div style={{ marginBottom: 14 }}>
@@ -97,15 +168,40 @@ export default function UserForm({ role, onBack, onSubmit }) {
                 label={`รหัสพนักงาน${isGCP ? " GCP" : ""}`}
                 required
                 value={empId}
-                onChange={setEmpId}
-                placeholder="เช่น 123456"
+                onChange={(v) => { setEmpId(v); setEmpInfo(null); setEmpError(null); }}
+                onBlur={handleEmpBlur}
+                placeholder="เช่น EMP-001"
+                error={empError}
               />
+              {empLoading && (
+                <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>กำลังตรวจสอบ...</div>
+              )}
+              {empInfo && (
+                <div style={{
+                  marginTop: 6, padding: "6px 10px", background: "#e8f5e9",
+                  border: "1px solid #a5d6a7", borderRadius: 6, fontSize: 12, color: "#2e7d32",
+                }}>
+                  ✅ พบข้อมูล: <b>{empInfo.fullName}</b> — {empInfo.role}
+                </div>
+              )}
             </div>
 
-            {/* แผนก + ชื่องาน */}
+            {/* แผนก + ชื่องาน (auto-filled, read-only) */}
             <div style={{ display: "flex", gap: 14, marginBottom: 14 }}>
-              <CustomSelect label="แผนก" required options={DEPT_OPTIONS} value={dept} onChange={setDept} />
-              <CustomSelect label="ชื่องาน" required options={JOB_OPTIONS} value={job} onChange={setJob} />
+              <GreenInput
+                label="แผนก"
+                required
+                value={empInfo?.department || ""}
+                placeholder="จะแสดงอัตโนมัติเมื่อกรอกรหัสพนักงาน"
+                disabled
+              />
+              <GreenInput
+                label="ชื่องาน"
+                required
+                value={empInfo?.jobTitle || ""}
+                placeholder="จะแสดงอัตโนมัติเมื่อกรอกรหัสพนักงาน"
+                disabled
+              />
             </div>
 
             {/* ประเภทประเมิน */}
@@ -113,33 +209,33 @@ export default function UserForm({ role, onBack, onSubmit }) {
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
                 ประเภทประเมิน<span style={{ color: "#e53935" }}>*</span>
               </div>
-              <div style={{ display: "flex", gap: 12 }}>
-                {["pre-Evaluation", "post-Evaluation"].map((v) => (
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                {EVAL_TYPE_OPTIONS.map((opt) => (
                   <label
-                    key={v}
+                    key={opt.value}
                     style={{
                       display: "flex", alignItems: "center", gap: 8,
-                      border: `1.5px solid ${evalType === v ? accentColor : "#bbb"}`,
+                      border: `1.5px solid ${evalType === opt.value ? accentColor : "#bbb"}`,
                       borderRadius: 6, padding: "8px 18px", cursor: "pointer",
                       fontSize: 13, fontFamily: "monospace",
-                      background: evalType === v ? (isGCP ? "#e3f2fd" : "#f1f8e9") : "#fff",
+                      background: evalType === opt.value ? (isGCP ? "#e3f2fd" : "#f1f8e9") : "#fff",
                     }}
                   >
                     <input
                       type="radio"
                       name="evaltype"
-                      value={v}
-                      checked={evalType === v}
-                      onChange={() => setEvalType(v)}
+                      value={opt.value}
+                      checked={evalType === opt.value}
+                      onChange={() => setEvalType(opt.value)}
                       style={{ accentColor }}
                     />
-                    {v}
+                    {opt.label}
                   </label>
                 ))}
               </div>
             </div>
 
-            {/* Supplier fields — โชว์เมื่อเลือก evalType แล้ว */}
+            {/* Supplier fields */}
             {evalType && (
               <div style={{
                 border: "1.5px solid #ccc", borderRadius: 8,
@@ -147,19 +243,31 @@ export default function UserForm({ role, onBack, onSubmit }) {
               }}>
                 <div style={{ display: "flex", gap: 14, marginBottom: 14 }}>
                   <GreenInput
-                    label="รหัสผู้ขาย/vender code"
+                    label="รหัสผู้ขาย (Vendor Code)"
                     required
                     value={vendorCode}
-                    onChange={setVendorCode}
+                    onChange={(v) => { setVendorCode(v); setSupplierValidated(false); setSupplierError(null); }}
+                    onBlur={handleVendorBlur}
                     placeholder="เช่น SUP-001"
+                    error={supplierError}
                   />
                   <GreenInput
-                    label="ชื่อผู้ขาย/Supplier"
+                    label="ชื่อผู้ขาย / Supplier"
+                    required
                     value={supplierName}
                     onChange={setSupplierName}
-                    placeholder="เช่น ABC Supply Co.,Ltd."
+                    placeholder="จะแสดงอัตโนมัติเมื่อกรอกรหัสผู้ขาย"
+                    disabled={supplierValidated}
                   />
                 </div>
+                {supplierValidated && (
+                  <div style={{
+                    marginBottom: 10, padding: "6px 10px", background: "#e8f5e9",
+                    border: "1px solid #a5d6a7", borderRadius: 6, fontSize: 12, color: "#2e7d32",
+                  }}>
+                    ✅ ตรวจสอบผู้ขายแล้ว
+                  </div>
+                )}
                 <div style={{ display: "flex", gap: 14 }}>
                   <CustomSelect
                     label="ประเภทสินค้า"
@@ -181,7 +289,6 @@ export default function UserForm({ role, onBack, onSubmit }) {
           </div>
         </div>
 
-        {/* Submit */}
         <GreenButton
           onClick={handleSubmit}
           color={isGCP ? "#1565c0" : "#2e7d32"}
