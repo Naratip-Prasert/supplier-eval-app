@@ -5,10 +5,11 @@
 // ============================================================
 
 import { useState } from "react";
-import { Header, GreenButton } from "../components";
+import { Header, GreenButton, useModal } from "../components";
 import { CRITERIA, LEVEL_COLORS, GRADE_MAP, getGrade } from "../constants";
 
 export default function EvalForm({ formData, onBack, onDone }) {
+  const { showAlert, showConfirm, ModalEl } = useModal();
   const [scores, setScores] = useState({}); // { "1.1": 4, "1.2": 3, ... }
   const [notes,  setNotes]  = useState({}); // { "1.1": "หมายเหตุ", ... }
 
@@ -26,13 +27,28 @@ export default function EvalForm({ formData, onBack, onDone }) {
   const subtitle = `${formData.empId || "BJC-XXXXX"}|${formData.dept || "ฝ่าย"}|${formData.job || "งาน"}`;
   const evalLabel = formData.evalType === "post-Evaluation" ? "Post" : "Pre";
 
+  const handleBack = async () => {
+    const ok = await showConfirm("ต้องการกลับหน้าหลักใช่ไหม?\nข้อมูลที่กรอกไว้ทั้งหมดจะหายไป", "กลับหน้าหลัก");
+    if (ok) onBack();
+  };
+
+  const handleSubmit = async () => {
+    const unanswered = allItems.filter((item) => !scores[item.no]).map((item) => item.no);
+    if (unanswered.length > 0) {
+      await showAlert(`ยังมีหัวข้อที่ยังไม่ได้ให้คะแนน:\n• ${unanswered.join("\n• ")}`, "ประเมินไม่ครบ");
+      return;
+    }
+    onDone({ scores, notes, totalScore, grade });
+  };
+
   return (
     <div style={{ minHeight: "100vh", background: "#fff", fontFamily: "Sarabun, sans-serif" }}>
+      {ModalEl}
       <Header
         titleOverride={`Supplier Performance Evaluation - ${evalLabel} Evaluation`}
         subtitle={subtitle}
         backLabel="← กลับหน้าหลัก"
-        onBack={onBack}
+        onBack={handleBack}
       />
 
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: 16 }}>
@@ -92,7 +108,7 @@ export default function EvalForm({ formData, onBack, onDone }) {
           </span>
         </div>
 
-        <GreenButton fullWidth onClick={() => onDone({ scores, notes, totalScore, grade })}>
+        <GreenButton fullWidth onClick={handleSubmit}>
           Submit Supplier Evaluation
         </GreenButton>
       </div>
