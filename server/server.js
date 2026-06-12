@@ -8,7 +8,7 @@ const express  = require("express");
 const mongoose = require("mongoose");
 const cors     = require("cors");
 const Evaluation = require("./models/Evaluation");
-const evaluationRoutes = require("./routes/evaluations");
+const evaluationRoutes = require("./route/evaluations");
 require("dotenv").config();
 
 const app  = express();
