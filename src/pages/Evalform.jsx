@@ -6,8 +6,9 @@ import { useState, useEffect, useRef } from "react";
 import { Header, GreenButton, useModal } from "../components";
 import { PRE_CRITERIA, POST_CRITERIA, LEVEL_COLORS, GRADE_MAP, getGrade } from "../constants";
 
-const LEVEL_LABELS = ["ต้องปรับปรุง", "ต่ำกว่าเกณฑ์", "พอใช้", "ดี", "ดีมาก"];
-const COLS = "56px 3fr 78px 1fr 1fr 1fr 1fr 1fr 88px 120px";
+const LEVEL_LABELS       = ["ต้องปรับปรุง (Unsatisfactory)", "ต่ำกว่าเกณฑ์ (Below Standard)", "ผ่านเกณฑ์ (Satisfactory)", "ดี (Good)", "ดีเยี่ยม (Excellent)"];
+const LEVEL_SHORT_LABELS = ["ต้องปรับปรุง", "ต่ำกว่าเกณฑ์", "ผ่านเกณฑ์", "ดี", "ดีเยี่ยม"];
+const COLS = "52px 2.8fr 76px 1.1fr 1.1fr 1.1fr 1.1fr 1.1fr 84px 116px";
 
 // ---- helpers -----------------------------------------------
 
@@ -43,7 +44,7 @@ function redistribute(items, current, total) {
 
 // คำนวณ initial weights ให้ section รวม = 100 และ items ใน section รวม = section weight
 function initWeights(criteria) {
-  const rawSec   = criteria.map((s) => s.items.reduce((sum, i) => sum + i.weight, 0));
+  const rawSec   = criteria.map((s) => s.items.filter((i) => !i.divider).reduce((sum, i) => sum + i.weight, 0));
   const rawTotal = rawSec.reduce((sum, w) => sum + w, 0) || 100;
 
   const sections = {};
@@ -60,11 +61,12 @@ function initWeights(criteria) {
 
   const items = {};
   criteria.forEach((section, si) => {
-    const secW    = sections[si];
-    const rawItem = section.items.reduce((sum, i) => sum + i.weight, 0) || 1;
-    let remItem   = secW;
-    section.items.forEach((item, idx) => {
-      if (idx === section.items.length - 1) {
+    const secW     = sections[si];
+    const realItems = section.items.filter((i) => !i.divider);
+    const rawItem  = realItems.reduce((sum, i) => sum + i.weight, 0) || 1;
+    let remItem    = secW;
+    realItems.forEach((item, idx) => {
+      if (idx === realItems.length - 1) {
         items[item.no] = Math.max(0, remItem);
       } else {
         const w = Math.round((item.weight / rawItem) * secW);
@@ -91,7 +93,7 @@ export default function EvalForm({ formData, onBack, onDone }) {
   const weights        = ws.items;
   const sectionWeights = ws.sections;
 
-  const allItems           = CRITERIA.flatMap((s) => s.items);
+  const allItems           = CRITERIA.flatMap((s) => s.items.filter((i) => !i.divider));
   const answered           = Object.keys(scores).length;
   const total              = allItems.length;
   const totalSectionWeight = CRITERIA.reduce((sum, _, si) => sum + (sectionWeights[si] ?? 0), 0);
@@ -100,12 +102,14 @@ export default function EvalForm({ formData, onBack, onDone }) {
   const totalScore = (() => {
     let raw = 0;
     CRITERIA.forEach((section, si) => {
-      const sw       = sectionWeights[si] ?? 0;
-      const maxItemW = section.items.reduce((s, i) => s + (weights[i.no] ?? i.weight), 0);
-      const rawItem  = section.items.reduce((s, item) => {
-        const lv = scores[item.no];
-        const w  = weights[item.no] ?? item.weight;
-        return lv ? s + (lv / 5) * w : s;
+      const sw        = sectionWeights[si] ?? 0;
+      const realItems = section.items.filter((i) => !i.divider);
+      const maxItemW  = realItems.reduce((s, i) => s + (weights[i.no] ?? i.weight), 0);
+      const rawItem   = realItems.reduce((s, item) => {
+        const lv    = scores[item.no];
+        const w     = weights[item.no] ?? item.weight;
+        const maxLv = item.levelValues ? Math.max(...item.levelValues) : 5;
+        return lv ? s + (lv / maxLv) * w : s;
       }, 0);
       raw += maxItemW > 0 ? (rawItem / maxItemW) * sw : 0;
     });
@@ -146,7 +150,7 @@ export default function EvalForm({ formData, onBack, onDone }) {
       // 2. items ใน ทุก section: redistribute ให้ sum = section weight ของแต่ละ section
       let newItems = { ...prev.items };
       CRITERIA.forEach((section, sIdx) => {
-        const keys = section.items.map((i) => i.no);
+        const keys = section.items.filter((i) => !i.divider).map((i) => i.no);
         newItems   = redistribute(keys, newItems, newSections[sIdx] ?? 0);
       });
 
@@ -161,7 +165,7 @@ export default function EvalForm({ formData, onBack, onDone }) {
       const sectionTotal    = prev.sections[si] ?? 0;
       const clamped         = Math.max(0, Math.min(sectionTotal, Number(newVal) || 0));
       const remaining       = sectionTotal - clamped;
-      const sectionItemKeys = CRITERIA[si].items.map((i) => i.no);
+      const sectionItemKeys = CRITERIA[si].items.filter((i) => !i.divider).map((i) => i.no);
       const otherItems      = sectionItemKeys.filter((k) => k !== no);
 
       const newItems    = redistribute(otherItems, prev.items, remaining);
@@ -185,28 +189,48 @@ export default function EvalForm({ formData, onBack, onDone }) {
 
         {/* Scoring guide */}
         <div style={{
-          display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center",
-          marginBottom: 12, padding: "10px 14px",
-          background: "#fff", borderRadius: 8, border: "1px solid #e0e0e0",
+          marginBottom: 12, background: "#fff", borderRadius: 8,
+          border: "1px solid #e0e0e0", overflow: "hidden",
         }}>
-          <span style={{ fontSize: 12, color: "#666", fontWeight: 600, marginRight: 4 }}>เกณฑ์คะแนน:</span>
-          {LEVEL_LABELS.map((lbl, i) => (
-            <span key={i} style={{
-              display: "inline-flex", alignItems: "center", gap: 5,
-              background: LEVEL_COLORS[i] + "28", border: `1.5px solid ${LEVEL_COLORS[i]}`,
-              borderRadius: 20, padding: "3px 10px", fontSize: 12, fontWeight: 600,
-            }}>
-              <span style={{
-                background: LEVEL_COLORS[i], color: "#fff", borderRadius: "50%",
-                width: 18, height: 18, display: "inline-flex",
-                alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800,
-              }}>{i + 1}</span>
-              {lbl}
+          {/* hint bar */}
+          <div style={{
+            background: "#fffbea", borderBottom: "1px solid #ffe082",
+            padding: "7px 16px",
+            display: "flex", alignItems: "center", gap: 8,
+          }}>
+            <span style={{
+              background: "#f9a825", color: "#fff", borderRadius: 6,
+              padding: "2px 9px", fontSize: 12, fontWeight: 800, letterSpacing: 0.3,
+            }}>💡 TIP</span>
+            <span style={{ fontSize: 13, color: "#6d4c00", fontWeight: 600 }}>
+              คลิกช่อง <span style={{
+                background: "#fff3cd", border: "1.5px solid #f9a825",
+                borderRadius: 4, padding: "1px 7px", fontWeight: 800, color: "#b45309",
+              }}>น้ำหนัก%</span>{" "}
+              เพื่อแก้ไข — ส่วนที่เหลือจะปรับให้โดยอัตโนมัติ
             </span>
-          ))}
-          <span style={{ marginLeft: "auto", fontSize: 12, color: "#888" }}>
-            💡 คลิกช่อง <b>น้ำหนัก%</b> เพื่อแก้ไข — ส่วนที่เหลือจะปรับให้อัตโนมัติ
-          </span>
+          </div>
+          {/* level chips */}
+          <div style={{
+            display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center",
+            padding: "8px 14px",
+          }}>
+            <span style={{ fontSize: 12, color: "#555", fontWeight: 700, marginRight: 2 }}>เกณฑ์คะแนน:</span>
+            {LEVEL_LABELS.map((lbl, i) => (
+              <span key={i} style={{
+                display: "inline-flex", alignItems: "center", gap: 5,
+                background: LEVEL_COLORS[i] + "28", border: `1.5px solid ${LEVEL_COLORS[i]}`,
+                borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 600,
+              }}>
+                <span style={{
+                  background: LEVEL_COLORS[i], color: "#fff", borderRadius: "50%",
+                  width: 20, height: 20, display: "inline-flex",
+                  alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800,
+                }}>{i + 1}</span>
+                {lbl}
+              </span>
+            ))}
+          </div>
         </div>
 
         {/* Table */}
@@ -219,19 +243,23 @@ export default function EvalForm({ formData, onBack, onDone }) {
                 secWeight={sectionWeights[si] ?? 0}
                 onSectionWeightChange={(val) => handleSectionWeightChange(si, val)}
               />
-              {section.items.map((item, ii) => (
-                <ScoreRow
-                  key={item.no}
-                  item={item}
-                  weight={weights[item.no] ?? item.weight}
-                  selected={scores[item.no]}
-                  note={notes[item.no] || ""}
-                  onSelect={(lv) => setScores((s) => ({ ...s, [item.no]: lv }))}
-                  onNote={(v)   => setNotes((n)  => ({ ...n, [item.no]: v }))}
-                  onWeightChange={(v) => handleItemWeightChange(item.no, si, v)}
-                  shaded={ii % 2 !== 0}
-                />
-              ))}
+              {section.items.map((item, ii) =>
+                item.divider
+                  ? <DividerRow key={item.label} label={item.label} level={item.level} />
+                  : (
+                    <ScoreRow
+                      key={item.no}
+                      item={item}
+                      weight={weights[item.no] ?? item.weight}
+                      selected={scores[item.no]}
+                      note={notes[item.no] || ""}
+                      onSelect={(lv) => setScores((s) => ({ ...s, [item.no]: lv }))}
+                      onNote={(v)   => setNotes((n)  => ({ ...n, [item.no]: v }))}
+                      onWeightChange={(v) => handleItemWeightChange(item.no, si, v)}
+                      shaded={ii % 2 !== 0}
+                    />
+                  )
+              )}
             </div>
           ))}
         </div>
@@ -324,25 +352,53 @@ function TableHeader() {
   return (
     <div style={{
       display: "grid", gridTemplateColumns: COLS,
-      background: "#2e7d32", color: "#fff",
+      background: "#1b5e20", color: "#fff",
       fontSize: 13, fontWeight: 700, letterSpacing: 0.2,
-      padding: "10px 6px", gap: 4, textAlign: "center",
+      padding: "12px 6px", gap: 4, textAlign: "center",
+      alignItems: "center",
     }}>
-      <div>ลำดับ</div>
-      <div style={{ textAlign: "left", paddingLeft: 6 }}>หัวข้อการประเมิน / รายละเอียด</div>
-      <div>น้ำหนัก%</div>
+      <div style={{ fontSize: 12 }}>ลำดับ</div>
+      <div style={{ textAlign: "left", paddingLeft: 10, fontSize: 13 }}>หัวข้อการประเมิน / รายละเอียด</div>
+      <div style={{ fontSize: 12, lineHeight: 1.4 }}>น้ำหนัก<br/>(%)</div>
       {[1, 2, 3, 4, 5].map((n) => (
-        <div key={n} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+        <div key={n} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
           <span style={{
             background: LEVEL_COLORS[n - 1], color: "#fff", borderRadius: "50%",
-            width: 22, height: 22, display: "flex", alignItems: "center",
-            justifyContent: "center", fontSize: 12, fontWeight: 800,
+            width: 24, height: 24, display: "flex", alignItems: "center",
+            justifyContent: "center", fontSize: 13, fontWeight: 800,
+            boxShadow: `0 1px 4px ${LEVEL_COLORS[n-1]}88`,
           }}>{n}</span>
-          <span style={{ fontSize: 10, opacity: 0.85 }}>{LEVEL_LABELS[n - 1]}</span>
+          <span style={{ fontSize: 10, opacity: 0.9, lineHeight: 1.3, textAlign: "center" }}>
+            {LEVEL_SHORT_LABELS[n - 1]}
+          </span>
         </div>
       ))}
-      <div>คะแนนที่ได้</div>
-      <div>หมายเหตุ</div>
+      <div style={{ fontSize: 12, lineHeight: 1.4 }}>คะแนน<br/>ที่ได้</div>
+      <div style={{ fontSize: 12 }}>หมายเหตุ</div>
+    </div>
+  );
+}
+
+function DividerRow({ label, level }) {
+  const isMain = level === 1;
+  return (
+    <div style={{
+      gridColumn: "1 / -1",
+      background: isMain ? "#e8f0fe" : "#f3f6fb",
+      borderTop: isMain ? "2px solid #90caf9" : "1px solid #d0dce8",
+      borderBottom: isMain ? "2px solid #90caf9" : "1px solid #d0dce8",
+      padding: isMain ? "9px 18px" : "6px 28px",
+      display: "flex", alignItems: "center", gap: 8,
+    }}>
+      {isMain && <span style={{ fontSize: 16 }}>🏢</span>}
+      <span style={{
+        fontSize: isMain ? 13 : 12,
+        fontWeight: isMain ? 800 : 700,
+        color: isMain ? "#1565c0" : "#455a7a",
+        letterSpacing: 0.2,
+      }}>
+        {label}
+      </span>
     </div>
   );
 }
@@ -411,7 +467,8 @@ function SectionHeaderRow({ section, secWeight, onSectionWeightChange }) {
 
 function ScoreRow({ item, weight, selected, note, onSelect, onNote, onWeightChange, shaded }) {
   const levelValues = item.levelValues || [1, 2, 3, 4, 5];
-  const rowScore    = selected ? ((selected / 5) * weight).toFixed(2) : "—";
+  const maxLv       = Math.max(...levelValues);
+  const rowScore    = selected ? ((selected / maxLv) * weight).toFixed(2) : "—";
   const [editing,   setEditing] = useState(false);
   const [draft,     setDraft]   = useState(String(weight));
 
@@ -434,19 +491,24 @@ function ScoreRow({ item, weight, selected, note, onSelect, onNote, onWeightChan
       transition: "background 0.15s",
     }}>
       <div style={{
-        padding: "12px 4px", textAlign: "center", fontSize: 13,
-        fontWeight: 700, color: "#1a6b1a",
+        padding: "14px 4px", textAlign: "center", fontSize: 12,
+        fontWeight: 800, color: "#1a6b1a", letterSpacing: 0.3,
         display: "flex", alignItems: "center", justifyContent: "center",
+        borderRight: "1px solid #e8ece8",
       }}>
         {item.no}
       </div>
 
       <div style={{
-        padding: "12px 8px", fontSize: 13, lineHeight: 1.65,
-        whiteSpace: "pre-line", color: "#222",
-        display: "flex", alignItems: "center",
+        padding: "12px 10px", fontSize: 13, lineHeight: 1.7,
+        whiteSpace: "pre-line", color: "#1a1a1a",
+        display: "flex", flexDirection: "column", justifyContent: "center",
+        borderRight: "1px solid #e8ece8",
       }}>
-        {item.title}
+        <span style={{ fontWeight: 500 }}>{item.title}</span>
+        {item.calcType === "capital-ratio" && (
+          <CapitalRatioCalc item={item} selected={selected} onSelect={onSelect} />
+        )}
       </div>
 
       <div style={{ padding: "8px 4px", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -483,46 +545,71 @@ function ScoreRow({ item, weight, selected, note, onSelect, onNote, onWeightChan
         )}
       </div>
 
-      {[1, 2, 3, 4, 5].map((lv) => {
-        const available  = levelValues.includes(lv);
-        const descIdx    = levelValues.indexOf(lv);
-        const isSelected = selected === lv;
-        return (
-          <div
-            key={lv}
-            onClick={() => available && onSelect(lv)}
-            style={{
-              padding: "8px 4px", textAlign: "center",
-              cursor: available ? "pointer" : "default",
-              background: isSelected ? LEVEL_COLORS[lv - 1] : available ? "transparent" : "#f5f5f5",
-              border: `2px solid ${isSelected ? LEVEL_COLORS[lv - 1] : available ? "#ddd" : "transparent"}`,
-              borderRadius: 6, margin: "6px 2px",
-              opacity: available ? 1 : 0.15,
-              transition: "all 0.15s",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              boxShadow: isSelected ? `0 2px 8px ${LEVEL_COLORS[lv - 1]}55` : "none",
-            }}
-            onMouseEnter={(e) => { if (available && !isSelected) e.currentTarget.style.background = LEVEL_COLORS[lv - 1] + "28"; }}
-            onMouseLeave={(e) => { if (available && !isSelected) e.currentTarget.style.background = "transparent"; }}
-          >
-            {available && (
-              <div style={{
-                fontSize: 11, lineHeight: 1.45,
-                color: isSelected ? "#fff" : "#555",
-                whiteSpace: "pre-line", wordBreak: "break-word",
-                fontWeight: isSelected ? 700 : 400,
+      {item.calcType === "capital-ratio"
+        ? [1, 2, 3, 4, 5].map((lv) => {
+            const isSelected = selected === lv;
+            return (
+              <div key={lv} title="ใช้ปุ่ม 🧮 คำนวณ เพื่อเลือก Level" style={{
+                padding: "8px 5px", cursor: "not-allowed",
+                background: isSelected ? LEVEL_COLORS[lv - 1] : "#f7f7f7",
+                border: `2px solid ${isSelected ? LEVEL_COLORS[lv - 1] : "#e4e4e4"}`,
+                borderRadius: 7, margin: "6px 3px",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                boxShadow: isSelected ? `0 2px 8px ${LEVEL_COLORS[lv - 1]}55` : "none",
               }}>
-                {item.levels[descIdx]}
+                <div style={{
+                  fontSize: 12, lineHeight: 1.5, textAlign: "center",
+                  color: isSelected ? "#fff" : "#aaa",
+                  whiteSpace: "pre-line", wordBreak: "break-word",
+                  fontWeight: isSelected ? 700 : 400,
+                }}>
+                  {item.levels[lv - 1]}
+                </div>
               </div>
-            )}
-          </div>
-        );
-      })}
+            );
+          })
+        : [1, 2, 3, 4, 5].map((lv) => {
+            const available  = levelValues.includes(lv);
+            const descIdx    = levelValues.indexOf(lv);
+            const isSelected = selected === lv;
+            return (
+              <div
+                key={lv}
+                onClick={() => available && onSelect(lv)}
+                style={{
+                  padding: "8px 5px",
+                  cursor: available ? "pointer" : "default",
+                  background: isSelected ? LEVEL_COLORS[lv - 1] : available ? "#fafafa" : "#f5f5f5",
+                  border: `2px solid ${isSelected ? LEVEL_COLORS[lv - 1] : available ? "#d8d8d8" : "transparent"}`,
+                  borderRadius: 7, margin: "6px 3px",
+                  opacity: available ? 1 : 0.12,
+                  transition: "all 0.15s",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  boxShadow: isSelected ? `0 2px 8px ${LEVEL_COLORS[lv - 1]}55` : "none",
+                }}
+                onMouseEnter={(e) => { if (available && !isSelected) e.currentTarget.style.background = LEVEL_COLORS[lv - 1] + "22"; }}
+                onMouseLeave={(e) => { if (available && !isSelected) e.currentTarget.style.background = "#fafafa"; }}
+              >
+                {available && (
+                  <div style={{
+                    fontSize: 12, lineHeight: 1.5, textAlign: "center",
+                    color: isSelected ? "#fff" : "#444",
+                    whiteSpace: "pre-line", wordBreak: "break-word",
+                    fontWeight: isSelected ? 700 : 400,
+                  }}>
+                    {item.levels[descIdx]}
+                  </div>
+                )}
+              </div>
+            );
+          })
+      }
 
       <div style={{
-        padding: "12px 4px", textAlign: "center", fontSize: 14, fontWeight: 800,
+        padding: "12px 4px", textAlign: "center", fontSize: 15, fontWeight: 800,
         color: selected ? "#1a6b1a" : "#ccc",
         display: "flex", alignItems: "center", justifyContent: "center",
+        borderLeft: "1px solid #e8ece8",
       }}>
         {rowScore}
       </div>
@@ -531,6 +618,172 @@ function ScoreRow({ item, weight, selected, note, onSelect, onNote, onWeightChan
         <NoteCell itemNo={item.no} value={note} onChange={onNote} />
       </div>
     </div>
+  );
+}
+
+// ---- CapitalRatioCalc: popup calculator สำหรับข้อ 4.3 / 5.3 -------------------
+function CapitalRatioCalc({ item, selected, onSelect }) {
+  const [open,     setOpen]     = useState(false);
+  const [capital,  setCapital]  = useState("");
+  const [value,    setValue]    = useState("");
+  const [numContracts, setNumContracts] = useState("");
+
+  const ratio = (() => {
+    const c = parseFloat(capital);
+    const v = parseFloat(value);
+    const n = parseFloat(numContracts);
+    if (!c || !v || !n || n === 0) return null;
+    return c / (v / n);
+  })();
+
+  const calcLevel = (r) => {
+    if (r === null) return null;
+    const t = item.calcThresholds; // [t0, t1, t2, t3] → L1 if r<t0, L2 if r<t1, ...
+    if (r < t[0]) return 1;
+    if (r < t[1]) return 2;
+    if (r < t[2]) return 3;
+    if (r < t[3]) return 4;
+    return 5;
+  };
+
+  const autoLevel = calcLevel(ratio);
+
+  const confirm = () => {
+    if (autoLevel) { onSelect(autoLevel); setOpen(false); }
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => { if (e.key === "Escape") setOpen(false); if (e.key === "Enter") confirm(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [open, autoLevel]);
+
+  const levelColor = autoLevel ? LEVEL_COLORS[autoLevel - 1] : "#ccc";
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        title="เปิดเครื่องคำนวณ Capital Ratio"
+        style={{
+          marginTop: 6, fontSize: 11, padding: "3px 10px", borderRadius: 20,
+          border: "1.5px solid #1565c0", background: selected ? "#e3f2fd" : "#f0f4ff",
+          color: "#1565c0", cursor: "pointer", fontFamily: "Sarabun, sans-serif",
+          fontWeight: 600, display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap",
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = "#bbdefb")}
+        onMouseLeave={(e) => (e.currentTarget.style.background = selected ? "#e3f2fd" : "#f0f4ff")}
+      >
+        🧮 คำนวณ Capital Ratio {selected ? `(L${selected})` : ""}
+      </button>
+
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{
+            position: "fixed", inset: 0, zIndex: 9990,
+            background: "rgba(0,0,0,0.45)",
+          }} />
+          <div style={{
+            position: "fixed", zIndex: 9991,
+            top: "50%", left: "50%",
+            transform: "translate(-50%, -50%)",
+            width: "min(480px, 92vw)",
+            background: "#fff", borderRadius: 14,
+            boxShadow: "0 24px 64px rgba(0,0,0,0.28)",
+            overflow: "hidden", fontFamily: "Sarabun, sans-serif",
+          }}>
+            {/* header */}
+            <div style={{ background: "#1565c0", color: "#fff", padding: "14px 20px" }}>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>🧮 คำนวณ Capital Ratio — ข้อ {item.no}</div>
+              <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>
+                สูตร: ทุนจดทะเบียน ÷ (มูลค่างาน ÷ จำนวนงาน)
+              </div>
+            </div>
+
+            {/* inputs */}
+            <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
+              {[
+                { label: "(1) ทุนจดทะเบียน (บาท)", val: capital,      set: setCapital },
+                { label: "(2) มูลค่างานรวม (บาท)",  val: value,        set: setValue },
+                { label: "(3) จำนวนงาน (สัญญา)",    val: numContracts, set: setNumContracts },
+              ].map(({ label, val, set }) => (
+                <div key={label}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#444", marginBottom: 6 }}>{label}</div>
+                  <input
+                    type="number"
+                    min={0}
+                    value={val}
+                    onChange={(e) => set(e.target.value)}
+                    placeholder="0"
+                    style={{
+                      width: "100%", boxSizing: "border-box",
+                      fontSize: 15, padding: "10px 12px",
+                      border: "1.5px solid #90caf9", borderRadius: 8,
+                      outline: "none", fontFamily: "Sarabun, sans-serif",
+                    }}
+                    onFocus={(e) => (e.target.style.borderColor = "#1565c0")}
+                    onBlur={(e)  => (e.target.style.borderColor = "#90caf9")}
+                  />
+                </div>
+              ))}
+
+              {/* result box */}
+              <div style={{
+                background: autoLevel ? levelColor + "18" : "#f5f5f5",
+                border: `2px solid ${autoLevel ? levelColor : "#e0e0e0"}`,
+                borderRadius: 10, padding: "14px 18px",
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+              }}>
+                <div>
+                  <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>Ratio = (1) ÷ [(2) ÷ (3)]</div>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: autoLevel ? levelColor : "#aaa" }}>
+                    {ratio !== null ? ratio.toFixed(3) + "x" : "—"}
+                  </div>
+                </div>
+                {autoLevel && (
+                  <div style={{
+                    textAlign: "center",
+                    background: levelColor, color: "#fff",
+                    borderRadius: 10, padding: "8px 18px",
+                    boxShadow: `0 2px 12px ${levelColor}66`,
+                  }}>
+                    <div style={{ fontSize: 11, opacity: 0.9 }}>ระดับที่ได้</div>
+                    <div style={{ fontSize: 28, fontWeight: 900, lineHeight: 1 }}>L{autoLevel}</div>
+                    <div style={{ fontSize: 10, opacity: 0.85, marginTop: 2 }}>{item.levels[autoLevel - 1]}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* footer */}
+            <div style={{ padding: "0 24px 20px", display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button
+                onClick={() => setOpen(false)}
+                style={{
+                  background: "#f5f5f5", color: "#555", border: "1.5px solid #d0d0d0",
+                  borderRadius: 8, padding: "10px 24px", fontSize: 14, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "Sarabun, sans-serif",
+                }}
+              >
+                ยกเลิก
+              </button>
+              <button
+                onClick={confirm}
+                disabled={!autoLevel}
+                style={{
+                  background: autoLevel ? "#1565c0" : "#bbb", color: "#fff", border: "none",
+                  borderRadius: 8, padding: "10px 28px", fontSize: 14, fontWeight: 700,
+                  cursor: autoLevel ? "pointer" : "not-allowed", fontFamily: "Sarabun, sans-serif",
+                }}
+              >
+                ใช้ Level {autoLevel ?? "?"} ✓
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </>
   );
 }
 
