@@ -17,7 +17,6 @@ export default function LandingPage({ onSubmit }) {
   const [selectedRole, setSelectedRole] = useState(null); // null | "user" | "gcp"
   const [empId,        setEmpId]        = useState("");
   const [dept,         setDept]         = useState("");
-  const [job,          setJob]          = useState("");
   const [evalType,     setEvalType]     = useState("");
   const [vendorCode,   setVendorCode]   = useState("");
   const [supplierName, setSupplierName] = useState("");
@@ -29,25 +28,19 @@ export default function LandingPage({ onSubmit }) {
   const themeColor = isGCP ? "#1565c0" : "#1a6b1a";
 
   const deptOptions = selectedRole ? Object.keys(DEPT_JOB_MAP[selectedRole]) : [];
-  const jobOptions  = dept && selectedRole ? (DEPT_JOB_MAP[selectedRole][dept] || []) : [];
 
   const handleSelectRole = (role) => {
     if (selectedRole === role) return;
     setSelectedRole(role);
-    setEmpId(""); setDept(""); setJob(""); setEvalType("");
+    setEmpId(""); setDept(""); setEvalType("");
     setVendorCode(""); setSupplierName(""); setProductType(""); setPeriod("");
   };
 
-  const handleDeptChange = (val) => {
-    setDept(val);
-    setJob("");
-  };
 
   const handleSubmit = async () => {
     const missing = [];
     if (!empId.trim())      missing.push("รหัสพนักงาน");
     if (!dept)              missing.push("แผนก");
-    if (!job)               missing.push("ชื่องาน");
     if (!evalType)          missing.push("ประเภทประเมิน");
     if (!vendorCode.trim()) missing.push("รหัสผู้ขาย / Vendor Code");
     if (!productType)       missing.push("ประเภทสินค้า");
@@ -57,7 +50,7 @@ export default function LandingPage({ onSubmit }) {
       await showAlert(`กรุณากรอกข้อมูลให้ครบก่อนดำเนินการต่อ\n\nยังขาด:\n• ${missing.join("\n• ")}`, "กรอกข้อมูลไม่ครบ");
       return;
     }
-    onSubmit({ empId, dept, job, evalType, vendorCode, supplierName, productType, period, role: selectedRole });
+    onSubmit({ empId, dept, evalType, vendorCode, supplierName, productType, period, role: selectedRole });
   };
 
   return (
@@ -178,10 +171,9 @@ export default function LandingPage({ onSubmit }) {
                 />
               </div>
 
-              {/* แผนก + ชื่องาน */}
-              <div style={{ display: "flex", gap: 14, marginBottom: 14 }}>
-                <CustomSelect label="แผนก" required options={deptOptions} value={dept} onChange={handleDeptChange} disabled={locked} />
-                <CustomSelect label="ชื่องาน" required options={jobOptions} value={job} onChange={setJob} disabled={locked || !dept} />
+              {/* แผนก */}
+              <div style={{ marginBottom: 14 }}>
+                <CustomSelect label="แผนก" required options={deptOptions} value={dept} onChange={setDept} disabled={locked} />
               </div>
 
               {/* ประเภทประเมิน */}

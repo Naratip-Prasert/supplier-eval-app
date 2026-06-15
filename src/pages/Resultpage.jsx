@@ -14,7 +14,7 @@ export default function ResultPage({ formData, result, onBack, onBackToEval }) {
   const { showConfirm, ModalEl } = useModal();
   const { totalScore, grade, scores = {} } = result;
   const gradeColor = GRADE_MAP[grade];
-  const subtitle   = `${formData.empId || "BJC-XXXXX"}|${formData.dept || "ฝ่าย"}|${formData.job || "งาน"}`;
+  const subtitle   = `${formData.empId || "BJC-XXXXX"}|${formData.dept || "ฝ่าย"}`;
   const evalLabel  = formData.evalType === "post-Evaluation" ? "Post" : "Pre";
 
   const now     = new Date();
@@ -72,7 +72,6 @@ export default function ResultPage({ formData, result, onBack, onBackToEval }) {
       ["Vendor Code", formData.vendorCode || ""],
       ["Evaluated By", formData.empId || ""],
       ["Dept", formData.dept || ""],
-      ["Job", formData.job || ""],
       ["Eval Type", formData.evalType || ""],
       ["Period", formData.period || ""],
       ["Date", dateStr],
