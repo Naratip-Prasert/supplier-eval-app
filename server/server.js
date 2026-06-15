@@ -11,11 +11,15 @@ const PORT = process.env.PORT || 5000;
 app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173' }));
 app.use(express.json());
 
-app.use('/api/evaluations', require('./route/evaluations'));
-app.use('/api/employees',   require('./route/employees'));
-app.use('/api/suppliers',   require('./route/suppliers'));
-app.use('/api/criteria',    require('./route/criteria'));
-app.use('/api/sessions',    require('./route/sessions'));
+app.get("/", (req, res) => {
+  res.json({ message: "Supplier Eval API is running" });
+});
+
+app.use('/api/evaluations', require('./routes/evaluations'));
+app.use('/api/employees',   require('./routes/employees'));
+app.use('/api/suppliers',   require('./routes/suppliers'));
+app.use('/api/criteria',    require('./routes/criteria'));
+app.use('/api/sessions',    require('./routes/sessions'));
 
 pool.connect()
   .then(client => {

@@ -2,7 +2,7 @@
 //  components/index.jsx — Shared UI components
 // ============================================================
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 // ------ Clock -----------------------------------------------
 export function Clock() {
@@ -150,6 +150,150 @@ export function GreenInput({ label, required, value, onChange, onBlur, placehold
       {error && <div style={{ color: "#e53935", fontSize: 11, marginTop: 3 }}>{error}</div>}
     </div>
   );
+}
+
+// ------ useModal + AppModal ---------------------------------
+// ใช้แทน window.alert / window.confirm ให้สวยขึ้น
+// Usage:
+//   const { showAlert, showConfirm, ModalEl } = useModal();
+//   render {ModalEl} ใน JSX
+//   await showAlert("ข้อความ", "หัวข้อ")
+//   const ok = await showConfirm("ข้อความ", "หัวข้อ")
+
+const MODAL_ANIM = `
+  @keyframes _modalIn {
+    from { opacity: 0; transform: scale(0.88) translateY(-12px); }
+    to   { opacity: 1; transform: scale(1)    translateY(0);     }
+  }
+  @keyframes _overlayIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+`;
+
+function AppModal({ type, title, message, onClose }) {
+  const isWarn   = type === "alert";
+  const headerBg = isWarn ? "#e65100" : "#1a6b1a";
+  const icon     = isWarn ? "⚠️" : "💬";
+  const okColor  = isWarn ? "#e65100" : "#2e7d32";
+  const okHover  = isWarn ? "#bf360c" : "#1b5e20";
+
+  return (
+    <>
+      <style>{MODAL_ANIM}</style>
+      {/* Overlay */}
+      <div
+        onClick={() => type === "alert" && onClose(undefined)}
+        style={{
+          position: "fixed", inset: 0, zIndex: 9998,
+          background: "rgba(0,0,0,0.48)",
+          animation: "_overlayIn 0.18s ease",
+        }}
+      />
+      {/* Card */}
+      <div style={{
+        position: "fixed", inset: 0, zIndex: 9999,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 16, pointerEvents: "none",
+      }}>
+        <div style={{
+          background: "#fff", borderRadius: 14,
+          width: "min(440px, 100%)",
+          boxShadow: "0 24px 64px rgba(0,0,0,0.28)",
+          overflow: "hidden",
+          animation: "_modalIn 0.2s cubic-bezier(.34,1.3,.64,1)",
+          pointerEvents: "auto",
+        }}>
+          {/* Header */}
+          <div style={{
+            background: headerBg, padding: "14px 20px",
+            display: "flex", alignItems: "center", gap: 12, color: "#fff",
+          }}>
+            <span style={{ fontSize: 26, lineHeight: 1, flexShrink: 0 }}>{icon}</span>
+            <span style={{ fontWeight: 700, fontSize: 16, fontFamily: "Sarabun, sans-serif" }}>{title}</span>
+          </div>
+
+          {/* Body */}
+          <div style={{ padding: "20px 24px 12px" }}>
+            <p style={{
+              margin: 0, fontSize: 14, fontFamily: "Sarabun, sans-serif",
+              whiteSpace: "pre-line", lineHeight: 1.85, color: "#333",
+            }}>
+              {message}
+            </p>
+          </div>
+
+          {/* Footer */}
+          <div style={{
+            padding: "12px 20px 20px",
+            display: "flex", justifyContent: "flex-end", gap: 10,
+          }}>
+            {type === "confirm" && (
+              <button
+                onClick={() => onClose(false)}
+                style={{
+                  background: "#f5f5f5", color: "#555",
+                  border: "1.5px solid #d0d0d0", borderRadius: 8,
+                  padding: "10px 26px", fontSize: 14, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "Sarabun, sans-serif",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "#e0e0e0")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "#f5f5f5")}
+              >
+                ยกเลิก
+              </button>
+            )}
+            <button
+              onClick={() => onClose(type === "confirm" ? true : undefined)}
+              style={{
+                background: okColor, color: "#fff", border: "none", borderRadius: 8,
+                padding: "10px 30px", fontSize: 14, fontWeight: 700,
+                cursor: "pointer", fontFamily: "Sarabun, sans-serif",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = okHover)}
+              onMouseLeave={(e) => (e.currentTarget.style.background = okColor)}
+            >
+              ตกลง
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+export function useModal() {
+  const [state, setState] = useState(null);
+  const resolveRef = useRef(null);
+
+  const showAlert = (message, title = "แจ้งเตือน") =>
+    new Promise((resolve) => {
+      resolveRef.current = resolve;
+      setState({ type: "alert", title, message });
+    });
+
+  const showConfirm = (message, title = "ยืนยัน") =>
+    new Promise((resolve) => {
+      resolveRef.current = resolve;
+      setState({ type: "confirm", title, message });
+    });
+
+  const handleClose = (value) => {
+    resolveRef.current?.(value);
+    resolveRef.current = null;
+    setState(null);
+  };
+
+  const ModalEl = state ? (
+    <AppModal
+      type={state.type}
+      title={state.title}
+      message={state.message}
+      onClose={handleClose}
+    />
+  ) : null;
+
+  return { showAlert, showConfirm, ModalEl };
 }
 
 // ------ GreenButton -----------------------------------------
