@@ -21,7 +21,8 @@
    - [evaluation_sessions](#39-evaluation_sessions)
    - [evaluations](#310-evaluations)
    - [evaluation_scores](#311-evaluation_scores)
-   - [grade_thresholds](#312-grade_thresholds)
+   - [evaluation_category_weights](#312-evaluation_category_weights)
+   - [grade_thresholds](#313-grade_thresholds)
 4. [Relationships ระหว่างตาราง](#4-relationships-ระหว่างตาราง)
 5. [Functions & Triggers](#5-functions--triggers)
 6. [Indexes](#6-indexes)
@@ -40,7 +41,7 @@
 | **Master Data** | `departments`, `job_titles`, `employees`, `suppliers` | ข้อมูลอ้างอิงหลักของระบบ |
 | **Permission** | `employee_supplier_permissions` | ควบคุมว่า BU คนไหนประเมิน Supplier ได้บ้าง |
 | **Evaluation Config** | `evaluation_categories`, `evaluation_criteria`, `score_level_descriptions`, `grade_thresholds` | โครงสร้างแบบประเมินและเกณฑ์การให้คะแนน |
-| **Evaluation Data** | `evaluation_sessions`, `evaluations`, `evaluation_scores` | ข้อมูลการประเมินจริง |
+| **Evaluation Data** | `evaluation_sessions`, `evaluations`, `evaluation_scores`, `evaluation_category_weights` | ข้อมูลการประเมินจริง (รวมการปรับน้ำหนักรายประเมิน) |
 
 ---
 
@@ -77,10 +78,11 @@ employee_supplier_permissions ────────► suppliers
                                             │ belongs to
                                             ▼ (1)
                                    evaluation_categories
-                                            │ (1)
-                                            │ has many
-                                            ▼ (N)
-                                  score_level_descriptions
+                                            │ (1)          │ (1)
+                                            │ has many     │ has many
+                                            ▼ (N)          ▼ (N)
+                                  score_level_descriptions  evaluation_category_weights
+                                                           (per-evaluation category weight)
 
 grade_thresholds  (standalone lookup — used by trigger)
 ```
@@ -330,7 +332,32 @@ weighted_score = CASE WHEN score IS NOT NULL
 
 ---
 
-### 3.12 `grade_thresholds`
+### 3.12 `evaluation_category_weights`
+
+**หน้าที่**: น้ำหนักของหมวดหมู่หลัก (major topic) ที่ BU หรือ GCP ตกลงใช้ในการประเมินแต่ละรอบ  
+เทียบกับ `evaluation_scores.weight` ที่ทำหน้าที่เดียวกันแต่สำหรับหัวข้อย่อย (sub-criteria)  
+ค่า `evaluation_categories.total_weight` ยังคงเป็นค่า default ที่ใช้อ้างอิง
+
+| Column | Type | Constraint | คำอธิบาย |
+|--------|------|-----------|----------|
+| `id` | UUID | PK | Auto-generated |
+| `evaluation_id` | UUID | FK → `evaluations.id` ON DELETE CASCADE | การประเมินที่สังกัด |
+| `category_id` | UUID | FK → `evaluation_categories.id` | หมวดหมู่ที่ปรับน้ำหนัก |
+| `weight` | DECIMAL(5,2) | NOT NULL | น้ำหนักที่ตกลงใช้จริง (%) ในการประเมินรอบนี้ |
+| `created_at` | TIMESTAMPTZ | DEFAULT NOW() | วันที่สร้าง |
+| `updated_at` | TIMESTAMPTZ | DEFAULT NOW() | วันที่อัปเดต |
+| — | — | UNIQUE(evaluation_id, category_id) | แต่ละ evaluation มีได้ 1 weight ต่อ category |
+
+**ความสัมพันธ์กับตารางอื่น**:
+- `evaluation_categories.total_weight` = ค่า default (baseline)
+- `evaluation_category_weights.weight` = ค่าที่ BU/GCP ตกลงใช้จริงต่อรอบประเมิน
+- คู่กับ `evaluation_scores.weight` ที่ทำหน้าที่เดียวกันในระดับหัวข้อย่อย
+
+**Requirement ที่รองรับ**: ความต้องการปรับน้ำหนักหมวดหมู่หลักโดย BU และ GCP ต่อรอบประเมิน
+
+---
+
+### 3.13 `grade_thresholds`
 
 **หน้าที่**: กำหนดช่วงคะแนนของแต่ละเกรด ปรับได้โดย Admin โดยไม่ต้องแก้โค้ด
 
@@ -398,6 +425,8 @@ grade_thresholds ◄──── (used by trigger to map score → grade)
 | `evaluation_criteria` | `evaluation_scores` | One-to-Many |
 | `evaluation_categories` | `evaluation_criteria` | One-to-Many |
 | `evaluation_criteria` | `score_level_descriptions` | One-to-Many (exactly 5) |
+| `evaluations` | `evaluation_category_weights` | One-to-Many (one per category) |
+| `evaluation_categories` | `evaluation_category_weights` | One-to-Many |
 
 ---
 
@@ -471,6 +500,8 @@ $$ LANGUAGE plpgsql;
 | `evaluations` | `idx_evaluations_status` | `status` | Filter draft/saved |
 | `evaluation_scores` | `idx_scores_evaluation` | `evaluation_id` | ดูคะแนนทั้งหมดของการประเมิน |
 | `evaluation_scores` | `idx_scores_criterion` | `criterion_id` | สถิติรายหัวข้อ |
+| `evaluation_category_weights` | `idx_cat_weights_evaluation` | `evaluation_id` | ดูน้ำหนักหมวดของการประเมิน |
+| `evaluation_category_weights` | `idx_cat_weights_category` | `category_id` | สถิติรายหมวด |
 
 ---
 
@@ -513,8 +544,9 @@ POST /api/evaluations
   1. Validate employee → supplier → permission
   2. หา session ที่ยังไม่ complete หรือสร้างใหม่
   3. INSERT evaluations (status='draft' ก่อน)
-  4. INSERT evaluation_scores (ทุก criterion)
-  5. UPDATE evaluations.status = 'saved'
+  4. INSERT evaluation_category_weights (น้ำหนักหมวดที่ BU/GCP ตกลงใช้)
+  5. INSERT evaluation_scores (ทุก criterion พร้อม weight ที่ปรับแล้ว)
+  6. UPDATE evaluations.status = 'saved'
      └─ TRIGGER recalculate_session_final_score() ทำงาน
         └─ ถ้าครบทั้ง BU + GCP:
            UPDATE evaluation_sessions SET final_score, final_grade, status='completed'
@@ -579,9 +611,10 @@ total_score = (53.00 / 70) × 100 = **75.71** → Grade **B**
 | `employees` | 6 | EMP-001 ถึง EMP-004 (BU), GCP-001 ถึง GCP-002 (GCP) |
 | `suppliers` | 5 | SUP-001 ถึง SUP-005 |
 | `employee_supplier_permissions` | — | GCP ทุกคนประเมินได้ทุก Supplier, EMP-001/002 → SUP-001/002/003, EMP-003/004 → SUP-004/005 |
-| `evaluation_categories` | 2 | CAT1 (Quality 40%), CAT2 (Delivery 30%) |
+| `evaluation_categories` | 2 | CAT1 (Quality 40%), CAT2 (Delivery 30%) — ค่า default baseline |
 | `evaluation_criteria` | 6 | 1.1, 1.2, 1.3, 1.4, 2.1, 2.2 |
 | `score_level_descriptions` | 30 | 5 ระดับ × 6 หัวข้อ |
+| `evaluation_category_weights` | — | ไม่มี seed — สร้างต่อการประเมิน (BU/GCP กำหนดค่าเองในแต่ละรอบ) |
 
 ---
 
@@ -595,6 +628,7 @@ total_score = (53.00 / 70) × 100 = **75.71** → Grade **B**
 | แต่ละหัวข้อมีคะแนนเดียวต่อการประเมิน | `UNIQUE(evaluation_id, criterion_id)` ใน `evaluation_scores` |
 | คะแนนต้องอยู่ระหว่าง 1-5 | `CHECK(score BETWEEN 1 AND 5)` |
 | น้ำหนักต้อง min <= max | `CHECK(min_score <= max_score)` ใน `grade_thresholds` |
+| แต่ละ evaluation มีน้ำหนัก category ได้ครั้งเดียวต่อหมวด | `UNIQUE(evaluation_id, category_id)` ใน `evaluation_category_weights` |
 | role ต้องเป็น BU, GCP, หรือ ADMIN | `CHECK(role IN ('BU','GCP','ADMIN'))` |
 | product_type ต้องเป็น goods, services, หรือ both | `CHECK(product_type IN (...))` |
 | session status ต้องเป็นค่าที่กำหนด | `CHECK(status IN ('pending','in_progress','completed'))` |

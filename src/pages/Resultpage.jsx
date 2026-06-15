@@ -21,7 +21,7 @@ const getNote   = (scores, no) => scores?.[no]?.note   ?? "";
 const getWeight = (scores, no, fallback) => scores?.[no]?.weight ?? fallback;
 
 export default function ResultPage({ formData, result, onBack }) {
-  const { totalScore, grade, scores = {} } = result;
+  const { totalScore, grade, scores = {}, categoryWeights = [] } = result;
   const gradeColor = GRADE_MAP[grade];
   const subtitle   = `${formData.empId || "BJC-XXXXX"}|${formData.dept || "ฝ่าย"}|${formData.job || "งาน"}`;
   const evalLabel  = formData.evalType === "re_evaluation" ? "Post" : "Pre";
@@ -48,6 +48,8 @@ export default function ResultPage({ formData, result, onBack }) {
 
   const [saveStatus,   setSaveStatus]   = useState("idle");
   const [showConfirm,  setShowConfirm]  = useState(false);
+  const [showSuccess,  setShowSuccess]  = useState(false);
+  const [errorMsg,     setErrorMsg]     = useState(null);
   const [exportOpen,   setExportOpen]   = useState(false);
   const [exporting,    setExporting]    = useState(false);
   const [history,      setHistory]      = useState([]);
@@ -183,12 +185,13 @@ export default function ResultPage({ formData, result, onBack }) {
     setSaveStatus("saving");
     try {
       const payload = {
-        employeeId:   formData.empId,
-        vendorCode:   formData.vendorCode,
-        evalType:     formData.evalType,
-        period:       formData.period,
-        productType:  formData.productType,
-        scores,                               // { "1.1": {score, weight, note}, ... }
+        employeeId:      formData.empId,
+        vendorCode:      formData.vendorCode,
+        evalType:        formData.evalType,
+        period:          formData.period,
+        productType:     formData.productType,
+        scores,                                // { "1.1": {score, weight, note}, ... }
+        categoryWeights,                       // [{ categoryCode, weight }, ...]
       };
       const res = await fetch(`${API_URL}/api/evaluations`, {
         method:  "POST",
@@ -199,10 +202,11 @@ export default function ResultPage({ formData, result, onBack }) {
         const data = await res.json().catch(() => ({}));
         console.error("Save failed:", data);
         setSaveStatus("error");
-        alert(`บันทึกไม่สำเร็จ: ${data.message || "เกิดข้อผิดพลาด"}`);
+        setErrorMsg(data.message || "เกิดข้อผิดพลาดในการบันทึก กรุณาลองใหม่อีกครั้ง");
         return;
       }
       setSaveStatus("saved");
+      setShowSuccess(true);
       // Reload history
       fetch(`${API_URL}/api/sessions?vendorCode=${encodeURIComponent(formData.vendorCode)}`)
         .then((r) => r.json())
@@ -211,6 +215,7 @@ export default function ResultPage({ formData, result, onBack }) {
     } catch (err) {
       console.error("Save error:", err);
       setSaveStatus("error");
+      setErrorMsg("ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้ กรุณาตรวจสอบการเชื่อมต่อ");
     }
   };
 
@@ -223,44 +228,237 @@ export default function ResultPage({ formData, result, onBack }) {
 
   return (
     <div style={{ minHeight: "100vh", background: "#fff", fontFamily: "Sarabun, sans-serif" }}>
-      {/* Confirmation modal (Req 10) */}
+      {/* Confirmation modal */}
       {showConfirm && (
         <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
+          position: "fixed", inset: 0,
+          background: "rgba(0,0,0,0.55)",
+          backdropFilter: "blur(4px)",
           display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999,
         }}>
           <div style={{
-            background: "#fff", borderRadius: 10, padding: "28px 32px",
-            maxWidth: 380, width: "90%", boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
-            textAlign: "center",
+            background: "#fff", borderRadius: 18,
+            maxWidth: 420, width: "92%",
+            boxShadow: "0 24px 64px rgba(0,0,0,0.35)",
+            overflow: "hidden",
           }}>
-            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 10 }}>ยืนยันการบันทึก?</div>
-            <div style={{ fontSize: 13, color: "#555", marginBottom: 6 }}>
-              ซัพพลายเออร์: <b>{formData.supplierName}</b>
+            <div style={{
+              background: "linear-gradient(135deg, #1a5c1a 0%, #2e7d32 60%, #43a047 100%)",
+              padding: "28px 28px 24px", textAlign: "center",
+            }}>
+              <div style={{
+                width: 68, height: 68, borderRadius: "50%",
+                background: "rgba(255,255,255,0.2)",
+                border: "2px solid rgba(255,255,255,0.35)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                margin: "0 auto 14px", fontSize: 32,
+              }}>💾</div>
+              <div style={{ color: "#fff", fontSize: 20, fontWeight: 700, letterSpacing: 0.3 }}>
+                ยืนยันการบันทึกผล
+              </div>
+              <div style={{ color: "rgba(255,255,255,0.75)", fontSize: 13, marginTop: 4 }}>
+                กรุณาตรวจสอบข้อมูลก่อนดำเนินการ
+              </div>
             </div>
-            <div style={{ fontSize: 13, color: "#555", marginBottom: 20 }}>
-              คะแนนรวม: <b>{totalScore.toFixed(1)}</b> — เกรด:{" "}
-              <b style={{ color: gradeColor }}>{grade}</b>
+
+            <div style={{ padding: "24px 28px 28px" }}>
+              <div style={{
+                background: "#f7fdf7", border: "1.5px solid #c8e6c9",
+                borderRadius: 12, padding: "16px 20px", marginBottom: 20,
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <span style={{ color: "#666", fontSize: 13 }}>ซัพพลายเออร์</span>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: "#1a1a1a" }}>{formData.supplierName}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <span style={{ color: "#666", fontSize: 13 }}>Vendor Code</span>
+                  <span style={{ fontWeight: 600, fontSize: 13, color: "#333", fontFamily: "monospace" }}>{formData.vendorCode || "—"}</span>
+                </div>
+                <div style={{ height: 1, background: "#e0e0e0", marginBottom: 12 }} />
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <span style={{ color: "#666", fontSize: 13 }}>คะแนนรวม</span>
+                  <span style={{ fontWeight: 800, fontSize: 22, color: "#1a6b1a" }}>{totalScore.toFixed(1)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ color: "#666", fontSize: 13 }}>เกรด</span>
+                  <span style={{
+                    background: gradeColor, color: "#fff",
+                    padding: "3px 18px", borderRadius: 20,
+                    fontWeight: 700, fontSize: 16,
+                  }}>{grade}</span>
+                </div>
+              </div>
+
+              <div style={{
+                background: "#fff8e1", border: "1px solid #ffe082",
+                borderRadius: 8, padding: "10px 14px", marginBottom: 22,
+                display: "flex", alignItems: "center", gap: 8,
+              }}>
+                <span style={{ fontSize: 16 }}>⚠️</span>
+                <span style={{ fontSize: 12, color: "#7b5800" }}>
+                  ข้อมูลที่บันทึกแล้วจะไม่สามารถแก้ไขได้ในภายหลัง
+                </span>
+              </div>
+
+              <div style={{ display: "flex", gap: 12 }}>
+                <button
+                  onClick={() => setShowConfirm(false)}
+                  style={{
+                    flex: 1, padding: "12px", border: "2px solid #e0e0e0",
+                    borderRadius: 10, fontSize: 14, cursor: "pointer",
+                    background: "#fff", color: "#555", fontFamily: "Sarabun, sans-serif",
+                    fontWeight: 600, transition: "border-color 0.2s",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#bbb")}
+                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#e0e0e0")}
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  onClick={doSave}
+                  style={{
+                    flex: 1, padding: "12px", border: "none",
+                    borderRadius: 10, fontSize: 14, fontWeight: 700,
+                    cursor: "pointer",
+                    background: "linear-gradient(135deg, #1a5c1a, #2e7d32)",
+                    color: "#fff", fontFamily: "Sarabun, sans-serif",
+                    boxShadow: "0 4px 14px rgba(46,125,50,0.45)",
+                  }}
+                >
+                  ยืนยันบันทึก
+                </button>
+              </div>
             </div>
-            <div style={{ display: "flex", gap: 12 }}>
+          </div>
+        </div>
+      )}
+
+      {/* Success modal */}
+      {showSuccess && (
+        <div style={{
+          position: "fixed", inset: 0,
+          background: "rgba(0,0,0,0.55)",
+          backdropFilter: "blur(4px)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999,
+        }}>
+          <div style={{
+            background: "#fff", borderRadius: 18,
+            maxWidth: 380, width: "92%",
+            boxShadow: "0 24px 64px rgba(0,0,0,0.35)",
+            overflow: "hidden", textAlign: "center",
+          }}>
+            <div style={{
+              background: "linear-gradient(135deg, #1a5c1a 0%, #2e7d32 60%, #66bb6a 100%)",
+              padding: "36px 28px 30px",
+            }}>
+              <div style={{
+                width: 80, height: 80, borderRadius: "50%",
+                background: "rgba(255,255,255,0.25)",
+                border: "3px solid rgba(255,255,255,0.5)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                margin: "0 auto 18px", fontSize: 38, color: "#fff",
+                fontWeight: 900,
+              }}>✓</div>
+              <div style={{ color: "#fff", fontSize: 24, fontWeight: 800 }}>บันทึกสำเร็จ!</div>
+              <div style={{ color: "rgba(255,255,255,0.8)", fontSize: 13, marginTop: 6 }}>
+                ผลการประเมินถูกบันทึกเรียบร้อยแล้ว
+              </div>
+            </div>
+            <div style={{ padding: "28px 28px 32px" }}>
+              <div style={{
+                background: "#f7fdf7", border: "1.5px solid #c8e6c9",
+                borderRadius: 10, padding: "14px 18px", marginBottom: 24, fontSize: 14,
+              }}>
+                <div style={{ color: "#444", marginBottom: 4 }}>
+                  <b style={{ color: "#1a6b1a" }}>{formData.supplierName}</b>
+                </div>
+                <div style={{ color: "#777", fontSize: 13 }}>
+                  คะแนน <b style={{ color: "#1a6b1a", fontSize: 16 }}>{totalScore.toFixed(1)}</b>
+                  {" "}—{" "}
+                  เกรด{" "}
+                  <span style={{
+                    background: gradeColor, color: "#fff",
+                    padding: "1px 12px", borderRadius: 20, fontWeight: 700, fontSize: 15,
+                  }}>{grade}</span>
+                </div>
+              </div>
               <button
-                onClick={() => setShowConfirm(false)}
+                onClick={() => { setShowSuccess(false); onBack(); }}
                 style={{
-                  flex: 1, padding: "10px", border: "1.5px solid #ccc",
-                  borderRadius: 8, fontSize: 14, cursor: "pointer", background: "#fff",
+                  width: "100%", padding: "13px",
+                  background: "linear-gradient(135deg, #1a5c1a, #2e7d32)",
+                  color: "#fff", border: "none", borderRadius: 10,
+                  fontSize: 15, fontWeight: 700, cursor: "pointer",
+                  fontFamily: "Sarabun, sans-serif",
+                  boxShadow: "0 4px 14px rgba(46,125,50,0.4)",
+                  marginBottom: 10,
                 }}
               >
-                ยกเลิก
+                กลับหน้าหลัก
               </button>
               <button
-                onClick={doSave}
+                onClick={() => setShowSuccess(false)}
                 style={{
-                  flex: 1, padding: "10px", border: "none",
-                  borderRadius: 8, fontSize: 14, fontWeight: 700,
-                  cursor: "pointer", background: "#2e7d32", color: "#fff",
+                  width: "100%", padding: "10px",
+                  background: "transparent", color: "#888",
+                  border: "none", fontSize: 13, cursor: "pointer",
+                  fontFamily: "Sarabun, sans-serif",
                 }}
               >
-                ยืนยันบันทึก
+                ดูรายงานต่อ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error modal */}
+      {errorMsg && (
+        <div style={{
+          position: "fixed", inset: 0,
+          background: "rgba(0,0,0,0.55)",
+          backdropFilter: "blur(4px)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999,
+        }}>
+          <div style={{
+            background: "#fff", borderRadius: 18,
+            maxWidth: 380, width: "92%",
+            boxShadow: "0 24px 64px rgba(0,0,0,0.35)",
+            overflow: "hidden", textAlign: "center",
+          }}>
+            <div style={{
+              background: "linear-gradient(135deg, #b71c1c, #e53935)",
+              padding: "32px 28px 26px",
+            }}>
+              <div style={{
+                width: 72, height: 72, borderRadius: "50%",
+                background: "rgba(255,255,255,0.2)",
+                border: "3px solid rgba(255,255,255,0.4)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                margin: "0 auto 14px", fontSize: 36, color: "#fff", fontWeight: 900,
+              }}>✕</div>
+              <div style={{ color: "#fff", fontSize: 20, fontWeight: 700 }}>บันทึกไม่สำเร็จ</div>
+            </div>
+            <div style={{ padding: "24px 28px 28px" }}>
+              <div style={{
+                background: "#fff5f5", border: "1.5px solid #ffcdd2",
+                borderRadius: 10, padding: "14px 18px", marginBottom: 22,
+                color: "#c62828", fontSize: 14,
+              }}>
+                {errorMsg}
+              </div>
+              <button
+                onClick={() => { setErrorMsg(null); setSaveStatus("idle"); }}
+                style={{
+                  width: "100%", padding: "12px",
+                  background: "linear-gradient(135deg, #b71c1c, #e53935)",
+                  color: "#fff", border: "none", borderRadius: 10,
+                  fontSize: 15, fontWeight: 700, cursor: "pointer",
+                  fontFamily: "Sarabun, sans-serif",
+                  boxShadow: "0 4px 14px rgba(229,57,53,0.4)",
+                }}
+              >
+                ปิด
               </button>
             </div>
           </div>
@@ -505,18 +703,17 @@ export default function ResultPage({ formData, result, onBack }) {
         </div>
         {/* ── End report content ── */}
 
-        <div style={{ display: "flex", gap: 12 }}>
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 8 }}>
           <GreenButton
-            fullWidth
             onClick={() => setShowConfirm(true)}
             disabled={saveStatus === "saving" || saveStatus === "saved"}
+            style={{ minWidth: 220, fontSize: 16 }}
           >
-            {saveStatus === "idle"   && "บันทึกผล"}
+            {saveStatus === "idle"   && "💾  บันทึกผล"}
             {saveStatus === "saving" && "กำลังบันทึก..."}
             {saveStatus === "saved"  && "✅ บันทึกแล้ว"}
             {saveStatus === "error"  && "❌ ลองใหม่"}
           </GreenButton>
-          <GreenButton fullWidth onClick={onBack}>Done</GreenButton>
         </div>
       </div>
     </div>

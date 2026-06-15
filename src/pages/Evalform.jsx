@@ -12,10 +12,18 @@ import { CRITERIA, LEVEL_COLORS, GRADE_MAP, getGrade } from "../constants";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
+// Parse numeric weight from a string like "น้ำหนักรวม 40%"
+const parseCatWeight = (w) => {
+  const m = String(w).match(/(\d+(?:\.\d+)?)/);
+  return m ? parseFloat(m[1]) : 0;
+};
+
 // Convert API response format to internal format (same shape as CRITERIA constant)
 function apiToSections(data) {
   return data.map((cat) => ({
-    section: cat.nameTh,
+    code:        cat.code,                          // e.g. "CAT1"
+    section:     cat.nameTh,
+    totalWeight: cat.totalWeight,                   // number baseline
     weight: `น้ำหนักรวม ${cat.totalWeight}%`,
     items: cat.items.map((item) => ({
       no:      item.code,
@@ -28,11 +36,14 @@ function apiToSections(data) {
 }
 
 export default function EvalForm({ formData, onBack, onDone }) {
-  const [sections,  setSections]  = useState(null);   // array of section objects
-  const [weights,   setWeights]   = useState({});     // { "1.1": 14, ... } — editable
-  const [scores,    setScores]    = useState({});     // { "1.1": 4, ... }
-  const [notes,     setNotes]     = useState({});     // { "1.1": "comment", ... }
-  const [loading,   setLoading]   = useState(true);
+  const [sections,        setSections]        = useState(null);  // array of section objects
+  const [weights,         setWeights]         = useState({});    // { "1.1": 14, ... } — editable sub-item weights
+  const [categoryWeights, setCategoryWeights] = useState({});    // { 0: 40, 1: 30, ... } — editable category weights
+  const [scores,          setScores]          = useState({});    // { "1.1": 4, ... }
+  const [notes,           setNotes]           = useState({});    // { "1.1": "comment", ... }
+  const [loading,         setLoading]         = useState(true);
+  const [missingItems,    setMissingItems]    = useState([]);    // items not yet scored
+  const [showAlert,       setShowAlert]       = useState(false);
 
   // Load criteria from API; fallback to CRITERIA constant
   useEffect(() => {
@@ -41,17 +52,25 @@ export default function EvalForm({ formData, onBack, onDone }) {
       .then((data) => {
         const secs = apiToSections(data);
         setSections(secs);
-        // Initialise weights from API default values
-        const init = {};
-        secs.forEach((s) => s.items.forEach((i) => { init[i.no] = i.weight; }));
-        setWeights(init);
+        const initW = {};
+        const initC = {};
+        secs.forEach((s, i) => {
+          s.items.forEach((item) => { initW[item.no] = item.weight; });
+          initC[i] = s.totalWeight ?? parseCatWeight(s.weight);
+        });
+        setWeights(initW);
+        setCategoryWeights(initC);
       })
       .catch(() => {
-        // Fallback: use hardcoded CRITERIA constant
         setSections(CRITERIA);
-        const init = {};
-        CRITERIA.forEach((s) => s.items.forEach((i) => { init[i.no] = i.weight; }));
-        setWeights(init);
+        const initW = {};
+        const initC = {};
+        CRITERIA.forEach((s, i) => {
+          s.items.forEach((item) => { initW[item.no] = item.weight; });
+          initC[i] = parseCatWeight(s.weight);
+        });
+        setWeights(initW);
+        setCategoryWeights(initC);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -73,15 +92,13 @@ export default function EvalForm({ formData, onBack, onDone }) {
   const evalLabel = formData.evalType === "re_evaluation" ? "Post" : "Pre";
 
   const handleSubmit = () => {
-    // Validate: all scores must be filled (Req 5)
     const missing = allItems.filter((item) => !scores[item.no]);
     if (missing.length > 0) {
-      const list = missing.map((i) => `• ${i.no} — ${i.title.replace(/\n/g, " ")}`).join("\n");
-      alert(`กรุณากรอกคะแนนให้ครบทุกข้อก่อนกด Submit\n\nข้อที่ยังไม่ได้กรอก:\n${list}`);
+      setMissingItems(missing);
+      setShowAlert(true);
       return;
     }
 
-    // Build combined score object for Resultpage and API
     const combinedScores = {};
     allItems.forEach((item) => {
       combinedScores[item.no] = {
@@ -91,7 +108,13 @@ export default function EvalForm({ formData, onBack, onDone }) {
       };
     });
 
-    onDone({ scores: combinedScores, totalScore, grade });
+    // Build category weights array for the API (evaluation_category_weights table)
+    const catWeightsPayload = activeSections.map((s, i) => ({
+      categoryCode: s.code || `CAT${i + 1}`,
+      weight: parseFloat(categoryWeights[i] ?? parseCatWeight(s.weight)),
+    }));
+
+    onDone({ scores: combinedScores, totalScore, grade, categoryWeights: catWeightsPayload });
   };
 
   if (loading) {
@@ -104,6 +127,85 @@ export default function EvalForm({ formData, onBack, onDone }) {
 
   return (
     <div style={{ minHeight: "100vh", background: "#fff", fontFamily: "Sarabun, sans-serif" }}>
+
+      {/* Missing-score alert modal */}
+      {showAlert && (
+        <div style={{
+          position: "fixed", inset: 0,
+          background: "rgba(0,0,0,0.55)",
+          backdropFilter: "blur(4px)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999,
+        }}>
+          <div style={{
+            background: "#fff", borderRadius: 18,
+            maxWidth: 480, width: "92%",
+            boxShadow: "0 24px 64px rgba(0,0,0,0.35)",
+            overflow: "hidden",
+          }}>
+            {/* Header */}
+            <div style={{
+              background: "linear-gradient(135deg, #bf360c, #e64a19)",
+              padding: "28px 28px 22px", textAlign: "center",
+            }}>
+              <div style={{
+                width: 68, height: 68, borderRadius: "50%",
+                background: "rgba(255,255,255,0.2)",
+                border: "2px solid rgba(255,255,255,0.4)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                margin: "0 auto 14px", fontSize: 34,
+              }}>⚠️</div>
+              <div style={{ color: "#fff", fontSize: 19, fontWeight: 700 }}>
+                กรุณากรอกคะแนนให้ครบทุกข้อ
+              </div>
+              <div style={{ color: "rgba(255,255,255,0.8)", fontSize: 13, marginTop: 5 }}>
+                ยังไม่ได้กรอกคะแนน{" "}
+                <b style={{ fontSize: 16 }}>{missingItems.length}</b> ข้อ
+              </div>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: "20px 28px 26px" }}>
+              <div style={{
+                background: "#fff8f5", border: "1.5px solid #ffccbc",
+                borderRadius: 12, padding: "14px 18px", marginBottom: 22,
+                maxHeight: 260, overflowY: "auto",
+              }}>
+                {missingItems.map((item, i) => (
+                  <div key={item.no} style={{
+                    display: "flex", alignItems: "flex-start", gap: 12,
+                    marginBottom: i < missingItems.length - 1 ? 12 : 0,
+                  }}>
+                    <span style={{
+                      flexShrink: 0,
+                      background: "#e64a19", color: "#fff",
+                      borderRadius: 6, padding: "2px 8px",
+                      fontSize: 12, fontWeight: 700, fontFamily: "monospace",
+                      marginTop: 1,
+                    }}>{item.no}</span>
+                    <span style={{ fontSize: 13, color: "#4e342e", lineHeight: 1.5 }}>
+                      {item.title.replace(/\n/g, " ")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => setShowAlert(false)}
+                style={{
+                  width: "100%", padding: "13px",
+                  background: "linear-gradient(135deg, #bf360c, #e64a19)",
+                  color: "#fff", border: "none", borderRadius: 10,
+                  fontSize: 15, fontWeight: 700, cursor: "pointer",
+                  fontFamily: "Sarabun, sans-serif",
+                  boxShadow: "0 4px 14px rgba(230,74,25,0.4)",
+                }}
+              >
+                ตกลง — กลับไปกรอกคะแนน
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Header
         titleOverride={`Supplier Performance Evaluation — ${evalLabel} Evaluation`}
         subtitle={subtitle}
@@ -118,7 +220,7 @@ export default function EvalForm({ formData, onBack, onDone }) {
         <div style={{ fontSize: 12, color: "#555", marginBottom: 10, fontFamily: "monospace" }}>
           เกณฑ์การให้คะแนน : ระดับ 1 = ต้องปรับปรุง | 2 = ต่ำกว่าเกณฑ์ | 3 = พอใช้ | 4 = ดี | 5 = ดีมาก
           <span style={{ color: "#1565c0", marginLeft: 12 }}>
-            ★ น้ำหนัก(%) สามารถแก้ไขได้ตามที่ผู้ประเมินตกลงกัน
+            ★ น้ำหนักหมวดหมู่ (แถบสีเขียว) และน้ำหนักหัวข้อย่อย (%) สามารถแก้ไขได้ตามที่ผู้ประเมินตกลงกัน
           </span>
         </div>
 
@@ -129,9 +231,39 @@ export default function EvalForm({ formData, onBack, onDone }) {
             <div key={si}>
               <div style={{
                 background: "#1a6b1a", color: "#fff",
-                padding: "8px 12px", fontSize: 13, fontWeight: 700, fontFamily: "monospace",
+                padding: "8px 14px", fontSize: 13, fontWeight: 700, fontFamily: "monospace",
+                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
               }}>
-                {section.section} — {section.weight}
+                <span>{section.section}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                  <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.8 }}>
+                    น้ำหนักหมวด:
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.5"
+                    value={categoryWeights[si] ?? parseCatWeight(section.weight)}
+                    onChange={(e) =>
+                      setCategoryWeights((cw) => ({
+                        ...cw,
+                        [si]: parseFloat(e.target.value) || 0,
+                      }))
+                    }
+                    title="ปรับน้ำหนักหมวดหมู่หลัก (%)"
+                    style={{
+                      width: 58, textAlign: "center", fontSize: 14, fontWeight: 800,
+                      border: "2px solid rgba(255,255,255,0.55)",
+                      borderRadius: 6, padding: "3px 4px", outline: "none",
+                      background: "rgba(255,255,255,0.15)", color: "#fff",
+                      fontFamily: "monospace",
+                    }}
+                    onFocus={(e) => (e.target.style.borderColor = "rgba(255,255,255,0.95)")}
+                    onBlur={(e)  => (e.target.style.borderColor = "rgba(255,255,255,0.55)")}
+                  />
+                  <span style={{ fontSize: 12, opacity: 0.85 }}>%</span>
+                </div>
               </div>
               {section.items.map((item, ii) => (
                 <ScoreRow

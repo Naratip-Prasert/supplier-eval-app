@@ -214,7 +214,32 @@ CREATE INDEX idx_scores_evaluation ON evaluation_scores(evaluation_id);
 CREATE INDEX idx_scores_criterion  ON evaluation_scores(criterion_id);
 
 -- ============================================================
--- 12. GRADE_THRESHOLDS
+-- 12. EVALUATION_CATEGORY_WEIGHTS
+--     Per-evaluation major-topic (category) weight overrides.
+--     Mirrors how evaluation_scores.weight overrides
+--     evaluation_criteria.default_weight for sub-criteria,
+--     allowing BU and GCP to agree on category weights each round.
+--     evaluation_categories.total_weight remains the default baseline.
+-- ============================================================
+CREATE TABLE evaluation_category_weights (
+  id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  evaluation_id  UUID        NOT NULL REFERENCES evaluations(id) ON DELETE CASCADE,
+  category_id    UUID        NOT NULL REFERENCES evaluation_categories(id),
+  weight         DECIMAL(5,2) NOT NULL,   -- agreed category weight for this evaluation (%)
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (evaluation_id, category_id)
+);
+
+CREATE INDEX idx_cat_weights_evaluation ON evaluation_category_weights(evaluation_id);
+CREATE INDEX idx_cat_weights_category   ON evaluation_category_weights(category_id);
+
+CREATE TRIGGER trg_cat_weights_updated_at
+  BEFORE UPDATE ON evaluation_category_weights
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ============================================================
+-- 13. GRADE_THRESHOLDS
 --     Configurable grade boundary table
 -- ============================================================
 CREATE TABLE grade_thresholds (

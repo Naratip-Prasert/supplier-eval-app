@@ -21,8 +21,16 @@ const PRODUCT_TYPE_TO_API = {
 };
 
 const EVAL_TYPE_OPTIONS = [
-  { value: "new_supplier",  label: "New Supplier / ซัพพลายเออร์ใหม่" },
-  { value: "re_evaluation", label: "Re-Evaluation / ประเมินซ้ำ" },
+  {
+    value: "new_supplier",
+    label: "Pre-Evaluation",
+    sublabel: "ซัพพลายเออร์ใหม่",
+  },
+  {
+    value: "re_evaluation",
+    label: "Post-Evaluation",
+    sublabel: "ประเมินหลังดำเนินการ",
+  },
 ];
 
 export default function UserForm({ role, onBack, onSubmit }) {
@@ -35,7 +43,9 @@ export default function UserForm({ role, onBack, onSubmit }) {
   const [empError,   setEmpError]   = useState(null);
 
   // Eval type
-  const [evalType, setEvalType] = useState("");
+  const [evalType,         setEvalType]         = useState("");
+  const [validationErrors, setValidationErrors] = useState([]);
+  const [showValidation,   setShowValidation]   = useState(false);
 
   // Supplier fields
   const [vendorCode,        setVendorCode]        = useState("");
@@ -101,7 +111,8 @@ export default function UserForm({ role, onBack, onSubmit }) {
     if (!period)         missing.push("รอบการประเมิน");
 
     if (missing.length > 0) {
-      alert(`กรุณากรอกข้อมูลให้ครบถ้วน:\n\n• ${missing.join("\n• ")}`);
+      setValidationErrors(missing);
+      setShowValidation(true);
       return;
     }
 
@@ -120,6 +131,78 @@ export default function UserForm({ role, onBack, onSubmit }) {
 
   return (
     <div style={{ minHeight: "100vh", background: "#fff", fontFamily: "Sarabun, sans-serif" }}>
+
+      {/* Validation error modal */}
+      {showValidation && (
+        <div style={{
+          position: "fixed", inset: 0,
+          background: "rgba(0,0,0,0.55)",
+          backdropFilter: "blur(4px)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999,
+        }}>
+          <div style={{
+            background: "#fff", borderRadius: 18,
+            maxWidth: 420, width: "92%",
+            boxShadow: "0 24px 64px rgba(0,0,0,0.35)",
+            overflow: "hidden",
+          }}>
+            <div style={{
+              background: "linear-gradient(135deg, #bf360c, #e64a19)",
+              padding: "26px 28px 22px", textAlign: "center",
+            }}>
+              <div style={{
+                width: 64, height: 64, borderRadius: "50%",
+                background: "rgba(255,255,255,0.2)",
+                border: "2px solid rgba(255,255,255,0.4)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                margin: "0 auto 12px", fontSize: 32,
+              }}>⚠️</div>
+              <div style={{ color: "#fff", fontSize: 19, fontWeight: 700 }}>
+                กรุณากรอกข้อมูลให้ครบถ้วน
+              </div>
+              <div style={{ color: "rgba(255,255,255,0.75)", fontSize: 13, marginTop: 4 }}>
+                พบ {validationErrors.length} รายการที่ยังไม่ได้กรอก
+              </div>
+            </div>
+            <div style={{ padding: "20px 28px 24px" }}>
+              <div style={{
+                background: "#fff8f5", border: "1.5px solid #ffccbc",
+                borderRadius: 12, padding: "14px 18px", marginBottom: 20,
+              }}>
+                {validationErrors.map((err, i) => (
+                  <div key={i} style={{
+                    display: "flex", alignItems: "flex-start", gap: 10,
+                    fontSize: 13, color: "#4e342e",
+                    marginBottom: i < validationErrors.length - 1 ? 10 : 0,
+                  }}>
+                    <span style={{
+                      flexShrink: 0, width: 20, height: 20, borderRadius: "50%",
+                      background: "#e64a19", color: "#fff",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 11, fontWeight: 700, marginTop: 1,
+                    }}>{i + 1}</span>
+                    <span>{err}</span>
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => setShowValidation(false)}
+                style={{
+                  width: "100%", padding: "12px",
+                  background: "linear-gradient(135deg, #bf360c, #e64a19)",
+                  color: "#fff", border: "none", borderRadius: 10,
+                  fontSize: 15, fontWeight: 700, cursor: "pointer",
+                  fontFamily: "Sarabun, sans-serif",
+                  boxShadow: "0 4px 14px rgba(230,74,25,0.4)",
+                }}
+              >
+                ตกลง — กลับไปกรอกข้อมูล
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Header />
 
       <div style={{ maxWidth: 700, margin: "0 auto", padding: "32px 20px", textAlign: "center" }}>
@@ -210,28 +293,45 @@ export default function UserForm({ role, onBack, onSubmit }) {
                 ประเภทประเมิน<span style={{ color: "#e53935" }}>*</span>
               </div>
               <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                {EVAL_TYPE_OPTIONS.map((opt) => (
-                  <label
-                    key={opt.value}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 8,
-                      border: `1.5px solid ${evalType === opt.value ? accentColor : "#bbb"}`,
-                      borderRadius: 6, padding: "8px 18px", cursor: "pointer",
-                      fontSize: 13, fontFamily: "monospace",
-                      background: evalType === opt.value ? (isGCP ? "#e3f2fd" : "#f1f8e9") : "#fff",
-                    }}
-                  >
-                    <input
-                      type="radio"
-                      name="evaltype"
-                      value={opt.value}
-                      checked={evalType === opt.value}
-                      onChange={() => setEvalType(opt.value)}
-                      style={{ accentColor }}
-                    />
-                    {opt.label}
-                  </label>
-                ))}
+                {EVAL_TYPE_OPTIONS.map((opt) => {
+                  const selected = evalType === opt.value;
+                  return (
+                    <label
+                      key={opt.value}
+                      style={{
+                        display: "flex", alignItems: "flex-start", gap: 10,
+                        border: `2px solid ${selected ? accentColor : "#ddd"}`,
+                        borderRadius: 10, padding: "10px 16px", cursor: "pointer",
+                        flex: 1, minWidth: 160,
+                        background: selected
+                          ? (isGCP ? "#e3f2fd" : "#f1f8e9")
+                          : "#fafafa",
+                        transition: "border-color 0.15s, background 0.15s",
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="evaltype"
+                        value={opt.value}
+                        checked={selected}
+                        onChange={() => setEvalType(opt.value)}
+                        style={{ accentColor, marginTop: 3, flexShrink: 0 }}
+                      />
+                      <div>
+                        <div style={{
+                          fontSize: 13, fontWeight: 700,
+                          color: selected ? accentColor : "#333",
+                          fontFamily: "monospace", letterSpacing: 0.3,
+                        }}>
+                          {opt.label}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>
+                          {opt.sublabel}
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
               </div>
             </div>
 
