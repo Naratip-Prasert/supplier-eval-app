@@ -84,9 +84,10 @@ function initWeights(criteria) {
 export default function EvalForm({ formData, onBack, onDone }) {
   const CRITERIA = formData.evalType === "post_eval" ? POST_CRITERIA : PRE_CRITERIA;
 
-  const { showAlert, showConfirm, ModalEl } = useModal();
-  const [scores, setScores] = useState({});
-  const [notes,  setNotes]  = useState({});
+  const { showConfirm, ModalEl } = useModal();
+  const [scores,       setScores]       = useState({});
+  const [notes,        setNotes]        = useState({});
+  const [missingItems, setMissingItems] = useState(null); // null = closed, array = open
 
   // รวม weights และ sectionWeights เป็น state เดียว → update atomic เสมอ
   const [ws, setWs] = useState(() => initWeights(CRITERIA));
@@ -126,10 +127,10 @@ export default function EvalForm({ formData, onBack, onDone }) {
     if (ok) onBack();
   };
 
-  const handleSubmit = async () => {
-    const unanswered = allItems.filter((item) => !scores[item.no]).map((i) => i.no);
+  const handleSubmit = () => {
+    const unanswered = allItems.filter((item) => !scores[item.no]);
     if (unanswered.length > 0) {
-      await showAlert(`ยังมีหัวข้อที่ยังไม่ได้ให้คะแนน:\n• ${unanswered.join("\n• ")}`, "ประเมินไม่ครบ");
+      setMissingItems(unanswered);
       return;
     }
     onDone({ scores, notes, totalScore, grade, weights, sectionWeights });
@@ -177,6 +178,15 @@ export default function EvalForm({ formData, onBack, onDone }) {
   return (
     <div style={{ minHeight: "100vh", background: "#f4f6f4", fontFamily: "Sarabun, sans-serif", paddingBottom: 100 }}>
       {ModalEl}
+      {missingItems && (
+        <MissingScoresModal
+          items={missingItems}
+          criteria={CRITERIA}
+          answered={answered}
+          total={total}
+          onClose={() => setMissingItems(null)}
+        />
+      )}
       <Header
         titleOverride={`Supplier Performance Evaluation - ${evalLabel} Evaluation`}
         subtitle={subtitle}
@@ -783,6 +793,192 @@ function CapitalRatioCalc({ item, selected, onSelect }) {
           </div>
         </>
       )}
+    </>
+  );
+}
+
+// ---- MissingScoresModal -------------------------------------------------------
+function MissingScoresModal({ items, criteria, answered, total, onClose }) {
+  const missingNos = new Set(items.map((i) => i.no));
+
+  return (
+    <>
+      <style>{`
+        @keyframes _missIn {
+          from { opacity: 0; transform: translate(-50%, -54%) scale(0.92); }
+          to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        }
+        @keyframes _missOverlay { from { opacity: 0; } to { opacity: 1; } }
+      `}</style>
+
+      {/* Backdrop */}
+      <div
+        onClick={onClose}
+        style={{
+          position: "fixed", inset: 0, zIndex: 9998,
+          background: "rgba(0,0,0,0.52)",
+          animation: "_missOverlay 0.18s ease",
+        }}
+      />
+
+      {/* Modal card */}
+      <div style={{
+        position: "fixed", zIndex: 9999,
+        top: "50%", left: "50%",
+        transform: "translate(-50%, -50%)",
+        width: "min(520px, 94vw)",
+        background: "#fff", borderRadius: 16,
+        boxShadow: "0 28px 72px rgba(0,0,0,0.30)",
+        overflow: "hidden",
+        fontFamily: "Sarabun, sans-serif",
+        animation: "_missIn 0.22s cubic-bezier(.34,1.3,.64,1)",
+      }}>
+
+        {/* Header */}
+        <div style={{
+          background: "linear-gradient(135deg, #b71c1c, #e53935)",
+          padding: "18px 22px",
+          display: "flex", alignItems: "center", gap: 14,
+        }}>
+          <div style={{
+            width: 44, height: 44, borderRadius: "50%",
+            background: "rgba(255,255,255,0.18)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 22, flexShrink: 0,
+          }}>⚠️</div>
+          <div>
+            <div style={{ color: "#fff", fontWeight: 800, fontSize: 17, letterSpacing: 0.3 }}>
+              ประเมินยังไม่ครบ
+            </div>
+            <div style={{ color: "rgba(255,255,255,0.8)", fontSize: 12, marginTop: 2 }}>
+              กรุณาให้คะแนนทุกหัวข้อก่อนส่งผลการประเมิน
+            </div>
+          </div>
+          <div style={{ marginLeft: "auto", flexShrink: 0 }}>
+            <div style={{
+              background: "rgba(255,255,255,0.22)", borderRadius: 10,
+              padding: "6px 14px", textAlign: "center",
+            }}>
+              <div style={{ color: "#fff", fontSize: 22, fontWeight: 900, lineHeight: 1 }}>
+                {items.length}
+              </div>
+              <div style={{ color: "rgba(255,255,255,0.8)", fontSize: 10 }}>หัวข้อที่ขาด</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Progress bar */}
+        <div style={{ padding: "14px 22px 0" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#666", marginBottom: 6 }}>
+            <span>ความคืบหน้าการประเมิน</span>
+            <span style={{ fontWeight: 700, color: answered === total ? "#2e7d32" : "#e53935" }}>
+              {answered} / {total} หัวข้อ
+            </span>
+          </div>
+          <div style={{ height: 8, background: "#f0f0f0", borderRadius: 99, overflow: "hidden" }}>
+            <div style={{
+              height: "100%", borderRadius: 99,
+              background: answered === total ? "#2e7d32" : "linear-gradient(90deg,#e53935,#ff7043)",
+              width: `${total > 0 ? (answered / total) * 100 : 0}%`,
+              transition: "width 0.4s",
+            }} />
+          </div>
+        </div>
+
+        {/* Missing items list — grouped by section */}
+        <div style={{ padding: "14px 22px 4px" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#333", marginBottom: 8 }}>
+            หัวข้อที่ยังไม่ได้ให้คะแนน:
+          </div>
+          <div style={{
+            maxHeight: 280, overflowY: "auto",
+            border: "1.5px solid #fce4e4", borderRadius: 10,
+            background: "#fff8f8",
+          }}>
+            {criteria.map((section, si) => {
+              const sectionMissing = section.items.filter(
+                (i) => !i.divider && missingNos.has(i.no)
+              );
+              if (sectionMissing.length === 0) return null;
+
+              const sectionLabel = section.section.replace(/^\d+\.\s*/, "").split("/")[0].trim();
+              return (
+                <div key={si}>
+                  {/* Section sub-header */}
+                  <div style={{
+                    padding: "8px 14px",
+                    background: "#fdecea",
+                    borderBottom: "1px solid #fce4e4",
+                    fontSize: 12, fontWeight: 700, color: "#c62828",
+                    display: "flex", alignItems: "center", gap: 6,
+                  }}>
+                    <span style={{
+                      background: "#e53935", color: "#fff",
+                      borderRadius: 4, padding: "1px 7px", fontSize: 11,
+                    }}>
+                      {si + 1}
+                    </span>
+                    {sectionLabel}
+                    <span style={{
+                      marginLeft: "auto", background: "#c62828", color: "#fff",
+                      borderRadius: 99, padding: "1px 8px", fontSize: 10, fontWeight: 700,
+                    }}>
+                      ขาด {sectionMissing.length}
+                    </span>
+                  </div>
+
+                  {/* Items */}
+                  {sectionMissing.map((item, idx) => (
+                    <div
+                      key={item.no}
+                      style={{
+                        padding: "9px 14px",
+                        borderBottom: idx < sectionMissing.length - 1 ? "1px solid #fce4e4" : "none",
+                        display: "flex", alignItems: "flex-start", gap: 10,
+                        background: idx % 2 === 0 ? "#fff8f8" : "#fff",
+                      }}
+                    >
+                      <span style={{
+                        background: "#e53935", color: "#fff",
+                        borderRadius: 6, padding: "2px 8px",
+                        fontSize: 11, fontWeight: 800, flexShrink: 0, marginTop: 1,
+                      }}>
+                        {item.no}
+                      </span>
+                      <span style={{
+                        fontSize: 12, color: "#444", lineHeight: 1.5,
+                        overflow: "hidden", display: "-webkit-box",
+                        WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+                      }}>
+                        {item.title}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: "16px 22px 20px", display: "flex", justifyContent: "flex-end" }}>
+          <button
+            onClick={onClose}
+            style={{
+              background: "linear-gradient(135deg, #b71c1c, #e53935)",
+              color: "#fff", border: "none", borderRadius: 10,
+              padding: "11px 32px", fontSize: 14, fontWeight: 700,
+              cursor: "pointer", fontFamily: "Sarabun, sans-serif",
+              boxShadow: "0 4px 14px rgba(229,57,53,0.4)",
+              letterSpacing: 0.3,
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.88")}
+            onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
+          >
+            ปิดและแก้ไข
+          </button>
+        </div>
+      </div>
     </>
   );
 }
