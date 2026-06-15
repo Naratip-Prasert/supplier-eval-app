@@ -58,6 +58,27 @@ router.get('/validate', async (req, res) => {
   }
 });
 
+// GET /api/suppliers/:vendorCode  — fetch single supplier by vendor code
+router.get('/:vendorCode', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT vendor_code    AS "vendorCode",
+              supplier_name  AS "supplierName",
+              product_type   AS "productType"
+         FROM suppliers
+        WHERE vendor_code = $1 AND is_active = TRUE`,
+      [req.params.vendorCode.trim()]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'ไม่พบรหัสผู้ขาย' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('GET /api/suppliers/:vendorCode error:', err);
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+  }
+});
+
 // GET /api/suppliers/:vendorCode/permission?employeeId=EMP-001
 // Checks whether a BU employee has permission to evaluate this supplier (req 1).
 // GCP employees always have permission.

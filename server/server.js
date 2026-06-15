@@ -11,6 +11,21 @@ const PORT = process.env.PORT || 5000;
 app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173' }));
 app.use(express.json());
 
+// ── Request logger ────────────────────────────────────────────
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const ms      = Date.now() - start;
+    const status  = res.statusCode;
+    const emoji   = status >= 500 ? '❌' : status >= 400 ? '⚠️ ' : '✅';
+    const line    = `${emoji} ${req.method.padEnd(6)} ${req.originalUrl.padEnd(45)} ${status}  (${ms}ms)`;
+    if (status >= 500)      console.error(line);
+    else if (status >= 400) console.warn(line);
+    else                    console.log(line);
+  });
+  next();
+});
+
 app.get("/", (req, res) => {
   res.json({ message: "Supplier Eval API is running" });
 });

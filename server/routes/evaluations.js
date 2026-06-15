@@ -77,6 +77,7 @@ router.post('/', async (req, res) => {
     );
     if (empResult.rows.length === 0) {
       await client.query('ROLLBACK');
+      console.warn(`[evaluations] ไม่พบรหัสพนักงาน: ${employeeId}`);
       return res.status(400).json({ message: 'ไม่พบรหัสพนักงาน', field: 'employeeId' });
     }
     const employee = empResult.rows[0];
@@ -88,6 +89,7 @@ router.post('/', async (req, res) => {
     );
     if (supResult.rows.length === 0) {
       await client.query('ROLLBACK');
+      console.warn(`[evaluations] ไม่พบ vendor code: ${vendorCode}`);
       return res.status(400).json({ message: 'ไม่พบรหัสซัพพลายเออร์', field: 'vendorCode' });
     }
     const supplier = supResult.rows[0];
@@ -101,6 +103,7 @@ router.post('/', async (req, res) => {
       );
       if (permResult.rows.length === 0) {
         await client.query('ROLLBACK');
+        console.warn(`[evaluations] BU ${employeeId} ไม่มีสิทธิ์ประเมิน vendor ${vendorCode}`);
         return res.status(403).json({ message: 'ไม่มีสิทธิ์ประเมินซัพพลายเออร์นี้' });
       }
     }
@@ -109,6 +112,7 @@ router.post('/', async (req, res) => {
     const validEvalTypes = ['new_supplier', 'post_eval'];
     if (!validEvalTypes.includes(evalType)) {
       await client.query('ROLLBACK');
+      console.warn(`[evaluations] evalType ไม่ถูกต้อง: "${evalType}" (รับได้: ${validEvalTypes.join(', ')})`);
       return res.status(400).json({ message: 'ประเภทการประเมินไม่ถูกต้อง', field: 'evalType' });
     }
 
@@ -135,6 +139,7 @@ router.post('/', async (req, res) => {
       );
       if (dupResult.rows.length > 0) {
         await client.query('ROLLBACK');
+        console.warn(`[evaluations] ${employeeId} (${employee.role}) ส่งผลซ้ำ session ${sessionId}`);
         return res.status(409).json({ message: 'คุณได้ส่งผลการประเมินสำหรับรายการนี้แล้ว' });
       }
     } else {
@@ -161,6 +166,7 @@ router.post('/', async (req, res) => {
     const unknownCodes = codes.filter(c => !criteriaMap[c]);
     if (unknownCodes.length > 0) {
       await client.query('ROLLBACK');
+      console.warn(`[evaluations] พบรหัสเกณฑ์ที่ไม่มีในระบบ: ${unknownCodes.join(', ')}`);
       return res.status(400).json({ message: 'พบรหัสเกณฑ์ที่ไม่ถูกต้อง', unknownCodes });
     }
 
