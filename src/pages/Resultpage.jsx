@@ -8,7 +8,7 @@
 
 import { useState, useRef } from "react";
 import { Header, GreenButton, useModal } from "../components";
-import { CRITERIA, GRADE_MAP, GRADE_GUIDE } from "../constants";
+import { PRE_CRITERIA, POST_CRITERIA, GRADE_MAP, GRADE_GUIDE } from "../constants";
 
 export default function ResultPage({ formData, result, onBack, onBackToEval }) {
   const { showConfirm, ModalEl } = useModal();
@@ -16,6 +16,7 @@ export default function ResultPage({ formData, result, onBack, onBackToEval }) {
   const gradeColor = GRADE_MAP[grade];
   const subtitle   = `${formData.empId || "BJC-XXXXX"}|${formData.dept || "ฝ่าย"}`;
   const evalLabel  = formData.evalType === "post-Evaluation" ? "Post" : "Pre";
+  const CRITERIA   = formData.evalType === "post-Evaluation" ? POST_CRITERIA : PRE_CRITERIA;
 
   const now     = new Date();
   const dateStr = `${String(now.getDate()).padStart(2,"0")}/${String(now.getMonth()+1).padStart(2,"0")}/${now.getFullYear()}`;
@@ -50,7 +51,8 @@ export default function ResultPage({ formData, result, onBack, onBackToEval }) {
     if (!ok) return;
     setDoneStatus("saving");
     try {
-      await fetch("http://localhost:5000/api/evaluations", {
+      const apiBase = import.meta.env.VITE_API_URL || "http://localhost:5000";
+      await fetch(`${apiBase}/api/evaluations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...formData, ...result }),
