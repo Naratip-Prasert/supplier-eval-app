@@ -253,11 +253,11 @@ export const PRE_CRITERIA = [
     ],
   },
   {
-    section: "5. ความรับผิดชอบต่อสังคม สิ่งแวดล้อม และธรรมาภิบาล (ESG)",
+    section: "5. ความรับผิดชอบต่อสังคม สิ่งแวดล้อม และธรรมาภิบาล   (ESG) แยกการประเมินของ(1)สำนักงานใหญ่/สาขา และ (2)โรงงาน",
     weight: 15,
     items: [
       // ---- HO/Store — Environment (5.1.x) ----
-      { divider: true, label: "สำนักงานใหญ่ / สาขา / Retail Store (HO / Store)", level: 1 },
+      { divider: true, label: "1. สำนักงานใหญ่ / สาขา / Retail Store (HO / Store)", level: 1 },
       { divider: true, label: "5.1  สิ่งแวดล้อม / Environment", level: 2 },
       {
         no: "5.1.1",
@@ -583,7 +583,7 @@ export const PRE_CRITERIA = [
         ],
       },
       // ---- Factory — Environment (F5.1.x) ----
-      { divider: true, label: "โรงงาน / สถานประกอบการผลิต (Factory)", level: 1 },
+      { divider: true, label: "2. โรงงาน / สถานประกอบการผลิต (Factory)", level: 1 },
       { divider: true, label: "F5.1  สิ่งแวดล้อม / Environment", level: 2 },
       {
         no: "F5.1.1",

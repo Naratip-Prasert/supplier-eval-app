@@ -12,71 +12,28 @@ const COLS = "52px 2.8fr 76px 1.1fr 1.1fr 1.1fr 1.1fr 1.1fr 84px 116px";
 
 // ---- helpers -----------------------------------------------
 
-// distribute `total` across `items` proportionally based on `current` values
-// last item absorbs rounding remainder
-function redistribute(items, current, total) {
-  const currentSum = items.reduce((s, k) => s + (current[k] ?? 0), 0);
-  const result = { ...current };
-  if (items.length === 0) return result;
+const r2 = (n) => Math.round(n * 100) / 100;
 
-  if (currentSum > 0) {
-    let rem = total;
-    items.forEach((k, idx) => {
-      if (idx === items.length - 1) {
-        result[k] = Math.max(0, rem);
-      } else {
-        const w = Math.round(((current[k] ?? 0) / currentSum) * total);
-        result[k] = w;
-        rem -= w;
-      }
-    });
-  } else {
-    // equal split
-    let rem = total;
-    items.forEach((k, idx) => {
-      const w = idx === items.length - 1 ? Math.max(0, rem) : Math.round(total / items.length);
-      result[k] = w;
-      rem -= w;
-    });
-  }
-  return result;
-}
 
-// คำนวณ initial weights ให้ section รวม = 100 และ items ใน section รวม = section weight
 function initWeights(criteria) {
-  const rawSec   = criteria.map((s) => s.items.filter((i) => !i.divider).reduce((sum, i) => sum + i.weight, 0));
-  const rawTotal = rawSec.reduce((sum, w) => sum + w, 0) || 100;
-
+  const n    = criteria.length || 1;
+  const each = r2(100 / n);
   const sections = {};
-  let remSec = 100;
-  criteria.forEach((_, si) => {
-    if (si === criteria.length - 1) {
-      sections[si] = Math.max(0, remSec);
-    } else {
-      const w = Math.round((rawSec[si] / rawTotal) * 100);
-      sections[si] = w;
-      remSec -= w;
-    }
-  });
-
-  const items = {};
+  const items    = {};
+  let rem = 100;
   criteria.forEach((section, si) => {
-    const secW     = sections[si];
+    const sw = si === criteria.length - 1 ? Math.max(0, r2(rem)) : each;
+    sections[si] = sw;
+    rem -= sw;
     const realItems = section.items.filter((i) => !i.divider);
-    const rawItem  = realItems.reduce((sum, i) => sum + i.weight, 0) || 1;
-    let remItem    = secW;
-    realItems.forEach((item, idx) => {
-      if (idx === realItems.length - 1) {
-        items[item.no] = Math.max(0, remItem);
-      } else {
-        const w = Math.round((item.weight / rawItem) * secW);
-        items[item.no] = w;
-        remItem -= w;
-      }
+    const itemEach  = realItems.length > 0 ? r2(sw / realItems.length) : 0;
+    let iRem = sw;
+    realItems.forEach((item, ii) => {
+      if (ii === realItems.length - 1) { items[item.no] = Math.max(0, r2(iRem)); }
+      else { items[item.no] = itemEach; iRem -= itemEach; }
     });
   });
-
-  return { items, sections };
+  return { sections, items };
 }
 
 // ---- main component ----------------------------------------
@@ -88,38 +45,85 @@ export default function EvalForm({ formData, onBack, onDone }) {
   const [scores, setScores] = useState({});
   const [notes,  setNotes]  = useState({});
 
-  // รวม weights และ sectionWeights เป็น state เดียว → update atomic เสมอ
   const [ws, setWs] = useState(() => initWeights(CRITERIA));
-  const weights        = ws.items;
   const sectionWeights = ws.sections;
+  const itemWeights    = ws.items;
 
-  const allItems           = CRITERIA.flatMap((s) => s.items.filter((i) => !i.divider));
-  const answered           = Object.keys(scores).length;
-  const total              = allItems.length;
+  const allItems        = CRITERIA.flatMap((s) => s.items.filter((i) => !i.divider));
+  const answered        = Object.keys(scores).length;
+  const total           = allItems.length;
+  const totalItemWeight = allItems.reduce((s, item) => s + (itemWeights[item.no] ?? 0), 0);
   const totalSectionWeight = CRITERIA.reduce((sum, _, si) => sum + (sectionWeights[si] ?? 0), 0);
 
-  // 2-level score: normalize within section → multiply by section weight
+  // คะแนน = Σ(lv/maxLv × itemWeight) / totalItemWeight × 100
   const totalScore = (() => {
-    let raw = 0;
-    CRITERIA.forEach((section, si) => {
-      const sw        = sectionWeights[si] ?? 0;
-      const realItems = section.items.filter((i) => !i.divider);
-      const maxItemW  = realItems.reduce((s, i) => s + (weights[i.no] ?? i.weight), 0);
-      const rawItem   = realItems.reduce((s, item) => {
-        const lv    = scores[item.no];
-        const w     = weights[item.no] ?? item.weight;
-        const maxLv = item.levelValues ? Math.max(...item.levelValues) : 5;
-        return lv ? s + (lv / maxLv) * w : s;
-      }, 0);
-      raw += maxItemW > 0 ? (rawItem / maxItemW) * sw : 0;
-    });
-    return totalSectionWeight > 0 ? (raw / totalSectionWeight) * 100 : 0;
+    if (totalItemWeight === 0) return 0;
+    const raw = allItems.reduce((s, item) => {
+      const lv    = scores[item.no];
+      const maxLv = item.levelValues ? Math.max(...item.levelValues) : 5;
+      const iw    = itemWeights[item.no] ?? 0;
+      return lv ? s + (lv / maxLv) * iw : s;
+    }, 0);
+    return (raw / totalItemWeight) * 100;
   })();
 
   const grade      = getGrade(totalScore);
   const gradeColor = GRADE_MAP[grade];
   const subtitle   = `${formData.empId || "BJC-XXXXX"}|${formData.dept || "ฝ่าย"}`;
   const evalLabel  = formData.evalType === "post-Evaluation" ? "Post" : "Pre";
+
+  const handleSectionWeightChange = (si, newVal) => {
+    const clamped   = Math.max(0, Math.min(100, Number(newVal) || 0));
+    setWs((prev) => {
+      const realItems = CRITERIA[si].items.filter((i) => !i.divider);
+      const oldSum    = realItems.reduce((s, it) => s + (prev.items[it.no] ?? 0), 0);
+      const newItems  = { ...prev.items };
+      // ปรับ items ใน section นี้ให้สัดส่วนเดิม รวม = clamped
+      if (oldSum > 0) {
+        let rem = clamped;
+        realItems.forEach((item, ii) => {
+          if (ii === realItems.length - 1) {
+            newItems[item.no] = Math.max(0, r2(rem));
+          } else {
+            const w = r2(((prev.items[item.no] ?? 0) / oldSum) * clamped);
+            newItems[item.no] = w;
+            rem -= w;
+          }
+        });
+      } else {
+        const each = r2(clamped / (realItems.length || 1));
+        let rem = clamped;
+        realItems.forEach((item, ii) => {
+          if (ii === realItems.length - 1) { newItems[item.no] = Math.max(0, r2(rem)); }
+          else { newItems[item.no] = each; rem -= each; }
+        });
+      }
+      return { sections: { ...prev.sections, [si]: clamped }, items: newItems };
+    });
+  };
+
+  const handleItemWeightChange = (no, si, newVal) => {
+    setWs((prev) => {
+      const secTotal  = prev.sections[si] ?? 0;
+      const clamped   = Math.max(0, Math.min(secTotal, Number(newVal) || 0));
+      const realItems = CRITERIA[si].items.filter((i) => !i.divider);
+      if (realItems.length <= 1) return { ...prev, items: { ...prev.items, [no]: clamped } };
+
+      const lastItem   = realItems[realItems.length - 1];
+      // ถ้าแก้ตัวสุดท้าย → ตัวก่อนสุดท้ายรับ มิฉะนั้น → ตัวสุดท้ายรับเสมอ
+      const bufferItem = no === lastItem.no
+        ? realItems[realItems.length - 2]
+        : lastItem;
+
+      const newItems  = { ...prev.items, [no]: clamped };
+      const othersSum = realItems
+        .filter((i) => i.no !== bufferItem.no)
+        .reduce((s, i) => s + (newItems[i.no] ?? 0), 0);
+      newItems[bufferItem.no] = Math.max(0, r2(secTotal - othersSum));
+
+      return { ...prev, items: newItems };
+    });
+  };
 
   const handleBack = async () => {
     const ok = await showConfirm("ต้องการกลับหน้าหลักใช่ไหม?\nข้อมูลที่กรอกไว้ทั้งหมดจะหายไป", "กลับหน้าหลัก");
@@ -132,47 +136,9 @@ export default function EvalForm({ formData, onBack, onDone }) {
       await showAlert(`ยังมีหัวข้อที่ยังไม่ได้ให้คะแนน:\n• ${unanswered.join("\n• ")}`, "ประเมินไม่ครบ");
       return;
     }
-    onDone({ scores, notes, totalScore, grade, weights, sectionWeights });
+    onDone({ scores, notes, totalScore, grade, sectionWeights });
   };
 
-  // ---- section weight change --------------------------------
-  // atomic: sections อื่นปรับให้รวม 100  +  items ทุก section ปรับตาม section weight ใหม่
-  const handleSectionWeightChange = (si, newVal) => {
-    const clamped   = Math.max(0, Math.min(100, Number(newVal) || 0));
-    const otherSIs  = CRITERIA.map((_, i) => i).filter((i) => i !== si);
-    const remaining = 100 - clamped;
-
-    setWs((prev) => {
-      // 1. section weights: si = clamped, others redistribute proportionally
-      const newSections = redistribute(otherSIs, prev.sections, remaining);
-      newSections[si]   = clamped;
-
-      // 2. items ใน ทุก section: redistribute ให้ sum = section weight ของแต่ละ section
-      let newItems = { ...prev.items };
-      CRITERIA.forEach((section, sIdx) => {
-        const keys = section.items.filter((i) => !i.divider).map((i) => i.no);
-        newItems   = redistribute(keys, newItems, newSections[sIdx] ?? 0);
-      });
-
-      return { items: newItems, sections: newSections };
-    });
-  };
-
-  // ---- item weight change ----------------------------------
-  // atomic: items อื่นใน section เดียวกันปรับ  (section weight ไม่เปลี่ยน)
-  const handleItemWeightChange = (no, si, newVal) => {
-    setWs((prev) => {
-      const sectionTotal    = prev.sections[si] ?? 0;
-      const clamped         = Math.max(0, Math.min(sectionTotal, Number(newVal) || 0));
-      const remaining       = sectionTotal - clamped;
-      const sectionItemKeys = CRITERIA[si].items.filter((i) => !i.divider).map((i) => i.no);
-      const otherItems      = sectionItemKeys.filter((k) => k !== no);
-
-      const newItems    = redistribute(otherItems, prev.items, remaining);
-      newItems[no]      = clamped;
-      return { ...prev, items: newItems };
-    });
-  };
 
   return (
     <div style={{ minHeight: "100vh", background: "#f4f6f4", fontFamily: "Sarabun, sans-serif", paddingBottom: 100 }}>
@@ -195,8 +161,7 @@ export default function EvalForm({ formData, onBack, onDone }) {
           {/* hint bar */}
           <div style={{
             background: "#fffbea", borderBottom: "1px solid #ffe082",
-            padding: "7px 16px",
-            display: "flex", alignItems: "center", gap: 8,
+            padding: "7px 16px", display: "flex", alignItems: "center", gap: 8,
           }}>
             <span style={{
               background: "#f9a825", color: "#fff", borderRadius: 6,
@@ -207,7 +172,7 @@ export default function EvalForm({ formData, onBack, onDone }) {
                 background: "#fff3cd", border: "1.5px solid #f9a825",
                 borderRadius: 4, padding: "1px 7px", fontWeight: 800, color: "#b45309",
               }}>น้ำหนัก%</span>{" "}
-              เพื่อแก้ไข — ส่วนที่เหลือจะปรับให้โดยอัตโนมัติ
+              ที่หัว Section เพื่อตั้งน้ำหนัก — หัวข้อใน Section จะปรับสัดส่วนตามอัตโนมัติ หรือแก้น้ำหนักแต่ละหัวข้อเองได้
             </span>
           </div>
           {/* level chips */}
@@ -250,7 +215,7 @@ export default function EvalForm({ formData, onBack, onDone }) {
                     <ScoreRow
                       key={item.no}
                       item={item}
-                      weight={weights[item.no] ?? item.weight}
+                      weight={itemWeights[item.no] ?? 0}
                       selected={scores[item.no]}
                       note={notes[item.no] || ""}
                       onSelect={(lv) => setScores((s) => ({ ...s, [item.no]: lv }))}
@@ -285,9 +250,9 @@ export default function EvalForm({ formData, onBack, onDone }) {
             }} />
           </div>
           <span style={{ fontSize: 12, color: "#888", whiteSpace: "nowrap" }}>
-            น้ำหนัก section รวม:{" "}
-            <b style={{ color: totalSectionWeight === 100 ? "#1a6b1a" : "#e65100" }}>{totalSectionWeight}%</b>
-            {totalSectionWeight !== 100 && <span style={{ color: "#e65100" }}> ≠ 100%</span>}
+            น้ำหนักรวม:{" "}
+            <b style={{ color: r2(totalItemWeight) === 100 ? "#1a6b1a" : "#e65100" }}>{r2(totalItemWeight)}%</b>
+            {r2(totalItemWeight) !== 100 && <span style={{ color: "#e65100" }}> ≠ 100%</span>}
           </span>
         </div>
 
@@ -411,10 +376,7 @@ function SectionHeaderRow({ section, secWeight, onSectionWeightChange }) {
     if (!editing) setDraft(String(secWeight));
   }, [secWeight, editing]);
 
-  const commit = () => {
-    setEditing(false);
-    onSectionWeightChange(draft);
-  };
+  const commit = () => { setEditing(false); onSectionWeightChange(draft); };
 
   return (
     <div style={{
@@ -429,10 +391,7 @@ function SectionHeaderRow({ section, secWeight, onSectionWeightChange }) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "6px 4px" }}>
         {editing ? (
           <input
-            type="number"
-            value={draft}
-            min={0} max={100}
-            autoFocus
+            type="number" value={draft} min={0} max={100} autoFocus
             onChange={(e) => setDraft(e.target.value)}
             onBlur={commit}
             onKeyDown={(e) => e.key === "Enter" && commit()}
@@ -469,17 +428,11 @@ function ScoreRow({ item, weight, selected, note, onSelect, onNote, onWeightChan
   const levelValues = item.levelValues || [1, 2, 3, 4, 5];
   const maxLv       = Math.max(...levelValues);
   const rowScore    = selected ? ((selected / maxLv) * weight).toFixed(2) : "—";
-  const [editing,   setEditing] = useState(false);
-  const [draft,     setDraft]   = useState(String(weight));
+  const [editing, setEditing] = useState(false);
+  const [draft,   setDraft]   = useState(String(weight));
 
-  useEffect(() => {
-    if (!editing) setDraft(String(weight));
-  }, [weight, editing]);
-
-  const commit = () => {
-    setEditing(false);
-    onWeightChange(draft);
-  };
+  useEffect(() => { if (!editing) setDraft(String(weight)); }, [weight, editing]);
+  const commit = () => { setEditing(false); onWeightChange(draft); };
 
   return (
     <div style={{
@@ -514,10 +467,7 @@ function ScoreRow({ item, weight, selected, note, onSelect, onNote, onWeightChan
       <div style={{ padding: "8px 4px", display: "flex", alignItems: "center", justifyContent: "center" }}>
         {editing ? (
           <input
-            type="number"
-            value={draft}
-            min={0} max={100}
-            autoFocus
+            type="number" value={draft} min={0} max={100} autoFocus
             onChange={(e) => setDraft(e.target.value)}
             onBlur={commit}
             onKeyDown={(e) => e.key === "Enter" && commit()}
@@ -530,7 +480,7 @@ function ScoreRow({ item, weight, selected, note, onSelect, onNote, onWeightChan
         ) : (
           <div
             onClick={() => { setDraft(String(weight)); setEditing(true); }}
-            title="คลิกเพื่อแก้ไข — หัวข้ออื่นใน section จะปรับให้รวมเท่า section weight"
+            title="คลิกเพื่อแก้ไข"
             style={{
               fontSize: 13, fontWeight: 700, color: "#1a6b1a",
               border: "1.5px dashed #a5d6a7", borderRadius: 6,
