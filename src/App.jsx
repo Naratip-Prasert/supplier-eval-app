@@ -1,8 +1,7 @@
 import { useState } from "react";
 import LandingPage from "./pages/LandingPage";
-import UserForm from "./pages/Userform";   
-import EvalForm from "./pages/Evalform";   
-import ResultPage from "./pages/Resultpage"; 
+import EvalForm from "./pages/Evalform";
+import ResultPage from "./pages/Resultpage";
 
 export default function App() {
   const [page, setPage] = useState("landing");
@@ -12,19 +11,6 @@ export default function App() {
   if (page === "landing") {
     return (
       <LandingPage
-        onSelect={(role) => {
-          setFormData({ role });
-          setPage("form");
-        }}
-      />
-    );
-  }
-
-  if (page === "form") {
-    return (
-      <UserForm
-        role={formData.role}
-        onBack={() => setPage("landing")}
         onSubmit={(data) => {
           setFormData(data);
           setPage("eval");
@@ -37,7 +23,7 @@ export default function App() {
     return (
       <EvalForm
         formData={formData}
-        onBack={() => setPage("form")}
+        onBack={() => setPage("landing")}
         onDone={(res) => {
           setResult(res);
           setPage("result");
@@ -51,6 +37,7 @@ export default function App() {
       <ResultPage
         formData={formData}
         result={result}
+        onBackToEval={() => setPage("eval")}
         onBack={() => {
           setFormData({});
           setResult(null);
