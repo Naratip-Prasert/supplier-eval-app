@@ -106,7 +106,7 @@ router.post('/', async (req, res) => {
     }
 
     // 4. Validate eval_type
-    const validEvalTypes = ['new_supplier', 're_evaluation'];
+    const validEvalTypes = ['new_supplier', 'post_eval'];
     if (!validEvalTypes.includes(evalType)) {
       await client.query('ROLLBACK');
       return res.status(400).json({ message: 'ประเภทการประเมินไม่ถูกต้อง', field: 'evalType' });

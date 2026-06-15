@@ -15,8 +15,8 @@ export default function ResultPage({ formData, result, onBack, onBackToEval }) {
   const { totalScore, grade, scores = {} } = result;
   const gradeColor = GRADE_MAP[grade];
   const subtitle   = `${formData.empId || "BJC-XXXXX"}|${formData.dept || "ฝ่าย"}`;
-  const evalLabel  = formData.evalType === "post-Evaluation" ? "Post" : "Pre";
-  const CRITERIA   = formData.evalType === "post-Evaluation" ? POST_CRITERIA : PRE_CRITERIA;
+  const evalLabel  = formData.evalType === "post_eval" ? "Post" : "Pre";
+  const CRITERIA   = formData.evalType === "post_eval" ? POST_CRITERIA : PRE_CRITERIA;
 
   const now     = new Date();
   const dateStr = `${String(now.getDate()).padStart(2,"0")}/${String(now.getMonth()+1).padStart(2,"0")}/${now.getFullYear()}`;
@@ -51,15 +51,36 @@ export default function ResultPage({ formData, result, onBack, onBackToEval }) {
     if (!ok) return;
     setDoneStatus("saving");
     try {
+      const rawScores  = result.scores  ?? {};
+      const rawNotes   = result.notes   ?? {};
+      const rawWeights = result.weights ?? {};
+      const mergedScores = Object.fromEntries(
+        Object.keys(rawScores).map((no) => [
+          no,
+          { score: rawScores[no], weight: rawWeights[no], note: rawNotes[no] ?? "" },
+        ])
+      );
       const apiBase = import.meta.env.VITE_API_URL || "http://localhost:5000";
-      await fetch(`${apiBase}/api/evaluations`, {
+      const res = await fetch(`${apiBase}/api/evaluations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...formData, ...result }),
+        body: JSON.stringify({
+          employeeId:  formData.employeeId,
+          vendorCode:  formData.vendorCode,
+          evalType:    formData.evalType,
+          period:      formData.period,
+          productType: formData.productType,
+          scores:      mergedScores,
+        }),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || res.statusText);
+      }
       setDoneStatus("saved");
       setTimeout(onBack, 600);
-    } catch {
+    } catch (err) {
+      console.error("Save failed:", err.message);
       setDoneStatus("error");
     }
   };

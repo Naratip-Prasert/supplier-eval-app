@@ -142,7 +142,7 @@ CREATE TABLE evaluation_sessions (
   id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   supplier_id     UUID        NOT NULL REFERENCES suppliers(id),
   eval_type       VARCHAR(20) NOT NULL
-                    CHECK (eval_type IN ('new_supplier', 're_evaluation')),
+                    CHECK (eval_type IN ('new_supplier', 'post_eval')),
   period          VARCHAR(50),                       -- "Monthly", "Quarterly", etc.
   status          VARCHAR(20) NOT NULL DEFAULT 'pending'
                     CHECK (status IN ('pending', 'in_progress', 'completed')),

@@ -82,7 +82,7 @@ function initWeights(criteria) {
 // ---- main component ----------------------------------------
 
 export default function EvalForm({ formData, onBack, onDone }) {
-  const CRITERIA = formData.evalType === "post-Evaluation" ? POST_CRITERIA : PRE_CRITERIA;
+  const CRITERIA = formData.evalType === "post_eval" ? POST_CRITERIA : PRE_CRITERIA;
 
   const { showAlert, showConfirm, ModalEl } = useModal();
   const [scores, setScores] = useState({});
@@ -119,7 +119,7 @@ export default function EvalForm({ formData, onBack, onDone }) {
   const grade      = getGrade(totalScore);
   const gradeColor = GRADE_MAP[grade];
   const subtitle   = `${formData.empId || "BJC-XXXXX"}|${formData.dept || "ฝ่าย"}`;
-  const evalLabel  = formData.evalType === "post-Evaluation" ? "Post" : "Pre";
+  const evalLabel  = formData.evalType === "post_eval" ? "Post" : "Pre";
 
   const handleBack = async () => {
     const ok = await showConfirm("ต้องการกลับหน้าหลักใช่ไหม?\nข้อมูลที่กรอกไว้ทั้งหมดจะหายไป", "กลับหน้าหลัก");

@@ -37,6 +37,8 @@ export default function LandingPage({ onSubmit }) {
   };
 
 
+  const PRODUCT_MAP = { "สินค้า": "goods", "บริการ": "services", "สินค้าและบริการ": "both" };
+
   const handleSubmit = async () => {
     const missing = [];
     if (!empId.trim())      missing.push("รหัสพนักงาน");
@@ -44,13 +46,18 @@ export default function LandingPage({ onSubmit }) {
     if (!evalType)          missing.push("ประเภทประเมิน");
     if (!vendorCode.trim()) missing.push("รหัสผู้ขาย / Vendor Code");
     if (!productType)       missing.push("ประเภทสินค้า");
-    if (!period)            missing.push(evalType === "pre-Evaluation" ? "ประเภทการประเมิน" : "รอบการประเมิน");
+    if (!period)            missing.push(evalType === "new_supplier" ? "ประเภทการประเมิน" : "รอบการประเมิน");
 
     if (missing.length > 0) {
       await showAlert(`กรุณากรอกข้อมูลให้ครบก่อนดำเนินการต่อ\n\nยังขาด:\n• ${missing.join("\n• ")}`, "กรอกข้อมูลไม่ครบ");
       return;
     }
-    onSubmit({ empId, dept, evalType, vendorCode, supplierName, productType, period, role: selectedRole });
+    onSubmit({
+      empId, dept, evalType, vendorCode, supplierName,
+      productType: PRODUCT_MAP[productType] ?? productType,
+      period, role: selectedRole,
+      employeeId: empId.trim(),
+    });
   };
 
   return (
@@ -182,7 +189,10 @@ export default function LandingPage({ onSubmit }) {
                   ประเภทประเมิน<span style={{ color: "#e53935" }}>*</span>
                 </div>
                 <div style={{ display: "flex", gap: 12 }}>
-                  {["pre-Evaluation", "post-Evaluation"].map((v) => (
+                  {[
+                    { value: "new_supplier", label: "pre-Evaluation" },
+                    { value: "post_eval",    label: "post-Evaluation" },
+                  ].map(({ value: v, label }) => (
                     <label
                       key={v}
                       style={{
@@ -205,7 +215,7 @@ export default function LandingPage({ onSubmit }) {
                         disabled={locked}
                         style={{ accentColor: themeColor }}
                       />
-                      {v}
+                      {label}
                     </label>
                   ))}
                 </div>
@@ -241,9 +251,9 @@ export default function LandingPage({ onSubmit }) {
                       onChange={setProductType}
                     />
                     <CustomSelect
-                      label={evalType === "pre-Evaluation" ? "ประเภทการประเมิน" : "รอบการประเมิน"}
+                      label={evalType === "new_supplier" ? "ประเภทการประเมิน" : "รอบการประเมิน"}
                       required
-                      options={evalType === "pre-Evaluation" ? PRE_EVAL_OPTIONS : EVAL_PERIOD_OPTIONS}
+                      options={evalType === "new_supplier" ? PRE_EVAL_OPTIONS : EVAL_PERIOD_OPTIONS}
                       value={period}
                       onChange={setPeriod}
                     />
