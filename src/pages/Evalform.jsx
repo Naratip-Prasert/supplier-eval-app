@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Header, GreenButton, useModal } from "../components";
-import { PRE_CRITERIA, POST_CRITERIA, LEVEL_COLORS, GRADE_MAP, getGrade } from "../constants";
+import { PRE_CRITERIA, POST_CRITERIA, LEVEL_COLORS, GRADE_MAP, GRADE_GUIDE, getGrade } from "../constants";
 import { AlertTriangle, FileText } from "lucide-react";
 
 const LEVEL_LABELS       = ["ต้องปรับปรุง (Unsatisfactory)", "ต่ำกว่าเกณฑ์ (Below Standard)", "ผ่านเกณฑ์ (Satisfactory)", "ดี (Good)", "ดีเยี่ยม (Excellent)"];
@@ -23,12 +23,20 @@ function initWeights(criteria) {
     const sw = section.weight ?? 0;
     sections[si] = sw;
     const realItems = section.items.filter((i) => !i.divider);
-    const itemEach  = realItems.length > 0 ? r2(sw / realItems.length) : 0;
-    let iRem = sw;
-    realItems.forEach((item, ii) => {
-      if (ii === realItems.length - 1) { items[item.no] = Math.max(0, r2(iRem)); }
-      else { items[item.no] = itemEach; iRem -= itemEach; }
-    });
+
+    // ถ้า item.weight ใน constants รวมกันได้ = section weight พอดี → ใช้โดยตรง (ได้จำนวนเต็ม)
+    const constantSum = realItems.reduce((s, i) => s + (i.weight ?? 0), 0);
+    if (realItems.every(i => i.weight != null) && constantSum === sw) {
+      realItems.forEach(item => { items[item.no] = item.weight; });
+    } else {
+      // fallback: แจกเท่ากัน (เช่น ESG ที่ item.weight ไม่รวมกันได้ = sw)
+      const itemEach = realItems.length > 0 ? r2(sw / realItems.length) : 0;
+      let iRem = sw;
+      realItems.forEach((item, ii) => {
+        if (ii === realItems.length - 1) { items[item.no] = Math.max(0, r2(iRem)); }
+        else { items[item.no] = itemEach; iRem -= itemEach; }
+      });
+    }
   });
   return { sections, items };
 }
@@ -147,7 +155,7 @@ export default function EvalForm({ formData, onBack, onDone }) {
       setMissingItems(unanswered);
       return;
     }
-    onDone({ scores, notes, totalScore, grade, sectionWeights });
+    onDone({ scores, notes, totalScore, grade, sectionWeights, weights: itemWeights });
   };
 
 
@@ -170,49 +178,75 @@ export default function EvalForm({ formData, onBack, onDone }) {
         onBack={handleBack}
       />
 
+      {/* DEV: fill-all button */}
+      <button
+        onClick={() => {
+          const filled = {};
+          CRITERIA.forEach(sec =>
+            sec.items.filter(i => !i.divider).forEach(item => {
+              const lvs = item.levelValues || [1, 2, 3, 4, 5];
+              filled[item.no] = Math.max(...lvs);
+            })
+          );
+          setScores(filled);
+        }}
+        style={{
+          position: "fixed", top: 68, right: 12, zIndex: 200,
+          background: "rgba(0,0,0,0.06)", border: "1px dashed #bbb",
+          color: "#999", fontSize: 10, borderRadius: 4,
+          padding: "3px 8px", cursor: "pointer",
+          fontFamily: "monospace",
+        }}
+      >
+        MAX ALL
+      </button>
+
       <div style={{ maxWidth: 1280, margin: "0 auto", padding: "16px 16px 0" }}>
         <InfoBar formData={formData} evalLabel={evalLabel} />
 
         {/* Scoring guide */}
         <div style={{
           marginBottom: 12, background: "#fff", borderRadius: 8,
-          border: "1px solid #e0e0e0", overflow: "hidden",
+          border: "2px solid #2e7d32", boxShadow: "0 2px 10px rgba(46,125,50,0.12)",
+          overflow: "hidden",
         }}>
           {/* hint bar */}
           <div style={{
-            background: "#fffbea", borderBottom: "1px solid #ffe082",
-            padding: "7px 16px", display: "flex", alignItems: "center", gap: 8,
+            background: "#e8f5e9", borderBottom: "2px solid #a5d6a7",
+            borderLeft: "5px solid #2e7d32",
+            padding: "11px 16px", display: "flex", alignItems: "center", gap: 10,
           }}>
             <span style={{
-              background: "#f9a825", color: "#fff", borderRadius: 6,
-              padding: "2px 9px", fontSize: 12, fontWeight: 800, letterSpacing: 0.3,
-            }}>💡 TIP</span>
-            <span style={{ fontSize: 13, color: "#6d4c00", fontWeight: 600 }}>
+              background: "#1b5e20", color: "#fff", borderRadius: 5,
+              padding: "4px 12px", fontSize: 12, fontWeight: 800, letterSpacing: 0.5,
+              flexShrink: 0,
+            }}>TIP</span>
+            <span style={{ fontSize: 14, color: "#1a3c1a", fontWeight: 500 }}>
               คลิกช่อง <span style={{
-                background: "#fff3cd", border: "1.5px solid #f9a825",
-                borderRadius: 4, padding: "1px 7px", fontWeight: 800, color: "#b45309",
+                background: "#fff", border: "1.5px solid #2e7d32",
+                borderRadius: 4, padding: "2px 8px", fontWeight: 800, color: "#1b5e20",
               }}>น้ำหนัก%</span>{" "}
-              ที่หัว Section เพื่อตั้งน้ำหนัก — หัวข้อใน Section จะปรับสัดส่วนตามอัตโนมัติ หรือแก้น้ำหนักแต่ละหัวข้อเองได้
+              ที่หัว Section เพื่อตั้งน้ำหนัก — หัวข้อใน Section จะปรับสัดส่วนตามอัตโนมัติ
             </span>
           </div>
-          {/* level chips */}
+          {/* level legend */}
           <div style={{
-            display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center",
+            display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center",
             padding: "8px 14px",
           }}>
-            <span style={{ fontSize: 12, color: "#555", fontWeight: 700, marginRight: 2 }}>เกณฑ์คะแนน:</span>
+            <span style={{ fontSize: 11, color: "#718096", fontWeight: 600, marginRight: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>Level:</span>
             {LEVEL_LABELS.map((lbl, i) => (
               <span key={i} style={{
                 display: "inline-flex", alignItems: "center", gap: 5,
-                background: LEVEL_COLORS[i] + "28", border: `1.5px solid ${LEVEL_COLORS[i]}`,
-                borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 600,
+                background: LEVEL_COLORS[i] + "18", border: `1px solid ${LEVEL_COLORS[i]}80`,
+                borderRadius: 5, padding: "3px 10px", fontSize: 12,
               }}>
                 <span style={{
-                  background: LEVEL_COLORS[i], color: "#fff", borderRadius: "50%",
-                  width: 20, height: 20, display: "inline-flex",
-                  alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800,
+                  background: LEVEL_COLORS[i], color: "#fff", borderRadius: 3,
+                  width: 18, height: 18, display: "inline-flex",
+                  alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700,
                 }}>{i + 1}</span>
-                {lbl}
+                <span style={{ color: "#2d3748", fontWeight: 500 }}>{lbl}</span>
               </span>
             ))}
           </div>
@@ -247,6 +281,47 @@ export default function EvalForm({ formData, onBack, onDone }) {
               )}
             </div>
           ))}
+        </div>
+
+        {/* Scoring Criteria table */}
+        <div style={{
+          background: "#fff", border: "2px solid #2e7d32", borderRadius: 8,
+          boxShadow: "0 2px 10px rgba(46,125,50,0.12)", overflow: "hidden", marginBottom: 16,
+        }}>
+          <div style={{
+            padding: "13px 18px", borderBottom: "1px solid #c8d8c8",
+            background: "linear-gradient(90deg,#1a6b1a,#2e7d32)",
+            fontWeight: 700, fontSize: 14, color: "#fff", letterSpacing: 0.3,
+          }}>
+            เกณฑ์การตัดสิน / Scoring Criteria
+          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: "#f8faf8" }}>
+                {["เกรด", "คะแนน (%)", "สถานะ"].map(h => (
+                  <th key={h} style={{
+                    padding: "8px 16px", textAlign: "left", fontWeight: 600,
+                    fontSize: 12, color: "#718096", borderBottom: "1px solid #e0e6e0",
+                  }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {GRADE_GUIDE.map((g, i) => (
+                <tr key={g.g} style={{ background: i % 2 === 0 ? "#fff" : "#fafcfa", borderBottom: "1px solid #f0f4f0" }}>
+                  <td style={{ padding: "9px 16px" }}>
+                    <span style={{
+                      background: g.color, color: "#fff",
+                      borderRadius: 5, padding: "3px 12px",
+                      fontWeight: 800, fontSize: 14, display: "inline-block",
+                    }}>{g.g}</span>
+                  </td>
+                  <td style={{ padding: "9px 16px", fontWeight: 600, color: "#2d3748" }}>{g.range}</td>
+                  <td style={{ padding: "9px 16px", color: g.color, fontWeight: 600 }}>{g.label}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -304,17 +379,19 @@ function InfoBar({ formData, evalLabel }) {
   const refNo = `SPE-${evalLabel.toUpperCase()}-${now.getFullYear()}${String(now.getMonth()+1).padStart(2,"0")}-AUTO`;
   return (
     <div style={{
-      background: "#fff", border: "1.5px solid #c8d8c8", borderRadius: 10,
-      padding: "14px 18px", marginBottom: 12,
+      background: "#fff", border: "1px solid #e0e6e0", borderRadius: 8,
+      boxShadow: "0 1px 4px rgba(0,0,0,0.05)",
+      padding: "12px 18px", marginBottom: 12,
+      display: "flex", alignItems: "center", gap: 18,
     }}>
       <div style={{
-        background: "#fffde7", border: "1.5px solid #f9a825", borderRadius: 6,
-        padding: "6px 14px", marginBottom: 12, textAlign: "center",
-        fontWeight: 700, fontSize: 13, color: "#555",
+        fontSize: 11, color: "#718096", fontWeight: 600,
+        letterSpacing: 0.5, textTransform: "uppercase",
+        borderRight: "1px solid #e0e6e0", paddingRight: 18, flexShrink: 0,
       }}>
-        บริษัทในกลุ่ม : Consumer / Packaging / Retail / Manufacturer
+        Consumer / Packaging<br />Retail / Manufacturer
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px 28px", fontSize: 13 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "5px 28px", fontSize: 13, flex: 1 }}>
         {[
           ["ชื่อผู้ขาย/ผู้ให้บริการ",    formData.supplierName || "—"],
           ["รหัสผู้ขาย (Vendor code)",    formData.vendorCode   || "—"],
@@ -323,9 +400,9 @@ function InfoBar({ formData, evalLabel }) {
           ["ชื่อผู้ประเมิน/รหัสพนักงาน", formData.empId        || "—"],
           ["รอบการประเมิน",               formData.period       || "—"],
         ].map(([label, val]) => (
-          <div key={label}>
-            <span style={{ fontWeight: 700, color: "#444" }}>{label}: </span>
-            <span style={{ color: "#1a6b1a", fontWeight: 600 }}>{val}</span>
+          <div key={label} style={{ display: "flex", gap: 4 }}>
+            <span style={{ color: "#718096", flexShrink: 0 }}>{label}:</span>
+            <span style={{ color: "#1a202c", fontWeight: 600 }}>{val}</span>
           </div>
         ))}
       </div>
@@ -369,18 +446,23 @@ function DividerRow({ label, level }) {
   return (
     <div style={{
       gridColumn: "1 / -1",
-      background: isMain ? "#e8f0fe" : "#f3f6fb",
-      borderTop: isMain ? "2px solid #90caf9" : "1px solid #d0dce8",
-      borderBottom: isMain ? "2px solid #90caf9" : "1px solid #d0dce8",
-      padding: isMain ? "9px 18px" : "6px 28px",
+      background: isMain ? "#f0f4fa" : "#f7f9fc",
+      borderTop: isMain ? "1.5px solid #b8cce4" : "1px solid #dde6f0",
+      borderBottom: isMain ? "1.5px solid #b8cce4" : "1px solid #dde6f0",
+      padding: isMain ? "8px 18px" : "6px 28px",
       display: "flex", alignItems: "center", gap: 8,
     }}>
-      {isMain && <span style={{ fontSize: 16 }}>🏢</span>}
+      {isMain && (
+        <span style={{
+          width: 3, height: 14, background: "#1558a0",
+          borderRadius: 2, display: "inline-block", flexShrink: 0,
+        }} />
+      )}
       <span style={{
         fontSize: isMain ? 13 : 12,
-        fontWeight: isMain ? 800 : 700,
-        color: isMain ? "#1565c0" : "#455a7a",
-        letterSpacing: 0.2,
+        fontWeight: isMain ? 700 : 600,
+        color: isMain ? "#1558a0" : "#4a6080",
+        letterSpacing: 0.1,
       }}>
         {label}
       </span>
@@ -434,7 +516,7 @@ function SectionHeaderRow({ section, secWeight, onSectionWeightChange }) {
             onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.15)")}
             onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
           >
-            {secWeight}% <span style={{ fontSize: 10, opacity: 0.8 }}>✏️</span>
+            {secWeight}%
           </div>
         )}
       </div>
@@ -474,11 +556,31 @@ function ScoreRow({ item, weight, selected, note, onSelect, onNote, onWeightChan
 
       <div style={{
         padding: "12px 10px", fontSize: 13, lineHeight: 1.7,
-        whiteSpace: "pre-line", color: "#1a1a1a",
+        color: "#1a1a1a",
         display: "flex", flexDirection: "column", justifyContent: "center",
         borderRight: "1px solid #e8ece8",
       }}>
-        <span style={{ fontWeight: 500 }}>{item.title}</span>
+        {item.calcType === "capital-ratio" ? (() => {
+          const lines = item.title.split("\n");
+          const instr = lines.pop();
+          return (
+            <>
+              <span style={{ fontWeight: 500, whiteSpace: "pre-line" }}>{lines.join("\n")}</span>
+              <span style={{
+                display: "inline-block", marginTop: 7,
+                background: "#fff3e0", border: "2px solid #fb8c00",
+                borderLeft: "5px solid #e65100",
+                borderRadius: 6, padding: "6px 12px",
+                fontSize: 12, color: "#bf360c", fontWeight: 700,
+                lineHeight: 1.5,
+              }}>
+                {instr}
+              </span>
+            </>
+          );
+        })() : (
+          <span style={{ fontWeight: 500, whiteSpace: "pre-line" }}>{item.title}</span>
+        )}
         {item.calcType === "capital-ratio" && (
           <CapitalRatioCalc item={item} selected={selected} onSelect={onSelect} />
         )}
@@ -510,7 +612,7 @@ function ScoreRow({ item, weight, selected, note, onSelect, onNote, onWeightChan
             onMouseEnter={(e) => (e.currentTarget.style.background = "#e8f5e9")}
             onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
           >
-            {weight}% <span style={{ fontSize: 10, color: "#aaa" }}>✏️</span>
+            {weight}%
           </div>
         )}
       </div>
@@ -519,17 +621,17 @@ function ScoreRow({ item, weight, selected, note, onSelect, onNote, onWeightChan
         ? [1, 2, 3, 4, 5].map((lv) => {
             const isSelected = selected === lv;
             return (
-              <div key={lv} title="ใช้ปุ่ม 🧮 คำนวณ เพื่อเลือก Level" style={{
+              <div key={lv} title="ใช้ปุ่มคำนวณ เพื่อเลือก Level" style={{
                 padding: "8px 5px", cursor: "not-allowed",
-                background: isSelected ? LEVEL_COLORS[lv - 1] : "#f7f7f7",
+                background: isSelected ? LEVEL_COLORS[lv - 1] + "22" : "#f7f7f7",
                 border: `2px solid ${isSelected ? LEVEL_COLORS[lv - 1] : "#e4e4e4"}`,
                 borderRadius: 7, margin: "6px 3px",
                 display: "flex", alignItems: "center", justifyContent: "center",
-                boxShadow: isSelected ? `0 2px 8px ${LEVEL_COLORS[lv - 1]}55` : "none",
+                boxShadow: isSelected ? `0 1px 5px ${LEVEL_COLORS[lv - 1]}40` : "none",
               }}>
                 <div style={{
                   fontSize: 12, lineHeight: 1.5, textAlign: "center",
-                  color: isSelected ? "#fff" : "#aaa",
+                  color: isSelected ? "#1a1a1a" : "#aaa",
                   whiteSpace: "pre-line", wordBreak: "break-word",
                   fontWeight: isSelected ? 700 : 400,
                 }}>
@@ -549,21 +651,21 @@ function ScoreRow({ item, weight, selected, note, onSelect, onNote, onWeightChan
                 style={{
                   padding: "8px 5px",
                   cursor: available ? "pointer" : "default",
-                  background: isSelected ? LEVEL_COLORS[lv - 1] : available ? "#fafafa" : "#f5f5f5",
-                  border: `2px solid ${isSelected ? LEVEL_COLORS[lv - 1] : available ? "#d8d8d8" : "transparent"}`,
+                  background: isSelected ? LEVEL_COLORS[lv - 1] + "22" : available ? "#fafafa" : "#f5f5f5",
+                  border: `2px solid ${isSelected ? LEVEL_COLORS[lv - 1] : available ? "#e0e0e0" : "transparent"}`,
                   borderRadius: 7, margin: "6px 3px",
                   opacity: available ? 1 : 0.12,
                   transition: "all 0.15s",
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  boxShadow: isSelected ? `0 2px 8px ${LEVEL_COLORS[lv - 1]}55` : "none",
+                  boxShadow: isSelected ? `0 1px 5px ${LEVEL_COLORS[lv - 1]}40` : "none",
                 }}
-                onMouseEnter={(e) => { if (available && !isSelected) e.currentTarget.style.background = LEVEL_COLORS[lv - 1] + "22"; }}
+                onMouseEnter={(e) => { if (available && !isSelected) e.currentTarget.style.background = LEVEL_COLORS[lv - 1] + "18"; }}
                 onMouseLeave={(e) => { if (available && !isSelected) e.currentTarget.style.background = "#fafafa"; }}
               >
                 {available && (
                   <div style={{
                     fontSize: 12, lineHeight: 1.5, textAlign: "center",
-                    color: isSelected ? "#fff" : "#444",
+                    color: "#1a1a1a",
                     whiteSpace: "pre-line", wordBreak: "break-word",
                     fontWeight: isSelected ? 700 : 400,
                   }}>

@@ -38,17 +38,19 @@ export const LEVEL_COLORS = [
 ];
 
 export const GRADE_MAP = {
-  A: "#2e7d32",
-  B: "#558b2f",
-  C: "#f57f17",
-  D: "#c62828",
+  A: "#1b5e20",
+  B: "#1565c0",
+  C: "#e65100",
+  D: "#b71c1c",
+  F: "#4a0000",
 };
 
 export const GRADE_GUIDE = [
-  { g: "A", range: "81-100", label: "ดีมาก",       color: "#2e7d32" },
-  { g: "B", range: "61-80",  label: "ดี",           color: "#558b2f" },
-  { g: "C", range: "51-60",  label: "พอใช้",        color: "#f57f17" },
-  { g: "D", range: "<50",    label: "ต้องปรับปรุง", color: "#c62828" },
+  { g: "A", range: "90-100", label: "ผ่านการรับรอง (Approved)",          color: "#1b5e20" },
+  { g: "B", range: "80-89",  label: "ผ่านเงื่อนไข (Conditional)",        color: "#1565c0" },
+  { g: "C", range: "70-79",  label: "ต้องปรับปรุง (Improvement Required)",color: "#e65100" },
+  { g: "D", range: "60-69",  label: "ไม่ผ่าน — ระงับ (Suspended)",       color: "#b71c1c" },
+  { g: "F", range: "< 60",   label: "ไม่ผ่าน — ตัดออก (Disqualified)",   color: "#4a0000" },
 ];
 
 export const PRE_CRITERIA = [
@@ -229,7 +231,7 @@ export const PRE_CRITERIA = [
         weight: 4,
         calcType: "capital-ratio",
         calcThresholds: [0.5, 1.0, 2.0, 3.0],
-        title: "ความสมดุลระหว่างทุนจดทะเบียนและมูลค่างานต่อปี\n(Registered Capital vs. Annual Contract Value Ratio)\n โปรดกดคำนวนปุ่มด้านล่างเพื่อประเมินระดับคะแนน",
+        title: "ความสมดุลระหว่างทุนจดทะเบียนและมูลค่างานต่อปี\n(Registered Capital vs. Annual Contract Value Ratio)\nโปรดกดคำนวนปุ่มด้านล่างเพื่อประเมินระดับคะแนน",
         levels: [
           "เสี่ยงสูง (<0.5 เท่า)",
           "เสี่ยง (0.5-0.99 เท่า)",
@@ -859,7 +861,7 @@ export const POST_CRITERIA = [
         weight: 3,
         calcType: "capital-ratio",
         calcThresholds: [0.1, 0.2, 0.5, 1.0],
-        title: "ความสมดุลระหว่างทุนจดทะเบียนและมูลค่างานต่อปี\n(Registered Capital vs. Annual Contract Value Ratio)",
+        title: "ความสมดุลระหว่างทุนจดทะเบียนและมูลค่างานต่อปี\n(Registered Capital vs. Annual Contract Value Ratio)\nโปรดกดคำนวนปุ่มด้านล่างเพื่อประเมินระดับคะแนน",
         levels: [
           "เสี่ยงสูง (<0.5 เท่า)",
           "เสี่ยง (0.5-0.99 เท่า)",
