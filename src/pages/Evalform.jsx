@@ -16,15 +16,11 @@ const r2 = (n) => Math.round(n * 100) / 100;
 
 
 function initWeights(criteria) {
-  const n    = criteria.length || 1;
-  const each = r2(100 / n);
   const sections = {};
   const items    = {};
-  let rem = 100;
   criteria.forEach((section, si) => {
-    const sw = si === criteria.length - 1 ? Math.max(0, r2(rem)) : each;
+    const sw = section.weight ?? 0;
     sections[si] = sw;
-    rem -= sw;
     const realItems = section.items.filter((i) => !i.divider);
     const itemEach  = realItems.length > 0 ? r2(sw / realItems.length) : 0;
     let iRem = sw;
@@ -73,32 +69,45 @@ export default function EvalForm({ formData, onBack, onDone }) {
   const evalLabel  = formData.evalType === "post-Evaluation" ? "Post" : "Pre";
 
   const handleSectionWeightChange = (si, newVal) => {
-    const clamped   = Math.max(0, Math.min(100, Number(newVal) || 0));
+    const clamped = Math.max(0, Math.min(100, Number(newVal) || 0));
     setWs((prev) => {
-      const realItems = CRITERIA[si].items.filter((i) => !i.divider);
-      const oldSum    = realItems.reduce((s, it) => s + (prev.items[it.no] ?? 0), 0);
-      const newItems  = { ...prev.items };
-      // ปรับ items ใน section นี้ให้สัดส่วนเดิม รวม = clamped
-      if (oldSum > 0) {
-        let rem = clamped;
-        realItems.forEach((item, ii) => {
-          if (ii === realItems.length - 1) {
-            newItems[item.no] = Math.max(0, r2(rem));
-          } else {
-            const w = r2(((prev.items[item.no] ?? 0) / oldSum) * clamped);
-            newItems[item.no] = w;
-            rem -= w;
-          }
-        });
-      } else {
-        const each = r2(clamped / (realItems.length || 1));
-        let rem = clamped;
-        realItems.forEach((item, ii) => {
-          if (ii === realItems.length - 1) { newItems[item.no] = Math.max(0, r2(rem)); }
-          else { newItems[item.no] = each; rem -= each; }
-        });
-      }
-      return { sections: { ...prev.sections, [si]: clamped }, items: newItems };
+      const lastSi = CRITERIA.length - 1;
+      const bufSi  = si === lastSi ? lastSi - 1 : lastSi;
+
+      // section ที่แก้ = clamped, buffer section = 100 - ผลรวมของที่เหลือ
+      const newSections = { ...prev.sections, [si]: clamped };
+      const othersSum   = CRITERIA.reduce((s, _, i) => {
+        if (i === bufSi) return s;
+        return s + (i === si ? clamped : (prev.sections[i] ?? 0));
+      }, 0);
+      newSections[bufSi] = Math.max(0, r2(100 - othersSum));
+
+      // helper: scale items ใน section ให้รวม = sw ใหม่ (สัดส่วนเดิม)
+      const newItems = { ...prev.items };
+      const scaleItems = (idx) => {
+        const sw        = newSections[idx];
+        const realItems = CRITERIA[idx].items.filter((i) => !i.divider);
+        const oldSum    = realItems.reduce((s, it) => s + (prev.items[it.no] ?? 0), 0);
+        if (oldSum > 0) {
+          let rem = sw;
+          realItems.forEach((item, ii) => {
+            if (ii === realItems.length - 1) { newItems[item.no] = Math.max(0, r2(rem)); }
+            else { const w = r2(((prev.items[item.no] ?? 0) / oldSum) * sw); newItems[item.no] = w; rem -= w; }
+          });
+        } else {
+          const each = r2(sw / (realItems.length || 1));
+          let rem = sw;
+          realItems.forEach((item, ii) => {
+            if (ii === realItems.length - 1) { newItems[item.no] = Math.max(0, r2(rem)); }
+            else { newItems[item.no] = each; rem -= each; }
+          });
+        }
+      };
+
+      scaleItems(si);
+      if (bufSi !== si) scaleItems(bufSi);
+
+      return { sections: newSections, items: newItems };
     });
   };
 
