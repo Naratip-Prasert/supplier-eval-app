@@ -9,6 +9,8 @@
 import { useState, useRef } from "react";
 import { Header, GreenButton, useModal } from "../components";
 import { PRE_CRITERIA, POST_CRITERIA, GRADE_MAP, GRADE_GUIDE } from "../constants";
+import { authFetch } from "../utils/api";
+import { Download, Printer, CheckCircle2, XCircle } from "lucide-react";
 
 export default function ResultPage({ formData, result, onBack, onBackToEval }) {
   const { showConfirm, ModalEl } = useModal();
@@ -60,10 +62,8 @@ export default function ResultPage({ formData, result, onBack, onBackToEval }) {
           { score: rawScores[no], weight: rawWeights[no], note: rawNotes[no] ?? "" },
         ])
       );
-      const apiBase = import.meta.env.VITE_API_URL || "http://localhost:5000";
-      const res = await fetch(`${apiBase}/api/evaluations`, {
+      const res = await authFetch("/api/evaluations", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           employeeId:  formData.employeeId,
           vendorCode:  formData.vendorCode,
@@ -171,11 +171,11 @@ export default function ResultPage({ formData, result, onBack, onBackToEval }) {
                   background: "#fff", border: "1px solid #bbb", borderRadius: 6,
                   boxShadow: "0 4px 12px rgba(0,0,0,0.15)", zIndex: 99, minWidth: 160,
                 }}>
-                  <button onClick={exportExcel} style={dropdownItemStyle}>
-                    📊 Export Excel (CSV)
+                  <button onClick={exportExcel} style={{ ...dropdownItemStyle, display: "flex", alignItems: "center", gap: 8 }}>
+                    <Download size={14} /> Export Excel (CSV)
                   </button>
-                  <button onClick={printPDF} style={dropdownItemStyle}>
-                    🖨️ Print / Save PDF
+                  <button onClick={printPDF} style={{ ...dropdownItemStyle, display: "flex", alignItems: "center", gap: 8 }}>
+                    <Printer size={14} /> Print / Save PDF
                   </button>
                 </div>
               )}
@@ -326,8 +326,8 @@ export default function ResultPage({ formData, result, onBack, onBackToEval }) {
             <GreenButton fullWidth onClick={handleDone} disabled={doneStatus === "saving" || doneStatus === "saved"}>
               {doneStatus === "idle"   && "ยืนยันผลการประเมินและบันทึก"}
               {doneStatus === "saving" && "กำลังบันทึก..."}
-              {doneStatus === "saved"  && "✅ บันทึกแล้ว"}
-              {doneStatus === "error"  && "❌ เกิดข้อผิดพลาด — ลองอีกครั้ง"}
+              {doneStatus === "saved"  && <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><CheckCircle2 size={16} /> บันทึกแล้ว</span>}
+              {doneStatus === "error"  && <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><XCircle size={16} /> เกิดข้อผิดพลาด — ลองอีกครั้ง</span>}
             </GreenButton>
           </div>
 

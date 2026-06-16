@@ -5,6 +5,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Header, GreenButton, useModal } from "../components";
 import { PRE_CRITERIA, POST_CRITERIA, LEVEL_COLORS, GRADE_MAP, getGrade } from "../constants";
+import { AlertTriangle, FileText } from "lucide-react";
 
 const LEVEL_LABELS       = ["ต้องปรับปรุง (Unsatisfactory)", "ต่ำกว่าเกณฑ์ (Below Standard)", "ผ่านเกณฑ์ (Satisfactory)", "ดี (Good)", "ดีเยี่ยม (Excellent)"];
 const LEVEL_SHORT_LABELS = ["ต้องปรับปรุง", "ต่ำกว่าเกณฑ์", "ผ่านเกณฑ์", "ดี", "ดีเยี่ยม"];
@@ -844,8 +845,8 @@ function MissingScoresModal({ items, criteria, answered, total, onClose }) {
             width: 44, height: 44, borderRadius: "50%",
             background: "rgba(255,255,255,0.18)",
             display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 22, flexShrink: 0,
-          }}>⚠️</div>
+            flexShrink: 0,
+          }}><AlertTriangle size={22} color="#fff" /></div>
           <div>
             <div style={{ color: "#fff", fontWeight: 800, fontSize: 17, letterSpacing: 0.3 }}>
               ประเมินยังไม่ครบ
@@ -1063,8 +1064,8 @@ function NoteCell({ itemNo, value, onChange }) {
               padding: "14px 20px",
               display: "flex", alignItems: "center", justifyContent: "space-between",
             }}>
-              <span style={{ fontSize: 16, fontWeight: 700 }}>
-                📝 หมายเหตุ — ข้อ {itemNo}
+              <span style={{ fontSize: 16, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
+                <FileText size={16} /> หมายเหตุ — ข้อ {itemNo}
               </span>
               <span style={{ fontSize: 12, opacity: 0.75 }}>ไม่จำกัดจำนวนตัวอักษร</span>
             </div>

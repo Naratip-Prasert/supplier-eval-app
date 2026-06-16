@@ -3,6 +3,7 @@
 // ============================================================
 
 import { useState, useEffect, useRef } from "react";
+import { Eye, EyeOff, AlertTriangle, HelpCircle } from "lucide-react";
 
 // ------ Clock -----------------------------------------------
 export function Clock() {
@@ -21,7 +22,7 @@ export function Clock() {
 }
 
 // ------ Header ----------------------------------------------
-export function Header({ subtitle, backLabel, onBack, titleOverride }) {
+export function Header({ subtitle, backLabel, onBack, titleOverride, user, onLogout }) {
   return (
     <div style={{
       background: "#1a6b1a", color: "#fff", padding: "10px 20px",
@@ -53,7 +54,70 @@ export function Header({ subtitle, backLabel, onBack, titleOverride }) {
           )}
         </div>
       </div>
-      <Clock />
+      <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
+        {user && (
+          <div style={{ textAlign: "right", lineHeight: 1.3 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{user.fullName}</div>
+            <div style={{ fontSize: 11, color: "#a5d6a7" }}>{user.role} · {user.department}</div>
+          </div>
+        )}
+        <Clock />
+        {onLogout && (
+          <button
+            onClick={onLogout}
+            style={{
+              background: "rgba(255,255,255,0.15)", color: "#fff",
+              border: "1px solid rgba(255,255,255,0.35)", borderRadius: 6,
+              padding: "5px 14px", fontSize: 12, cursor: "pointer",
+              fontFamily: "monospace", whiteSpace: "nowrap",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.28)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.15)")}
+          >
+            ออกจากระบบ
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ------ PasswordInput ---------------------------------------
+export function PasswordInput({ label, required, value, onChange, placeholder, error }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div style={{ flex: 1, minWidth: 0 }}>
+      {label && (
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#222" }}>
+          {label}{required && <span style={{ color: "#e53935" }}>*</span>}
+        </div>
+      )}
+      <div style={{ position: "relative" }}>
+        <input
+          type={show ? "text" : "password"}
+          value={value}
+          onChange={(e) => onChange && onChange(e.target.value)}
+          placeholder={placeholder || ""}
+          style={{
+            width: "100%", boxSizing: "border-box",
+            background: "#d4f5c8", border: `1.5px solid ${error ? "#e53935" : "#888"}`,
+            borderRadius: 8, padding: "8px 44px 8px 14px", fontSize: 14, outline: "none",
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => setShow((s) => !s)}
+          style={{
+            position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
+            background: "none", border: "none", cursor: "pointer",
+            fontSize: 16, color: "#666", lineHeight: 1,
+          }}
+          tabIndex={-1}
+        >
+          {show ? <EyeOff size={16} /> : <Eye size={16} />}
+        </button>
+      </div>
+      {error && <div style={{ color: "#e53935", fontSize: 11, marginTop: 3 }}>{error}</div>}
     </div>
   );
 }
@@ -174,7 +238,7 @@ const MODAL_ANIM = `
 function AppModal({ type, title, message, onClose }) {
   const isWarn   = type === "alert";
   const headerBg = isWarn ? "#e65100" : "#1a6b1a";
-  const icon     = isWarn ? "⚠️" : "💬";
+  const Icon     = isWarn ? AlertTriangle : HelpCircle;
   const okColor  = isWarn ? "#e65100" : "#2e7d32";
   const okHover  = isWarn ? "#bf360c" : "#1b5e20";
 
@@ -209,7 +273,7 @@ function AppModal({ type, title, message, onClose }) {
             background: headerBg, padding: "14px 20px",
             display: "flex", alignItems: "center", gap: 12, color: "#fff",
           }}>
-            <span style={{ fontSize: 26, lineHeight: 1, flexShrink: 0 }}>{icon}</span>
+            <Icon size={26} style={{ flexShrink: 0 }} />
             <span style={{ fontWeight: 700, fontSize: 16, fontFamily: "Sarabun, sans-serif" }}>{title}</span>
           </div>
 

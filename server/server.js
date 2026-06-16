@@ -26,15 +26,18 @@ app.use((req, res, next) => {
   next();
 });
 
+const requireAuth = require('./middleware/authMiddleware');
+
 app.get("/", (req, res) => {
   res.json({ message: "Supplier Eval API is running" });
 });
 
-app.use('/api/evaluations', require('./routes/evaluations'));
-app.use('/api/employees',   require('./routes/employees'));
-app.use('/api/suppliers',   require('./routes/suppliers'));
-app.use('/api/criteria',    require('./routes/criteria'));
-app.use('/api/sessions',    require('./routes/sessions'));
+app.use('/api/auth',        require('./routes/auth'));          // public
+app.use('/api/evaluations', requireAuth, require('./routes/evaluations'));
+app.use('/api/employees',   requireAuth, require('./routes/employees'));
+app.use('/api/suppliers',   requireAuth, require('./routes/suppliers'));
+app.use('/api/criteria',    requireAuth, require('./routes/criteria'));
+app.use('/api/sessions',    requireAuth, require('./routes/sessions'));
 
 pool.connect()
   .then(client => {
