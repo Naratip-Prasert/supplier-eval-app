@@ -20,7 +20,9 @@ export const DEPT_JOB_MAP = {
 
 export const PRODUCT_TYPE_OPTIONS = ["สินค้า", "บริการ", "สินค้าและบริการ"];
 
-export const PRE_EVAL_OPTIONS = ["New Supplier / ผู้ขายรายใหม่"];
+export const PRE_PERIOD_OPTIONS = [
+  "New Supplier / ผู้ขายรายใหม่",
+];
 
 export const EVAL_PERIOD_OPTIONS = [
   "Monthly / รายเดือน",
@@ -46,11 +48,11 @@ export const GRADE_MAP = {
 };
 
 export const GRADE_GUIDE = [
-  { g: "A", range: "90-100", label: "ผ่านการรับรอง (Approved)",          color: "#1b5e20" },
-  { g: "B", range: "80-89",  label: "ผ่านเงื่อนไข (Conditional)",        color: "#1565c0" },
-  { g: "C", range: "70-79",  label: "ต้องปรับปรุง (Improvement Required)",color: "#e65100" },
-  { g: "D", range: "60-69",  label: "ไม่ผ่าน — ระงับ (Suspended)",       color: "#b71c1c" },
-  { g: "F", range: "< 60",   label: "ไม่ผ่าน — ตัดออก (Disqualified)",   color: "#4a0000" },
+  { g: "A", range: "≥ 90", label: "ผ่านการรับรอง (Approved)",          color: "#1b5e20" },
+  { g: "B", range: "≥ 80", label: "ผ่านเงื่อนไข (Conditional)",        color: "#1565c0" },
+  { g: "C", range: "≥ 70", label: "ต้องปรับปรุง (Improvement Required)",color: "#e65100" },
+  { g: "D", range: "≥ 60", label: "ไม่ผ่าน — ระงับ (Suspended)",       color: "#b71c1c" },
+  { g: "F", range: "< 60", label: "ไม่ผ่าน — ตัดออก (Disqualified)",   color: "#4a0000" },
 ];
 
 export const PRE_CRITERIA = [
@@ -1293,12 +1295,11 @@ export const POST_CRITERIA = [
   },
 ];
 
-// Keep legacy export for backward compatibility
-export const CRITERIA = PRE_CRITERIA;
-
 export function getGrade(score) {
-  if (score >= 81) return "A";
-  if (score >= 61) return "B";
-  if (score >= 51) return "C";
-  return "D";
+  const s = Math.round(score * 100) / 100; // round to 2dp before compare
+  if (s >= 90) return "A";
+  if (s >= 80) return "B";
+  if (s >= 70) return "C";
+  if (s >= 60) return "D";
+  return "F";
 }

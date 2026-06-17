@@ -22,7 +22,7 @@ export function Clock() {
 }
 
 // ------ Header ----------------------------------------------
-export function Header({ subtitle, backLabel, onBack, titleOverride, user, onLogout }) {
+export function Header({ subtitle, backLabel, onBack, titleOverride, user, onLogout, profilePic }) {
   return (
     <div style={{
       background: "#1a6b1a", color: "#fff", padding: "10px 20px",
@@ -56,9 +56,24 @@ export function Header({ subtitle, backLabel, onBack, titleOverride, user, onLog
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
         {user && (
-          <div style={{ textAlign: "right", lineHeight: 1.3 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{user.fullName}</div>
-            <div style={{ fontSize: 11, color: "#a5d6a7" }}>{user.role} · {user.department}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{
+              width: 34, height: 34, borderRadius: "50%",
+              border: "2px solid rgba(255,255,255,0.6)",
+              overflow: "hidden", flexShrink: 0,
+              background: "rgba(255,255,255,0.2)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 12, fontWeight: 700, color: "#fff",
+            }}>
+              {profilePic
+                ? <img src={profilePic} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                : (user.fullName || "?").split(" ").map((w) => w[0] ?? "").join("").slice(0, 2).toUpperCase()
+              }
+            </div>
+            <div style={{ textAlign: "right", lineHeight: 1.3 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{user.fullName}</div>
+              <div style={{ fontSize: 11, color: "#a5d6a7" }}>{user.role} · {user.department}</div>
+            </div>
           </div>
         )}
         <Clock />

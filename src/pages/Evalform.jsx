@@ -43,15 +43,16 @@ function initWeights(criteria) {
 
 // ---- main component ----------------------------------------
 
-export default function EvalForm({ formData, onBack, onDone }) {
+export default function EvalForm({ formData, savedState, user, profilePic, onBack, onDone }) {
   const CRITERIA = formData.evalType === "post_eval" ? POST_CRITERIA : PRE_CRITERIA;
 
   const { showConfirm, ModalEl } = useModal();
-  const [scores,       setScores]       = useState({});
-  const [notes,        setNotes]        = useState({});
+  const [scores,       setScores]       = useState(() => savedState?.scores      ?? {});
+  const [notes,        setNotes]        = useState(() => savedState?.notes       ?? {});
   const [missingItems, setMissingItems] = useState(null); // null = closed, array = open
+  const [legalStatus, setLegalStatus]   = useState(() => savedState?.legalStatus ?? null);
 
-  const [ws, setWs] = useState(() => initWeights(CRITERIA));
+  const [ws, setWs] = useState(() => savedState?.ws ?? initWeights(CRITERIA));
   const sectionWeights = ws.sections;
   const itemWeights    = ws.items;
 
@@ -144,18 +145,27 @@ export default function EvalForm({ formData, onBack, onDone }) {
     });
   };
 
+  const handleSubmitDisqualified = async () => {
+    const ok = await showConfirm(
+      "ผู้ประเมินจะถูก Disqualified ทันที\nยืนยันส่งผลการประเมิน 'ไม่ผ่าน' ใช่ไหม?",
+      "ส่งผล — ไม่ผ่าน (Disqualified)"
+    );
+    if (ok) onDone({ scores: {}, notes: {}, totalScore: 0, grade: "F", sectionWeights, weights: itemWeights, disqualified: true, legalStatus: "fail", ws });
+  };
+
   const handleBack = async () => {
     const ok = await showConfirm("ต้องการกลับหน้าหลักใช่ไหม?\nข้อมูลที่กรอกไว้ทั้งหมดจะหายไป", "กลับหน้าหลัก");
     if (ok) onBack();
   };
 
   const handleSubmit = () => {
+    if (legalStatus !== "pass") return;
     const unanswered = allItems.filter((item) => !scores[item.no]);
     if (unanswered.length > 0) {
       setMissingItems(unanswered);
       return;
     }
-    onDone({ scores, notes, totalScore, grade, sectionWeights, weights: itemWeights });
+    onDone({ scores, notes, totalScore, grade, sectionWeights, weights: itemWeights, legalStatus, ws });
   };
 
 
@@ -176,6 +186,8 @@ export default function EvalForm({ formData, onBack, onDone }) {
         subtitle={subtitle}
         backLabel="← กลับหน้าหลัก"
         onBack={handleBack}
+        user={user}
+        profilePic={profilePic}
       />
 
       {/* DEV: fill-all button */}
@@ -203,6 +215,17 @@ export default function EvalForm({ formData, onBack, onDone }) {
 
       <div style={{ maxWidth: 1280, margin: "0 auto", padding: "16px 16px 0" }}>
         <InfoBar formData={formData} evalLabel={evalLabel} />
+        <LegalComplianceCard
+          status={legalStatus}
+          onChange={setLegalStatus}
+          onSubmitDisqualified={handleSubmitDisqualified}
+        />
+
+        <div style={{
+          opacity: legalStatus !== "pass" ? 0.42 : 1,
+          pointerEvents: legalStatus !== "pass" ? "none" : "auto",
+          transition: "opacity 0.25s",
+        }}>
 
         {/* Scoring guide */}
         <div style={{
@@ -323,6 +346,8 @@ export default function EvalForm({ formData, onBack, onDone }) {
             </tbody>
           </table>
         </div>
+
+        </div>{/* /locked wrapper */}
       </div>
 
       {/* Sticky score bar */}
@@ -364,7 +389,13 @@ export default function EvalForm({ formData, onBack, onDone }) {
           }}>{grade}</span>
         </div>
 
-        <GreenButton onClick={handleSubmit} style={{ padding: "10px 32px", fontSize: 15 }}>
+        <GreenButton
+          onClick={handleSubmit}
+          style={{
+            padding: "10px 32px", fontSize: 15,
+            ...(legalStatus !== "pass" && { opacity: 0.38, cursor: "not-allowed", filter: "grayscale(40%)" }),
+          }}
+        >
           Submit Supplier Evaluation
         </GreenButton>
       </div>
@@ -373,6 +404,137 @@ export default function EvalForm({ formData, onBack, onDone }) {
 }
 
 // ---- Sub-components ----------------------------------------
+
+function LegalComplianceCard({ status, onChange, onSubmitDisqualified }) {
+  const isFail = status === "fail";
+  const isPass = status === "pass";
+
+  const headerBg = isFail
+    ? "linear-gradient(90deg,#b71c1c,#e53935)"
+    : isPass
+    ? "linear-gradient(90deg,#1a6b1a,#2e7d32)"
+    : "linear-gradient(90deg,#bf360c,#e64a19)";
+
+  return (
+    <div style={{
+      marginBottom: 12, background: "#fff", borderRadius: 8,
+      border: `2px solid ${isFail ? "#b71c1c" : isPass ? "#2e7d32" : "#e64a19"}`,
+      boxShadow: "0 2px 10px rgba(0,0,0,0.08)",
+      overflow: "hidden",
+      transition: "border-color 0.2s",
+    }}>
+      {/* Header */}
+      <div style={{
+        background: headerBg, padding: "10px 16px",
+        display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+      }}>
+        <span style={{
+          background: "rgba(255,255,255,0.22)", color: "#fff", borderRadius: 5,
+          padding: "3px 10px", fontSize: 11, fontWeight: 800, letterSpacing: 0.5, flexShrink: 0,
+        }}>
+          ขั้นตอนที่ 1 — บังคับ
+        </span>
+        <span style={{ fontSize: 14, color: "#fff", fontWeight: 700 }}>
+          การปฏิบัติตามกฎหมายและข้อบังคับที่เกี่ยวข้อง
+          <span style={{ fontWeight: 400, fontSize: 13 }}> (Legal & Regulatory Compliance)</span>
+        </span>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "rgba(255,255,255,0.88)", fontWeight: 600, flexShrink: 0 }}>
+          {!status && "⚠ กรุณาเลือกสถานะก่อน — ยังทำประเมินไม่ได้"}
+          {isPass && "✓ ผ่านการตรวจสอบ — สามารถดำเนินการประเมินต่อได้"}
+          {isFail && "ไม่สารมารถดำเนินการประเมินต่อได้ และต้องส่งผลการประเมินทันที"}
+        </span>
+      </div>
+
+      {/* Options row */}
+      <div style={{ padding: "14px 16px", display: "flex", gap: 12, alignItems: "stretch", flexWrap: "wrap" }}>
+        {/* Fail option */}
+        <LegalOption
+          selected={isFail}
+          onClick={() => onChange("fail")}
+          badge="ไม่ผ่าน (Disqualified)"
+          badgeColor="#b71c1c"
+          activeColor="#b71c1c"
+          activeBg="#fff5f5"
+          label="ไม่ปฏิบัติตามกฎหมาย มีประวัติถูกดำเนินคดี"
+        />
+
+        {/* Submit button — appears right next to fail when selected */}
+        {isFail && (
+          <button
+            onClick={onSubmitDisqualified}
+            style={{
+              background: "linear-gradient(135deg,#b71c1c,#e53935)",
+              color: "#fff", border: "none", borderRadius: 8,
+              padding: "10px 20px", fontSize: 14, fontWeight: 700,
+              cursor: "pointer", fontFamily: "Sarabun, sans-serif",
+              boxShadow: "0 4px 14px rgba(183,28,28,0.35)",
+              whiteSpace: "nowrap", alignSelf: "center", flexShrink: 0,
+              letterSpacing: 0.2,
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.86")}
+            onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
+          >
+            ส่งผลการประเมิน →
+          </button>
+        )}
+
+        {/* Pass option */}
+        <LegalOption
+          selected={isPass}
+          onClick={() => onChange("pass")}
+          badge="ผ่าน"
+          badgeColor="#2e7d32"
+          activeColor="#2e7d32"
+          activeBg="#f1f8e9"
+          label="ปฏิบัติตามกฎหมายครบถ้วน ไม่มีประวัติถูกดำเนินคดี มีใบอนุญาตครบถ้วนตาม TOR"
+        />
+      </div>
+    </div>
+  );
+}
+
+function LegalOption({ selected, onClick, badge, badgeColor, activeColor, activeBg, label }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        flex: 1, minWidth: 240,
+        border: `2px solid ${selected ? activeColor : hovered ? activeColor + "66" : "#e0e0e0"}`,
+        borderRadius: 8, padding: "12px 14px",
+        background: selected ? activeBg : hovered ? activeBg : "#fafafa",
+        cursor: "pointer", transition: "all 0.15s",
+        display: "flex", alignItems: "flex-start", gap: 10,
+      }}
+    >
+      {/* Radio dot */}
+      <div style={{
+        width: 18, height: 18, borderRadius: "50%", flexShrink: 0, marginTop: 2,
+        border: `2px solid ${selected ? activeColor : "#ccc"}`,
+        background: selected ? activeColor : "transparent",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        transition: "all 0.15s",
+      }}>
+        {selected && <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#fff" }} />}
+      </div>
+      <div style={{ flex: 1, lineHeight: 1.5 }}>
+        <span style={{ fontSize: 13, fontWeight: selected ? 700 : 500, color: selected ? activeColor : "#444" }}>
+          {label}
+        </span>
+        {" "}
+        <span style={{
+          background: badgeColor, color: "#fff",
+          borderRadius: 4, padding: "1px 8px", fontSize: 11, fontWeight: 700,
+          verticalAlign: "middle", whiteSpace: "nowrap",
+        }}>
+          {badge}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 function InfoBar({ formData, evalLabel }) {
   const now   = new Date();

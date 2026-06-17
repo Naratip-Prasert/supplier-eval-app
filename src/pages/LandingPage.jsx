@@ -2,16 +2,117 @@
 //  pages/LandingPage.jsx
 // ============================================================
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Header, CustomSelect, GreenInput, GreenButton, useModal } from "../components";
 import { authFetch } from "../utils/api";
-import { Info, Loader2, AlertCircle } from "lucide-react";
-import { PRODUCT_TYPE_OPTIONS, EVAL_PERIOD_OPTIONS } from "../constants";
+import { Info, Loader2, AlertCircle, User, LogOut, ChevronDown } from "lucide-react";
+import { PRODUCT_TYPE_OPTIONS, EVAL_PERIOD_OPTIONS, PRE_PERIOD_OPTIONS } from "../constants";
 
 const PRODUCT_MAP   = { "สินค้า": "goods", "บริการ": "services", "สินค้าและบริการ": "both" };
 const PRODUCT_LABEL = { goods: "สินค้า", services: "บริการ", both: "สินค้าและบริการ" };
 
-export default function LandingPage({ authUser, onSubmit, onLogout }) {
+function ProfileDropdown({ user, profilePic, themeColor, onProfile, onLogout }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+
+  const initials = (user.fullName || "?")
+    .split(" ").map((w) => w[0] ?? "").join("").slice(0, 2).toUpperCase();
+
+  return (
+    <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          display: "flex", alignItems: "center", gap: 12,
+          background: "#fff",
+          border: `2px solid ${open ? themeColor : "#d0d0d0"}`,
+          borderRadius: 50,
+          padding: "6px 14px 6px 6px",
+          cursor: "pointer",
+          boxShadow: open
+            ? `0 0 0 3px ${themeColor}22, 0 4px 12px rgba(0,0,0,0.1)`
+            : "0 2px 8px rgba(0,0,0,0.09)",
+          transition: "border-color 0.15s, box-shadow 0.15s",
+          fontFamily: "Sarabun, sans-serif",
+        }}
+        onMouseEnter={(e) => {
+          if (!open) e.currentTarget.style.borderColor = themeColor;
+        }}
+        onMouseLeave={(e) => {
+          if (!open) e.currentTarget.style.borderColor = "#d0d0d0";
+        }}
+      >
+        <div style={{
+          width: 44, height: 44, borderRadius: "50%",
+          background: themeColor, color: "#fff",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 17, fontWeight: 700, flexShrink: 0, letterSpacing: 0.5,
+          overflow: "hidden",
+        }}>
+          {profilePic
+            ? <img src={profilePic} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            : initials}
+        </div>
+        <div style={{ textAlign: "left", lineHeight: 1.35 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1a1a" }}>{user.fullName}</div>
+          <div style={{ fontSize: 12, color: "#777", marginTop: 1 }}>
+            {user.empId} · {user.department}
+          </div>
+        </div>
+        <ChevronDown
+          size={16}
+          style={{
+            color: "#999", marginLeft: 2, flexShrink: 0,
+            transform: open ? "rotate(180deg)" : "rotate(0deg)",
+            transition: "transform 0.2s",
+          }}
+        />
+      </button>
+
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 8px)", left: 0,
+          background: "#fff", borderRadius: 10,
+          boxShadow: "0 8px 32px rgba(0,0,0,0.15)",
+          border: "1px solid #e8e8e8",
+          zIndex: 300, minWidth: 200, overflow: "hidden",
+        }}>
+          {[
+            { icon: <User size={15} />, label: "ดูโปรไฟล์",    action: () => { setOpen(false); onProfile(); }, color: "#1a1a1a", hover: "#f0f7f0" },
+            { icon: <LogOut size={15} />, label: "ออกจากระบบ", action: () => { setOpen(false); onLogout(); },  color: "#c62828", hover: "#fff5f5" },
+          ].map(({ icon, label, action, color, hover }, i, arr) => (
+            <button
+              key={label}
+              onClick={action}
+              style={{
+                display: "flex", alignItems: "center", gap: 10,
+                width: "100%", textAlign: "left", padding: "12px 16px",
+                fontSize: 14, background: "none",
+                border: "none",
+                borderTop: i > 0 ? "1px solid #f0f0f0" : "none",
+                cursor: "pointer", fontFamily: "Sarabun, sans-serif", color,
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = hover)}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+            >
+              <span style={{ color, display: "flex" }}>{icon}</span>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, onProfile }) {
   const { showAlert, ModalEl } = useModal();
 
   // Derive role from auth token — no manual role selector needed
@@ -93,7 +194,16 @@ export default function LandingPage({ authUser, onSubmit, onLogout }) {
     <div style={{ minHeight: "100vh", background: "#fff", fontFamily: "Sarabun, sans-serif" }}>
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       {ModalEl}
-      <Header user={authUser} onLogout={onLogout} />
+      <Header />
+      <div style={{ padding: "14px 20px" }}>
+        <ProfileDropdown
+          user={authUser}
+          profilePic={profilePic}
+          themeColor={themeColor}
+          onProfile={onProfile}
+          onLogout={onLogout}
+        />
+      </div>
 
       <div style={{ maxWidth: 700, margin: "0 auto", padding: "40px 20px" }}>
         <h1 style={{ fontSize: 26, fontWeight: 700, marginBottom: 24, textAlign: "center" }}>
@@ -181,7 +291,10 @@ export default function LandingPage({ authUser, onSubmit, onLogout }) {
                       name="evaltype"
                       value={v}
                       checked={evalType === v}
-                      onChange={() => { setEvalType(v); setPeriod(""); }}
+                      onChange={() => {
+                        setEvalType(v);
+                        setPeriod(v === "new_supplier" ? PRE_PERIOD_OPTIONS[0] : "");
+                      }}
                       style={{ accentColor: themeColor }}
                     />
                     {label}
@@ -201,7 +314,7 @@ export default function LandingPage({ authUser, onSubmit, onLogout }) {
                   {/* Vendor Code */}
                   <div style={{ flex: 1 }}>
                     <GreenInput
-                      label="รหัสผู้ขาย/vendor code"
+                      label="เลขประจำตัวผู้เสียภาษี/Tex ID"
                       required
                       value={vendorCode}
                       onChange={(v) => {
@@ -281,13 +394,27 @@ export default function LandingPage({ authUser, onSubmit, onLogout }) {
                   </div>
 
                   {/* Period */}
-                  <CustomSelect
-                    label="รอบการประเมิน"
-                    required
-                    options={EVAL_PERIOD_OPTIONS}
-                    value={period}
-                    onChange={setPeriod}
-                  />
+                  {evalType === "new_supplier" ? (
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#222" }}>
+                        รอบการประเมิน<span style={{ color: "#e53935" }}>*</span>
+                      </div>
+                      <div style={{
+                        background: "#f0f0f0", border: "1.5px solid #aaa",
+                        borderRadius: 8, padding: "8px 14px", fontSize: 14, color: "#444",
+                      }}>
+                        {PRE_PERIOD_OPTIONS[0]}
+                      </div>
+                    </div>
+                  ) : (
+                    <CustomSelect
+                      label="รอบการประเมิน"
+                      required
+                      options={EVAL_PERIOD_OPTIONS}
+                      value={period}
+                      onChange={setPeriod}
+                    />
+                  )}
                 </div>
               </div>
             )}

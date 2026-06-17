@@ -29,7 +29,7 @@ const card = (extra = {}) => ({
   ...extra,
 });
 
-export default function ResultPage({ formData, result, onBack, onBackToEval }) {
+export default function ResultPage({ formData, result, user, profilePic, onBack, onBackToEval }) {
   const { showConfirm, ModalEl } = useModal();
   const { totalScore, grade, scores = {} } = result;
   const gradeColor = GRADE_MAP[grade];
@@ -154,7 +154,10 @@ export default function ResultPage({ formData, result, onBack, onBackToEval }) {
 
         /* ── PRINT ── */
         @media print {
-          @page { size: A4 portrait; margin: 12mm 14mm; }
+          /* margin: 0 removes browser's auto date/URL/page-number headers */
+          @page { size: A4 landscape; margin: 0; }
+
+          html { zoom: 0.85; }
 
           body {
             -webkit-print-color-adjust: exact;
@@ -162,6 +165,7 @@ export default function ResultPage({ formData, result, onBack, onBackToEval }) {
             background: #fff !important;
             font-family: Sarabun, sans-serif;
             font-size: 10pt;
+            margin: 0; padding: 0;
           }
 
           /* hide UI chrome */
@@ -171,10 +175,18 @@ export default function ResultPage({ formData, result, onBack, onBackToEval }) {
           /* show print document header */
           .print-doc-header { display: block !important; }
 
-          /* remove app background */
+          /* manual page margins (replaces the zeroed @page margin) */
           .result-outer-bg {
             background: #fff !important;
             min-height: unset !important;
+            padding: 10mm 12mm !important;
+            box-sizing: border-box;
+          }
+
+          /* full-width inner wrapper */
+          .result-content-inner {
+            max-width: 100% !important;
+            padding: 0 !important;
           }
 
           /* expand Score Detail — remove scroll clip */
@@ -190,13 +202,7 @@ export default function ResultPage({ formData, result, onBack, onBackToEval }) {
           /* new page before Score Detail */
           .print-break-before { page-break-before: always; }
 
-          /* collapse summary+radar grid → single column */
-          .result-main-grid { display: block !important; }
-          .result-main-grid > * { margin-bottom: 12px; }
-
-          /* collapse bottom grid → single column */
-          .result-bottom-grid { display: block !important; }
-          .result-bottom-grid > * { margin-bottom: 12px; }
+          /* keep grids same as screen (landscape fits) */
 
           /* signature: keep on same page */
           .result-signature { page-break-inside: avoid; }
@@ -214,10 +220,12 @@ export default function ResultPage({ formData, result, onBack, onBackToEval }) {
             subtitle={subtitle}
             backLabel="← กลับหน้าประเมิน"
             onBack={handleBackToEval}
+            user={user}
+            profilePic={profilePic}
           />
         </div>
 
-        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "20px 16px" }}>
+        <div className="result-content-inner" style={{ maxWidth: 1200, margin: "0 auto", padding: "20px 16px" }}>
 
           {/* ── Print-only document header ── */}
           <div className="print-doc-header" style={{ marginBottom: 18, paddingBottom: 12, borderBottom: "2.5px solid #1a6b1a" }}>

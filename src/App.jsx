@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { authFetch } from "./utils/api";
 import LandingPage        from "./pages/LandingPage";
 import EvalForm           from "./pages/Evalform";
 import ResultPage         from "./pages/Resultpage";
+import ProfilePage        from "./pages/ProfilePage";
 import LoginPage          from "./pages/LoginPage";
 import RegisterPage       from "./pages/RegisterPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
@@ -23,10 +25,20 @@ function getStoredUser() {
 }
 
 export default function App() {
-  const [user,     setUser]     = useState(() => getStoredUser());
-  const [page,     setPage]     = useState("landing");
-  const [formData, setFormData] = useState({});
-  const [result,   setResult]   = useState(null);
+  const [user,           setUser]           = useState(() => getStoredUser());
+  const [page,           setPage]           = useState("landing");
+  const [formData,       setFormData]       = useState({});
+  const [result,         setResult]         = useState(null);
+  const [evalSavedState, setEvalSavedState] = useState(null);
+  const [profilePic,     setProfilePic]     = useState(null);
+
+  useEffect(() => {
+    if (!user) { setProfilePic(null); return; }
+    authFetch("/api/employees/me")
+      .then((r) => r.json())
+      .then((d) => setProfilePic(d.profilePicture || null))
+      .catch(() => {});
+  }, [user?.empId]);
 
   // ── Password reset via email link ────────────────────────────
   const resetToken = new URLSearchParams(window.location.search).get("reset");
@@ -56,6 +68,7 @@ export default function App() {
     setUser(null);
     setFormData({});
     setResult(null);
+    setEvalSavedState(null);
     setPage("landing");
   };
 
@@ -82,12 +95,29 @@ export default function App() {
   }
 
   // ── Logged in: show main app pages ───────────────────────────
+  if (page === "profile") {
+    return (
+      <ProfilePage
+        authUser={user}
+        onBack={() => setPage("landing")}
+        onProfileUpdate={(token, userData, pic) => {
+          localStorage.setItem("spe_token", token);
+          setUser(userData);
+          if (pic !== undefined) setProfilePic(pic);
+        }}
+      />
+    );
+  }
+
   if (page === "eval") {
     return (
       <EvalForm
         formData={formData}
-        onBack={() => setPage("landing")}
-        onDone={(res) => { setResult(res); setPage("result"); }}
+        savedState={evalSavedState}
+        user={user}
+        profilePic={profilePic}
+        onBack={() => { setEvalSavedState(null); setPage("landing"); }}
+        onDone={(res) => { setEvalSavedState(res); setResult(res); setPage("result"); }}
       />
     );
   }
@@ -97,10 +127,13 @@ export default function App() {
       <ResultPage
         formData={formData}
         result={result}
+        user={user}
+        profilePic={profilePic}
         onBackToEval={() => setPage("eval")}
         onBack={() => {
           setFormData({});
           setResult(null);
+          setEvalSavedState(null);
           setPage("landing");
         }}
       />
@@ -110,8 +143,10 @@ export default function App() {
   return (
     <LandingPage
       authUser={user}
+      profilePic={profilePic}
       onSubmit={(data) => { setFormData(data); setPage("eval"); }}
       onLogout={handleLogout}
+      onProfile={() => setPage("profile")}
     />
   );
 }

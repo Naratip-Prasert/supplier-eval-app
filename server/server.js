@@ -15,7 +15,7 @@ app.use(cors({
   },
   credentials: true,
 }));
-app.use(express.json());
+app.use(express.json({ limit: '8mb' }));
 
 // ── Request logger ────────────────────────────────────────────
 app.use((req, res, next) => {
@@ -46,7 +46,10 @@ app.use('/api/criteria',    requireAuth, require('./routes/criteria'));
 app.use('/api/sessions',    requireAuth, require('./routes/sessions'));
 
 pool.connect()
-  .then(client => {
+  .then(async client => {
+    await client.query(
+      `ALTER TABLE employees ADD COLUMN IF NOT EXISTS profile_picture TEXT`
+    ).catch(() => {});
     client.release();
     console.log('✅ PostgreSQL connected');
     app.listen(PORT, () =>
