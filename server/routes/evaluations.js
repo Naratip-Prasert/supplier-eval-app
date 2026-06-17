@@ -18,11 +18,11 @@ async function computeScoreAndGrade(client, scoresInput, criteriaMap) {
   let totalRawScore      = 0;
   let totalPossibleWeight = 0;
 
+  // Use ALL submitted criteria (with their submitted weights) so the score
+  // is correct even for criteria codes not yet in the DB.
   for (const code of Object.keys(scoresInput)) {
-    const criterion = criteriaMap[code];
-    if (!criterion) continue;
     const entry  = scoresInput[code];
-    const weight = parseFloat(entry.weight ?? criterion.default_weight);
+    const weight = parseFloat(entry.weight ?? criteriaMap[code]?.default_weight ?? 1);
     totalPossibleWeight += weight;
     if (entry.score != null) {
       totalRawScore += (parseFloat(entry.score) / 5) * weight;
@@ -94,18 +94,26 @@ router.post('/', async (req, res) => {
     }
     const supplier = supResult.rows[0];
 
-    // 3. BU permission check
+    // 3. BU permission check (default-allow when no permissions are defined for this employee)
     if (employee.role === 'BU') {
-      const permResult = await client.query(
-        `SELECT 1 FROM employee_supplier_permissions
-          WHERE employee_id = $1 AND supplier_id = $2`,
-        [employee.id, supplier.id]
+      const anyPerm = await client.query(
+        `SELECT 1 FROM employee_supplier_permissions WHERE employee_id = $1 LIMIT 1`,
+        [employee.id]
       );
-      if (permResult.rows.length === 0) {
-        await client.query('ROLLBACK');
-        console.warn(`[evaluations] BU ${employeeId} ไม่มีสิทธิ์ประเมิน vendor ${vendorCode}`);
-        return res.status(403).json({ message: 'ไม่มีสิทธิ์ประเมินซัพพลายเออร์นี้' });
+      if (anyPerm.rows.length > 0) {
+        // Employee has an explicit permission list — enforce it
+        const permResult = await client.query(
+          `SELECT 1 FROM employee_supplier_permissions
+            WHERE employee_id = $1 AND supplier_id = $2`,
+          [employee.id, supplier.id]
+        );
+        if (permResult.rows.length === 0) {
+          await client.query('ROLLBACK');
+          console.warn(`[evaluations] BU ${employeeId} ไม่มีสิทธิ์ประเมิน vendor ${vendorCode}`);
+          return res.status(403).json({ message: 'ไม่มีสิทธิ์ประเมินซัพพลายเออร์นี้' });
+        }
       }
+      // If no permissions defined at all → default allow
     }
 
     // 4. Validate eval_type
@@ -162,12 +170,10 @@ router.post('/', async (req, res) => {
     const criteriaMap = {};
     criteriaResult.rows.forEach(c => { criteriaMap[c.code] = c; });
 
-    // Reject if any submitted code is unknown
+    // Log unknown codes but do not reject (criteria table may be incomplete)
     const unknownCodes = codes.filter(c => !criteriaMap[c]);
     if (unknownCodes.length > 0) {
-      await client.query('ROLLBACK');
-      console.warn(`[evaluations] พบรหัสเกณฑ์ที่ไม่มีในระบบ: ${unknownCodes.join(', ')}`);
-      return res.status(400).json({ message: 'พบรหัสเกณฑ์ที่ไม่ถูกต้อง', unknownCodes });
+      console.warn(`[evaluations] รหัสเกณฑ์ไม่มีในตาราง (ข้ามการเก็บ): ${unknownCodes.join(', ')}`);
     }
 
     // 7. Compute total score and grade on the server (ignore frontend values)
@@ -183,13 +189,14 @@ router.post('/', async (req, res) => {
     );
     const evaluationId = evalResult.rows[0].id;
 
-    // 9. Insert evaluation_scores
+    // 9. Insert evaluation_scores (only for criteria that exist in DB)
     for (const code of codes) {
       const criterion = criteriaMap[code];
-      const entry     = scores[code];
-      const weight    = parseFloat(entry.weight ?? criterion.default_weight);
-      const score     = entry.score != null ? parseInt(entry.score, 10) : null;
-      const note      = entry.note ?? '';
+      if (!criterion) continue; // skip codes not in criteria table
+      const entry  = scores[code];
+      const weight = parseFloat(entry.weight ?? criterion.default_weight);
+      const score  = entry.score != null ? parseInt(entry.score, 10) : null;
+      const note   = entry.note ?? '';
 
       await client.query(
         `INSERT INTO evaluation_scores (evaluation_id, criterion_id, weight, score, note)
@@ -236,6 +243,40 @@ router.get('/', async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error('GET /api/evaluations error:', err);
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+  }
+});
+
+// ── GET /api/evaluations/my ───────────────────────────────────
+// Returns all evaluations submitted by the current user
+router.get('/my', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+         ev.id              AS "evalId",
+         s.vendor_code      AS "vendorCode",
+         s.supplier_name    AS "supplierName",
+         es.eval_type       AS "evalType",
+         es.period,
+         ev.product_type    AS "productType",
+         ev.total_score     AS "totalScore",
+         ev.grade,
+         ev.submitted_at    AS "submittedAt",
+         es.status          AS "sessionStatus",
+         es.final_score     AS "finalScore",
+         es.final_grade     AS "finalGrade"
+       FROM evaluations ev
+       JOIN evaluation_sessions es ON es.id = ev.session_id
+       JOIN suppliers           s  ON s.id  = es.supplier_id
+       JOIN employees           emp ON emp.id = ev.employee_id
+       WHERE emp.employee_id = $1
+       ORDER BY ev.submitted_at DESC
+       LIMIT 100`,
+      [req.user.empId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('GET /api/evaluations/my error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
 });

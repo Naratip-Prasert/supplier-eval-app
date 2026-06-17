@@ -5,13 +5,13 @@
 import { useState, useRef, useEffect } from "react";
 import { Header, CustomSelect, GreenInput, GreenButton, useModal } from "../components";
 import { authFetch } from "../utils/api";
-import { Info, Loader2, AlertCircle, User, LogOut, ChevronDown } from "lucide-react";
+import { Info, Loader2, AlertCircle, User, LogOut, ChevronDown, ClipboardList } from "lucide-react";
 import { PRODUCT_TYPE_OPTIONS, EVAL_PERIOD_OPTIONS, PRE_PERIOD_OPTIONS } from "../constants";
 
 const PRODUCT_MAP   = { "สินค้า": "goods", "บริการ": "services", "สินค้าและบริการ": "both" };
 const PRODUCT_LABEL = { goods: "สินค้า", services: "บริการ", both: "สินค้าและบริการ" };
 
-function ProfileDropdown({ user, profilePic, themeColor, onProfile, onLogout }) {
+function ProfileDropdown({ user, profilePic, themeColor, onProfile, onHistory, onLogout }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -85,8 +85,9 @@ function ProfileDropdown({ user, profilePic, themeColor, onProfile, onLogout }) 
           zIndex: 300, minWidth: 200, overflow: "hidden",
         }}>
           {[
-            { icon: <User size={15} />, label: "ดูโปรไฟล์",    action: () => { setOpen(false); onProfile(); }, color: "#1a1a1a", hover: "#f0f7f0" },
-            { icon: <LogOut size={15} />, label: "ออกจากระบบ", action: () => { setOpen(false); onLogout(); },  color: "#c62828", hover: "#fff5f5" },
+            { icon: <User size={15} />,          label: "ดูโปรไฟล์",        action: () => { setOpen(false); onProfile(); }, color: "#1a1a1a", hover: "#f0f7f0" },
+            { icon: <ClipboardList size={15} />, label: "ประวัติการประเมิน", action: () => { setOpen(false); onHistory(); }, color: "#1a1a1a", hover: "#f0f7f0" },
+            { icon: <LogOut size={15} />,        label: "ออกจากระบบ",        action: () => { setOpen(false); onLogout(); },  color: "#c62828", hover: "#fff5f5" },
           ].map(({ icon, label, action, color, hover }, i, arr) => (
             <button
               key={label}
@@ -112,7 +113,7 @@ function ProfileDropdown({ user, profilePic, themeColor, onProfile, onLogout }) 
   );
 }
 
-export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, onProfile }) {
+export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, onProfile, onHistory }) {
   const { showAlert, ModalEl } = useModal();
 
   // Derive role from auth token — no manual role selector needed
@@ -201,6 +202,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
           profilePic={profilePic}
           themeColor={themeColor}
           onProfile={onProfile}
+          onHistory={onHistory}
           onLogout={onLogout}
         />
       </div>
@@ -359,7 +361,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                     }}>
                       {supplierName || (
                         <span style={{ fontStyle: "italic", fontSize: 13 }}>
-                          กรอก Vendor Code ก่อน
+                          กรอก Tex ID ก่อน
                         </span>
                       )}
                     </div>

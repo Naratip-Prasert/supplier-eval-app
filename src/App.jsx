@@ -4,6 +4,7 @@ import LandingPage        from "./pages/LandingPage";
 import EvalForm           from "./pages/Evalform";
 import ResultPage         from "./pages/Resultpage";
 import ProfilePage        from "./pages/ProfilePage";
+import HistoryPage        from "./pages/HistoryPage";
 import LoginPage          from "./pages/LoginPage";
 import RegisterPage       from "./pages/RegisterPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
@@ -95,6 +96,10 @@ export default function App() {
   }
 
   // ── Logged in: show main app pages ───────────────────────────
+  if (page === "history") {
+    return <HistoryPage authUser={user} onBack={() => setPage("landing")} />;
+  }
+
   if (page === "profile") {
     return (
       <ProfilePage
@@ -147,6 +152,7 @@ export default function App() {
       onSubmit={(data) => { setFormData(data); setPage("eval"); }}
       onLogout={handleLogout}
       onProfile={() => setPage("profile")}
+      onHistory={() => setPage("history")}
     />
   );
 }

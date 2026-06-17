@@ -55,7 +55,8 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
   const radarValues  = sectionSummary.map(s => s.max > 0 ? s.got / s.max : 0);
   const RADAR_LABELS = sectionSummary.map(s => s.label);
 
-  const [doneStatus, setDoneStatus] = useState("idle");
+  const [doneStatus,  setDoneStatus]  = useState("idle");
+  const [doneErrMsg,  setDoneErrMsg]  = useState("");
   const [showExport, setShowExport] = useState(false);
   const exportRef = useRef(null);
 
@@ -69,6 +70,7 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
     const ok = await showConfirm("บันทึกผลการประเมินและเสร็จสิ้นใช่ไหม?", "ยืนยันการบันทึก");
     if (!ok) return;
     setDoneStatus("saving");
+    setDoneErrMsg("");
     try {
       const rawScores  = result.scores  ?? {};
       const rawNotes   = result.notes   ?? {};
@@ -98,6 +100,7 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
       setTimeout(onBack, 600);
     } catch (err) {
       console.error("Save failed:", err.message);
+      setDoneErrMsg(err.message || "เชื่อมต่อไม่ได้");
       setDoneStatus("error");
     }
   };
@@ -595,6 +598,17 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
                 </span>
               )}
             </GreenButton>
+            {doneStatus === "error" && doneErrMsg && (
+              <div style={{
+                marginTop: 10, padding: "10px 14px",
+                background: "#fff5f5", border: "1px solid #ffd0d0",
+                borderRadius: 8, fontSize: 13, color: "#c62828",
+                display: "flex", alignItems: "flex-start", gap: 8,
+              }}>
+                <XCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span><strong>สาเหตุ:</strong> {doneErrMsg}</span>
+              </div>
+            )}
           </div>
 
         </div>

@@ -50,6 +50,24 @@ pool.connect()
     await client.query(
       `ALTER TABLE employees ADD COLUMN IF NOT EXISTS profile_picture TEXT`
     ).catch(() => {});
+
+    // Fix grade thresholds to match frontend getGrade() logic
+    await client.query(`
+      INSERT INTO grade_thresholds (grade, min_score, max_score, label_th, label_en, color_hex)
+      VALUES
+        ('A', 90,    100,   'ผ่านการรับรอง',    'Approved',             '#1b5e20'),
+        ('B', 80,    89.99, 'ผ่านเงื่อนไข',     'Conditional',          '#1565c0'),
+        ('C', 70,    79.99, 'ต้องปรับปรุง',     'Improvement Required', '#e65100'),
+        ('D', 60,    69.99, 'ไม่ผ่าน — ระงับ',  'Suspended',            '#b71c1c'),
+        ('F',  0,    59.99, 'ไม่ผ่าน — ตัดออก', 'Disqualified',         '#4a0000')
+      ON CONFLICT (grade) DO UPDATE SET
+        min_score = EXCLUDED.min_score,
+        max_score = EXCLUDED.max_score,
+        label_th  = EXCLUDED.label_th,
+        label_en  = EXCLUDED.label_en,
+        color_hex = EXCLUDED.color_hex
+    `).catch(err => console.warn('grade_thresholds migration warning:', err.message));
+
     client.release();
     console.log('✅ PostgreSQL connected');
     app.listen(PORT, () =>
