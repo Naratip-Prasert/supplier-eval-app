@@ -1,30 +1,30 @@
 'use strict';
-const express = require('express');
-const cors    = require('cors');
-require('dotenv').config();
+const express = require('express'); // express เป็น framework ที่ทำให้ node.js รับ http request ได้ง่าย
+const cors    = require('cors'); // เช็คว่าโดเมนที่เรียกเข้ามา ได้รับอนุญาตให้ดึงข้อมูลจาก API ของเราไหม
+require('dotenv').config(); // ใช้ค่าจาก .env จะได้ไม่ต้องทำ Hardcode
 
 const pool = require('./db');
 
-const app  = express();
+const app  = express(); //สร้าง Express Application — app คือ object หลักที่เราจะ config ทุกอย่างลงไป
 const PORT = process.env.PORT || 5000;
 
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin || /^http:\/\/localhost:\d+$/.test(origin)) cb(null, true);
+app.use(cors({ // app.use(...) คือการเพิ่ม middleware - บอก express ว่าใช้ cor middleware กับทุก req
+  origin: (origin, cb) => {  //กำหนด function ตรวจสอบ origin
+    if (!origin || /^http:\/\/localhost:\d+$/.test(origin)) cb(null, true); // ถ้าไม่มี origin หรือ เป็น localhost ตามด้วยเลขอะไรก็ได้ - ถือว่าอนุญาต = cb(null , true)
     else cb(new Error('Not allowed by CORS'));
   },
   credentials: true,
 }));
-app.use(express.json({ limit: '8mb' }));
+app.use(express.json({ limit: '8mb' })); //บอก Express ให้แปลง JSON ที่ส่งมาใน request body เป็น JavaScript object อัตโนมัติ
 
 // ── Request logger ────────────────────────────────────────────
-app.use((req, res, next) => {
-  const start = Date.now();
+app.use((req, res, next) => { // เพิ่ม middleware ที่จะรันกับทุก request — รับ parameter 3 ตัวเสมอ: req (request), res (response), next (ฟังก์ชันที่บอกให้ไปต่อ)
+  const start = Date.now(); // จดเวลาที่ request เข้ามา (millisecond) — ใช้คำนวณว่า request ใช้เวลานานแค่ไหน
   res.on('finish', () => {
     const ms      = Date.now() - start;
     const status  = res.statusCode;
     const emoji   = status >= 500 ? '❌' : status >= 400 ? '⚠️ ' : '✅';
-    const line    = `${emoji} ${req.method.padEnd(6)} ${req.originalUrl.padEnd(45)} ${status}  (${ms}ms)`;
+    const line    = `${emoji} ${req.method.padEnd(6)} ${req.originalUrl.padEnd(45)} ${status}  (${ms}ms)`; //เลือก emoji ตาม status — 500+ คือ server error (❌), 400+ คือ client error (⚠️), อื่นๆ คือสำเร็จ (✅) — เขียนแบบ ternary ซ้อนกัน
     if (status >= 500)      console.error(line);
     else if (status >= 400) console.warn(line);
     else                    console.log(line);
