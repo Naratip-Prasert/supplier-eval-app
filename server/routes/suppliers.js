@@ -9,14 +9,19 @@ const router = require('express').Router();
 const pool   = require('../db');
 
 // GET /api/suppliers
-// Returns all active suppliers (for dropdowns / autocomplete).
+// ADMIN: returns all suppliers (active + inactive) with isActive field.
+// Others: returns only active suppliers (for dropdowns).
 router.get('/', async (req, res) => {
+  const isAdmin = req.user?.role === 'ADMIN';
   try {
     const result = await pool.query(
-      `SELECT vendor_code AS "vendorCode", supplier_name AS "supplierName", product_type AS "productType"
-         FROM suppliers
-        WHERE is_active = TRUE
-        ORDER BY supplier_name`
+      isAdmin
+        ? `SELECT vendor_code AS "vendorCode", supplier_name AS "supplierName",
+                  product_type AS "productType", is_active AS "isActive"
+             FROM suppliers ORDER BY supplier_name`
+        : `SELECT vendor_code AS "vendorCode", supplier_name AS "supplierName",
+                  product_type AS "productType"
+             FROM suppliers WHERE is_active = TRUE ORDER BY supplier_name`
     );
     res.json(result.rows);
   } catch (err) {
@@ -58,6 +63,36 @@ router.get('/validate', async (req, res) => {
   }
 });
 
+// POST /api/suppliers  (ADMIN only) — add new supplier
+router.post('/', async (req, res) => {
+  if (req.user.role !== 'ADMIN') {
+    return res.status(403).json({ message: 'เฉพาะ Admin เท่านั้น' });
+  }
+  const { vendorCode, supplierName, productType } = req.body;
+  if (!vendorCode?.trim() || !supplierName?.trim()) {
+    return res.status(400).json({ message: 'กรุณากรอก vendorCode และ supplierName' });
+  }
+  const validTypes = ['goods', 'services', 'both'];
+  if (productType && !validTypes.includes(productType)) {
+    return res.status(400).json({ message: 'productType ไม่ถูกต้อง' });
+  }
+  try {
+    const result = await pool.query(
+      `INSERT INTO suppliers (vendor_code, supplier_name, product_type, is_active)
+       VALUES ($1, $2, $3, TRUE)
+       RETURNING vendor_code AS "vendorCode", supplier_name AS "supplierName", product_type AS "productType"`,
+      [vendorCode.trim().toUpperCase(), supplierName.trim(), productType || 'goods']
+    );
+    res.status(201).json({ message: 'เพิ่มซัพพลายเออร์สำเร็จ', supplier: result.rows[0] });
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ message: 'Vendor Code นี้มีอยู่แล้ว' });
+    }
+    console.error('POST /api/suppliers error:', err);
+    res.status(500).json({ message: 'เพิ่มไม่สำเร็จ', error: err.message });
+  }
+});
+
 // GET /api/suppliers/:vendorCode  — fetch single supplier by vendor code
 router.get('/:vendorCode', async (req, res) => {
   try {
@@ -76,6 +111,32 @@ router.get('/:vendorCode', async (req, res) => {
   } catch (err) {
     console.error('GET /api/suppliers/:vendorCode error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+  }
+});
+
+// PATCH /api/suppliers/:vendorCode  (ADMIN only) — update supplier
+router.patch('/:vendorCode', async (req, res) => {
+  if (req.user.role !== 'ADMIN') {
+    return res.status(403).json({ message: 'เฉพาะ Admin เท่านั้น' });
+  }
+  const { supplierName, productType, isActive } = req.body;
+  const fields = [];
+  const params = [];
+  if (supplierName !== undefined) { params.push(supplierName.trim()); fields.push(`supplier_name = $${params.length}`); }
+  if (productType  !== undefined) { params.push(productType);          fields.push(`product_type = $${params.length}`); }
+  if (isActive     !== undefined) { params.push(isActive);             fields.push(`is_active = $${params.length}`); }
+  if (fields.length === 0) return res.status(400).json({ message: 'ไม่มีข้อมูลที่จะอัปเดต' });
+  params.push(req.params.vendorCode.trim());
+  try {
+    const result = await pool.query(
+      `UPDATE suppliers SET ${fields.join(', ')} WHERE vendor_code = $${params.length} RETURNING vendor_code`,
+      params
+    );
+    if (result.rows.length === 0) return res.status(404).json({ message: 'ไม่พบซัพพลายเออร์' });
+    res.json({ message: 'อัปเดตสำเร็จ' });
+  } catch (err) {
+    console.error('PATCH /api/suppliers/:vendorCode error:', err);
+    res.status(500).json({ message: 'อัปเดตไม่สำเร็จ', error: err.message });
   }
 });
 

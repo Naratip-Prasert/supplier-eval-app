@@ -34,19 +34,21 @@ function formatDate(iso) {
   });
 }
 
-export default function HistoryPage({ authUser, onBack }) {
+export default function HistoryPage({ authUser, onBack, onViewDetail }) {
   const [records, setRecords] = useState([]);
   const [status,  setStatus]  = useState("loading");
+  const isAdmin = authUser?.role === "ADMIN";
+  const endpoint = isAdmin ? "/api/evaluations/all" : "/api/evaluations/my";
 
   useEffect(() => {
-    authFetch("/api/evaluations/my")
+    authFetch(endpoint)
       .then((r) => r.json())
       .then((data) => {
         setRecords(Array.isArray(data) ? data : []);
         setStatus("ok");
       })
       .catch(() => setStatus("error"));
-  }, []);
+  }, [endpoint]);
 
   return (
     <div style={{ minHeight: "100vh", background: "#f5f5f5", fontFamily: "Sarabun, sans-serif" }}>
@@ -62,7 +64,7 @@ export default function HistoryPage({ authUser, onBack }) {
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
           <ClipboardList size={20} style={{ color: "#1a6b1a" }} />
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#1a1a1a" }}>
-            ประวัติการประเมินของฉัน
+            {isAdmin ? "ประวัติการประเมินทั้งหมด" : "ประวัติการประเมินของฉัน"}
           </h2>
           {status === "ok" && (
             <span style={{
@@ -111,9 +113,11 @@ export default function HistoryPage({ authUser, onBack }) {
             {records.map((r) => {
               const gc = GRADE_COLOR[r.grade] ?? GRADE_COLOR.F;
               const score = r.totalScore != null ? Number(r.totalScore).toFixed(2) : "—";
+              const clickable = !!onViewDetail;
               return (
                 <div
                   key={r.evalId}
+                  onClick={() => onViewDetail?.(r.evalId)}
                   style={{
                     background: "#fff",
                     border: `1.5px solid ${gc.border}`,
@@ -122,7 +126,11 @@ export default function HistoryPage({ authUser, onBack }) {
                     padding: "16px 20px",
                     display: "flex", alignItems: "center", gap: 16,
                     boxShadow: "0 1px 6px rgba(0,0,0,0.06)",
+                    cursor: clickable ? "pointer" : "default",
+                    transition: "transform .12s, box-shadow .12s",
                   }}
+                  onMouseEnter={e => { if (clickable) { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 4px 14px rgba(0,0,0,0.10)"; }}}
+                  onMouseLeave={e => { if (clickable) { e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = "0 1px 6px rgba(0,0,0,0.06)"; }}}
                 >
                   {/* Grade badge */}
                   <div style={{
@@ -153,17 +161,36 @@ export default function HistoryPage({ authUser, onBack }) {
                         </>
                       )}
                     </div>
+                    {/* Admin: show evaluator name + role */}
+                    {isAdmin && r.evaluatorName && (
+                      <div style={{ marginTop: 5, display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ fontSize: 11, color: "#aaa" }}>โดย:</span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: "#555" }}>{r.evaluatorName}</span>
+                        <span style={{
+                          fontSize: 10, padding: "1px 7px", borderRadius: 8, fontWeight: 700,
+                          background: r.role === "GCP" ? "#e3f2fd" : r.role === "ADMIN" ? "#fce4ec" : "#e8f5e9",
+                          color: r.role === "GCP" ? "#1565c0" : r.role === "ADMIN" ? "#880e4f" : "#1b5e20",
+                        }}>
+                          {r.role}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Score + date */}
-                  <div style={{ textAlign: "right", flexShrink: 0 }}>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: gc.badge, lineHeight: 1 }}>
-                      {score}
+                  {/* Score + date + chevron */}
+                  <div style={{ textAlign: "right", flexShrink: 0, display: "flex", alignItems: "center", gap: 10 }}>
+                    <div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: gc.badge, lineHeight: 1 }}>
+                        {score}
+                      </div>
+                      <div style={{ fontSize: 10, color: "#aaa", marginTop: 2 }}>คะแนน</div>
+                      <div style={{ fontSize: 11, color: "#999", marginTop: 6 }}>
+                        {formatDate(r.submittedAt)}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 10, color: "#aaa", marginTop: 2 }}>คะแนน</div>
-                    <div style={{ fontSize: 11, color: "#999", marginTop: 6 }}>
-                      {formatDate(r.submittedAt)}
-                    </div>
+                    {clickable && (
+                      <ChevronRight size={18} style={{ color: "#ccc", flexShrink: 0 }} />
+                    )}
                   </div>
                 </div>
               );

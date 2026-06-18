@@ -29,7 +29,7 @@ const card = (extra = {}) => ({
   ...extra,
 });
 
-export default function ResultPage({ formData, result, user, profilePic, onBack, onBackToEval }) {
+export default function ResultPage({ formData, result, user, profilePic, onBack, onBackToEval, readOnly = false }) {
   const { showConfirm, ModalEl } = useModal();
   const { totalScore, grade, scores = {} } = result;
   const gradeColor = GRADE_MAP[grade];
@@ -61,6 +61,7 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
   const exportRef = useRef(null);
 
   const handleBackToEval = async () => {
+    if (readOnly) { onBack(); return; }
     const ok = await showConfirm("ต้องการกลับไปแก้ไขแบบประเมินใช่ไหม?", "กลับหน้าประเมิน");
     if (ok) onBackToEval();
   };
@@ -232,7 +233,7 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
           <Header
             titleOverride={`Supplier Performance Evaluation — ${evalLabel} Evaluation`}
             subtitle={subtitle}
-            backLabel="← กลับหน้าประเมิน"
+            backLabel={readOnly ? "← กลับ" : "← กลับหน้าประเมิน"}
             onBack={handleBackToEval}
             user={user}
             profilePic={profilePic}
@@ -593,8 +594,8 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
             </div>
           </div>
 
-          {/* ── Done button ── */}
-          <div className="no-print">
+          {/* ── Done button — hidden in read-only (history view) ── */}
+          {!readOnly && <div className="no-print">
             <GreenButton fullWidth onClick={handleDone} disabled={doneStatus === "saving" || doneStatus === "saved"}>
               {doneStatus === "idle"   && "ยืนยันผลการประเมินและบันทึก"}
               {doneStatus === "saving" && "กำลังบันทึก..."}
@@ -620,7 +621,7 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
                 <span><strong>สาเหตุ:</strong> {doneErrMsg}</span>
               </div>
             )}
-          </div>
+          </div>}
 
         </div>
       </div>

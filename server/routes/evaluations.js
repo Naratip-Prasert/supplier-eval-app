@@ -104,8 +104,8 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ message: 'ประเภทการประเมินไม่ถูกต้อง', field: 'evalType' });
     }
 
-    // Map ADMIN → 'GCP' so the INSERT passes the evaluations.role CHECK constraint
-    const evalRole = ['BU', 'GCP'].includes(employee.role) ? employee.role : 'GCP';
+    // USER, GCP, ADMIN are all valid roles for evaluation submissions
+    const evalRole = ['USER', 'GCP', 'ADMIN'].includes(employee.role) ? employee.role : 'USER';
 
     // 5. Find or create session for (supplier, period, evalType)
     const sessionResult = await client.query(
@@ -162,13 +162,13 @@ router.post('/', async (req, res) => {
     // 7. Compute total score and grade on the server (ignore frontend values)
     const { totalScore, grade } = await computeScoreAndGrade(client, scores, criteriaMap);
 
-    // 8. Insert evaluation record
+    // 8. Insert evaluation record (raw_scores stores every criterion submitted)
     const evalResult = await client.query(
       `INSERT INTO evaluations
-         (session_id, employee_id, role, product_type, status, total_score, grade, submitted_at)
-       VALUES ($1, $2, $3, $4, 'saved', $5, $6, NOW())
+         (session_id, employee_id, role, product_type, status, total_score, grade, submitted_at, raw_scores)
+       VALUES ($1, $2, $3, $4, 'saved', $5, $6, NOW(), $7)
        RETURNING id`,
-      [sessionId, employee.id, evalRole, productType, totalScore, grade]
+      [sessionId, employee.id, evalRole, productType, totalScore, grade, JSON.stringify(scores)]
     );
     const evaluationId = evalResult.rows[0].id;
 
@@ -230,6 +230,44 @@ router.get('/', async (req, res) => {
   }
 });
 
+// ── GET /api/evaluations/all  (ADMIN only) ───────────────────
+// Returns every evaluation in the system with evaluator info
+router.get('/all', async (req, res) => {
+  if (req.user.role !== 'ADMIN') {
+    return res.status(403).json({ message: 'เฉพาะ Admin เท่านั้น' });
+  }
+  try {
+    const result = await pool.query(
+      `SELECT
+         ev.id              AS "evalId",
+         s.vendor_code      AS "vendorCode",
+         s.supplier_name    AS "supplierName",
+         es.eval_type       AS "evalType",
+         es.period,
+         ev.product_type    AS "productType",
+         ev.total_score     AS "totalScore",
+         ev.grade,
+         ev.submitted_at    AS "submittedAt",
+         ev.role,
+         es.status          AS "sessionStatus",
+         es.final_score     AS "finalScore",
+         es.final_grade     AS "finalGrade",
+         emp.full_name      AS "evaluatorName",
+         emp.employee_id    AS "evaluatorId"
+       FROM evaluations ev
+       JOIN evaluation_sessions es  ON es.id  = ev.session_id
+       JOIN suppliers           s   ON s.id   = es.supplier_id
+       JOIN employees           emp ON emp.id = ev.employee_id
+       ORDER BY ev.submitted_at DESC
+       LIMIT 500`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('GET /api/evaluations/all error:', err);
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+  }
+});
+
 // ── GET /api/evaluations/my ───────────────────────────────────
 // Returns all evaluations submitted by the current user
 router.get('/my', async (req, res) => {
@@ -285,7 +323,11 @@ router.get('/:id', async (req, res) => {
          sup.supplier_name AS "supplierName",
          es.eval_type     AS "evalType",
          es.period,
-         ev.product_type  AS "productType"
+         ev.product_type  AS "productType",
+         es.status        AS "sessionStatus",
+         es.final_score   AS "finalScore",
+         es.final_grade   AS "finalGrade",
+         ev.raw_scores    AS "rawScores"
        FROM evaluations ev
        JOIN employees          emp ON emp.id = ev.employee_id
        LEFT JOIN departments   d   ON d.id   = emp.department_id

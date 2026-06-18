@@ -117,7 +117,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
   const { showAlert, ModalEl } = useModal();
 
   // Derive role from auth token — no manual role selector needed
-  const isGCP      = authUser.role === "gcp";
+  const isGCP      = authUser.role === "GCP";
   const themeColor = isGCP ? "#1565c0" : "#1a6b1a";
 
   const [evalType,     setEvalType]     = useState("");
