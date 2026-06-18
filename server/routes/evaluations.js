@@ -33,9 +33,11 @@ async function computeScoreAndGrade(client, scoresInput, criteriaMap) {
     ? Math.round((totalRawScore / totalPossibleWeight) * 100 * 100) / 100
     : 0;
 
+  // Round to 1dp for grade lookup — matches .toFixed(1) display precision
+  const scoreFor1dp = Math.round(totalScore * 10) / 10;
   const gradeRow = await client.query(
     'SELECT grade FROM grade_thresholds WHERE $1 >= min_score AND $1 <= max_score LIMIT 1',
-    [totalScore]
+    [scoreFor1dp]
   );
   const grade = gradeRow.rows[0]?.grade ?? 'D';
 

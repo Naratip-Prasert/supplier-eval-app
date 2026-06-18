@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { authFetch } from "./utils/api";
+import { PRE_CRITERIA, POST_CRITERIA } from "./constants";
 import PortalPage         from "./pages/PortalPage";
 import LandingPage        from "./pages/LandingPage";
 import EvalForm           from "./pages/Evalform";
@@ -20,24 +21,46 @@ function EvalHistoryLoader({ evalId, user, profilePic, onBack }) {
     authFetch(`/api/evaluations/${evalId}`)
       .then(r => r.json())
       .then(d => {
+        const CRITERIA = d.evalType === "post_eval" ? POST_CRITERIA : PRE_CRITERIA;
+
+        // Scores are stored as 0-5 normalized (rawLv/maxLv*5) at submit time.
+        // Reverse to raw level scale so sectionSummary formula (lv/maxLv)*weight works correctly.
+        const maxLvMap = {};
+        CRITERIA.forEach(sec => sec.items.forEach(item => {
+          if (!item.divider) maxLvMap[item.no] = item.levelValues ? Math.max(...item.levelValues) : 5;
+        }));
+
         const scoresObj  = {};
         const weightsObj = {};
         const notesObj   = {};
 
         // 1. Seed from raw_scores (complete snapshot saved at submit time)
         const raw = d.rawScores ?? {};
+        const hasRaw = Object.keys(raw).length > 0;
         Object.entries(raw).forEach(([code, entry]) => {
-          if (entry.score != null) scoresObj[code]  = Number(entry.score);
+          if (entry.score != null) {
+            const maxLv = maxLvMap[code] ?? 5;
+            scoresObj[code] = (Number(entry.score) / 5) * maxLv;
+          }
           if (entry.weight != null) weightsObj[code] = Number(entry.weight);
           notesObj[code] = entry.note || "";
         });
 
-        // 2. Overlay with DB evaluation_scores (authoritative stored values)
+        // 2. Overlay with DB evaluation_scores (also stored as 0-5 normalized)
         (d.scores ?? []).forEach(s => {
-          if (s.score  != null) scoresObj[s.code]  = s.score;
+          if (s.score != null) {
+            const maxLv = maxLvMap[s.code] ?? 5;
+            scoresObj[s.code] = (Number(s.score) / 5) * maxLv;
+          }
           if (s.weight != null) weightsObj[s.code] = Number(s.weight);
           notesObj[s.code] = s.note || "";
         });
+
+        // 3. When raw_scores is missing (old evaluations), DB only has a few criteria
+        //    so section aggregates will be wrong. Override radar with uniform polygon
+        //    at the stored totalScore level so the chart matches the displayed score.
+        const ratio    = Math.min(1, Number(d.totalScore) / 100);
+        const radarOverride = hasRaw ? null : CRITERIA.map(() => ratio);
 
         setLoaded({
           formData: {
@@ -51,11 +74,12 @@ function EvalHistoryLoader({ evalId, user, profilePic, onBack }) {
             productType:  d.productType,
           },
           result: {
-            totalScore: Number(d.totalScore),
-            grade:      d.grade,
-            scores:     scoresObj,
-            weights:    weightsObj,
-            notes:      notesObj,
+            totalScore:   Number(d.totalScore),
+            grade:        d.grade,
+            scores:       scoresObj,
+            weights:      weightsObj,
+            notes:        notesObj,
+            radarOverride,
           },
         });
       })
