@@ -29,7 +29,7 @@ const card = (extra = {}) => ({
   ...extra,
 });
 
-export default function ResultPage({ formData, result, user, profilePic, onBack, onBackToEval }) {
+export default function ResultPage({ formData, result, user, profilePic, onBack, onBackToEval, readOnly = false }) {
   const { showConfirm, ModalEl } = useModal();
   const { totalScore, grade, scores = {} } = result;
   const gradeColor = GRADE_MAP[grade];
@@ -55,11 +55,13 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
   const radarValues  = sectionSummary.map(s => s.max > 0 ? s.got / s.max : 0);
   const RADAR_LABELS = sectionSummary.map(s => s.label);
 
-  const [doneStatus, setDoneStatus] = useState("idle");
+  const [doneStatus,  setDoneStatus]  = useState("idle");
+  const [doneErrMsg,  setDoneErrMsg]  = useState("");
   const [showExport, setShowExport] = useState(false);
   const exportRef = useRef(null);
 
   const handleBackToEval = async () => {
+    if (readOnly) { onBack(); return; }
     const ok = await showConfirm("ต้องการกลับไปแก้ไขแบบประเมินใช่ไหม?", "กลับหน้าประเมิน");
     if (ok) onBackToEval();
   };
@@ -69,15 +71,27 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
     const ok = await showConfirm("บันทึกผลการประเมินและเสร็จสิ้นใช่ไหม?", "ยืนยันการบันทึก");
     if (!ok) return;
     setDoneStatus("saving");
+    setDoneErrMsg("");
     try {
       const rawScores  = result.scores  ?? {};
       const rawNotes   = result.notes   ?? {};
       const rawWeights = result.weights ?? {};
+
+      // Build maxLv lookup from CRITERIA so backend divides by correct max
+      const maxLvMap = {};
+      CRITERIA.forEach(sec => sec.items.forEach(item => {
+        if (!item.divider)
+          maxLvMap[item.no] = item.levelValues ? Math.max(...item.levelValues) : 5;
+      }));
+
       const mergedScores = Object.fromEntries(
-        Object.keys(rawScores).map(no => [
-          no,
-          { score: rawScores[no], weight: rawWeights[no], note: rawNotes[no] ?? "" },
-        ])
+        Object.keys(rawScores).map(no => {
+          const rawLv   = rawScores[no];
+          const maxLv   = maxLvMap[no] ?? 5;
+          // Normalize to 0-5 scale so backend formula (score/5)*weight is always correct
+          const normScore = rawLv != null ? (rawLv / maxLv) * 5 : rawLv;
+          return [no, { score: normScore, weight: rawWeights[no], note: rawNotes[no] ?? "" }];
+        })
       );
       const res = await authFetch("/api/evaluations", {
         method: "POST",
@@ -98,6 +112,7 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
       setTimeout(onBack, 600);
     } catch (err) {
       console.error("Save failed:", err.message);
+      setDoneErrMsg(err.message || "เชื่อมต่อไม่ได้");
       setDoneStatus("error");
     }
   };
@@ -218,7 +233,7 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
           <Header
             titleOverride={`Supplier Performance Evaluation — ${evalLabel} Evaluation`}
             subtitle={subtitle}
-            backLabel="← กลับหน้าประเมิน"
+            backLabel={readOnly ? "← กลับ" : "← กลับหน้าประเมิน"}
             onBack={handleBackToEval}
             user={user}
             profilePic={profilePic}
@@ -313,7 +328,7 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
                 {formData.supplierName || "—"}
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 20px", fontSize: 12, color: "#718096" }}>
-                <span>Vendor Code: <strong style={{ color: "#4a5568" }}>{formData.vendorCode || "—"}</strong></span>
+                <span>Tax ID: <strong style={{ color: "#4a5568" }}>{formData.vendorCode || "—"}</strong></span>
                 <span>Evaluated by: <strong style={{ color: "#4a5568" }}>{formData.empId || "—"}</strong></span>
                 <span>Dept: <strong style={{ color: "#4a5568" }}>{formData.dept || "—"}</strong></span>
                 <span>Period: <strong style={{ color: "#4a5568" }}>{formData.period || "—"}</strong></span>
@@ -579,8 +594,8 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
             </div>
           </div>
 
-          {/* ── Done button ── */}
-          <div className="no-print">
+          {/* ── Done button — hidden in read-only (history view) ── */}
+          {!readOnly && <div className="no-print">
             <GreenButton fullWidth onClick={handleDone} disabled={doneStatus === "saving" || doneStatus === "saved"}>
               {doneStatus === "idle"   && "ยืนยันผลการประเมินและบันทึก"}
               {doneStatus === "saving" && "กำลังบันทึก..."}
@@ -595,7 +610,18 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
                 </span>
               )}
             </GreenButton>
-          </div>
+            {doneStatus === "error" && doneErrMsg && (
+              <div style={{
+                marginTop: 10, padding: "10px 14px",
+                background: "#fff5f5", border: "1px solid #ffd0d0",
+                borderRadius: 8, fontSize: 13, color: "#c62828",
+                display: "flex", alignItems: "flex-start", gap: 8,
+              }}>
+                <XCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span><strong>สาเหตุ:</strong> {doneErrMsg}</span>
+              </div>
+            )}
+          </div>}
 
         </div>
       </div>

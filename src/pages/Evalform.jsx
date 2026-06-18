@@ -556,7 +556,7 @@ function InfoBar({ formData, evalLabel }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "5px 28px", fontSize: 13, flex: 1 }}>
         {[
           ["ชื่อผู้ขาย/ผู้ให้บริการ",    formData.supplierName || "—"],
-          ["รหัสผู้ขาย (Vendor code)",    formData.vendorCode   || "—"],
+          ["เลขประจำตัวผู้เสียภาษี/Tax ID",    formData.vendorCode   || "—"],
           ["เลขที่อ้างอิง",               refNo],
           ["หน่วยงาน",                    formData.dept         || "—"],
           ["ชื่อผู้ประเมิน/รหัสพนักงาน", formData.empId        || "—"],

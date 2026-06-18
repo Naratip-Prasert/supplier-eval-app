@@ -5,13 +5,13 @@
 import { useState, useRef, useEffect } from "react";
 import { Header, CustomSelect, GreenInput, GreenButton, useModal } from "../components";
 import { authFetch } from "../utils/api";
-import { Info, Loader2, AlertCircle, User, LogOut, ChevronDown } from "lucide-react";
+import { Info, Loader2, AlertCircle, User, LogOut, ChevronDown, ClipboardList } from "lucide-react";
 import { PRODUCT_TYPE_OPTIONS, EVAL_PERIOD_OPTIONS, PRE_PERIOD_OPTIONS } from "../constants";
 
 const PRODUCT_MAP   = { "สินค้า": "goods", "บริการ": "services", "สินค้าและบริการ": "both" };
 const PRODUCT_LABEL = { goods: "สินค้า", services: "บริการ", both: "สินค้าและบริการ" };
 
-function ProfileDropdown({ user, profilePic, themeColor, onProfile, onLogout }) {
+function ProfileDropdown({ user, profilePic, themeColor, onProfile, onHistory, onLogout }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -85,8 +85,9 @@ function ProfileDropdown({ user, profilePic, themeColor, onProfile, onLogout }) 
           zIndex: 300, minWidth: 200, overflow: "hidden",
         }}>
           {[
-            { icon: <User size={15} />, label: "ดูโปรไฟล์",    action: () => { setOpen(false); onProfile(); }, color: "#1a1a1a", hover: "#f0f7f0" },
-            { icon: <LogOut size={15} />, label: "ออกจากระบบ", action: () => { setOpen(false); onLogout(); },  color: "#c62828", hover: "#fff5f5" },
+            { icon: <User size={15} />,          label: "ดูโปรไฟล์",        action: () => { setOpen(false); onProfile(); }, color: "#1a1a1a", hover: "#f0f7f0" },
+            { icon: <ClipboardList size={15} />, label: "ประวัติการประเมิน", action: () => { setOpen(false); onHistory(); }, color: "#1a1a1a", hover: "#f0f7f0" },
+            { icon: <LogOut size={15} />,        label: "ออกจากระบบ",        action: () => { setOpen(false); onLogout(); },  color: "#c62828", hover: "#fff5f5" },
           ].map(({ icon, label, action, color, hover }, i, arr) => (
             <button
               key={label}
@@ -112,11 +113,11 @@ function ProfileDropdown({ user, profilePic, themeColor, onProfile, onLogout }) 
   );
 }
 
-export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, onProfile }) {
+export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, onProfile, onHistory, onBack }) {
   const { showAlert, ModalEl } = useModal();
 
   // Derive role from auth token — no manual role selector needed
-  const isGCP      = authUser.role === "gcp";
+  const isGCP      = authUser.role === "GCP";
   const themeColor = isGCP ? "#1565c0" : "#1a6b1a";
 
   const [evalType,     setEvalType]     = useState("");
@@ -196,13 +197,32 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
       {ModalEl}
       <Header />
       <div style={{ padding: "14px 20px" }}>
-        <ProfileDropdown
-          user={authUser}
-          profilePic={profilePic}
-          themeColor={themeColor}
-          onProfile={onProfile}
-          onLogout={onLogout}
-        />
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {onBack && (
+            <button
+              onClick={onBack}
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                background: "none", border: "1.5px solid #d0d0d0",
+                borderRadius: 20, padding: "6px 14px",
+                cursor: "pointer", fontSize: 13, color: "#555",
+                fontFamily: "Sarabun, sans-serif",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = themeColor; e.currentTarget.style.color = themeColor; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#d0d0d0"; e.currentTarget.style.color = "#555"; }}
+            >
+              ← หน้าหลัก
+            </button>
+          )}
+          <ProfileDropdown
+            user={authUser}
+            profilePic={profilePic}
+            themeColor={themeColor}
+            onProfile={onProfile}
+            onHistory={onHistory}
+            onLogout={onLogout}
+          />
+        </div>
       </div>
 
       <div style={{ maxWidth: 700, margin: "0 auto", padding: "40px 20px" }}>
@@ -314,7 +334,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                   {/* Vendor Code */}
                   <div style={{ flex: 1 }}>
                     <GreenInput
-                      label="เลขประจำตัวผู้เสียภาษี/Tax ID"
+                      label="เลขประจำตัวผู้เสียภาษี/Tex ID"
                       required
                       value={vendorCode}
                       onChange={(v) => {
@@ -359,7 +379,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                     }}>
                       {supplierName || (
                         <span style={{ fontStyle: "italic", fontSize: 13 }}>
-                          กรอก Vendor Code ก่อน
+                          กรอก Tex ID ก่อน
                         </span>
                       )}
                     </div>

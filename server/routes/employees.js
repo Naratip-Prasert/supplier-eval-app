@@ -6,6 +6,34 @@ const router = require('express').Router();
 const pool   = require('../db');
 const jwt    = require('jsonwebtoken');
 
+// ── GET /api/employees  (ADMIN only) ─────────────────────────
+router.get('/', async (req, res) => {
+  if (req.user.role !== 'ADMIN') {
+    return res.status(403).json({ message: 'เฉพาะ Admin เท่านั้น' });
+  }
+  try {
+    const result = await pool.query(
+      `SELECT
+         e.employee_id    AS "employeeId",
+         e.full_name      AS "fullName",
+         e.email,
+         e.role,
+         e.is_active      AS "isActive",
+         d.name_th        AS "department",
+         j.name_th        AS "jobTitle",
+         e.created_at     AS "createdAt"
+       FROM employees e
+       LEFT JOIN departments d ON d.id = e.department_id
+       LEFT JOIN job_titles  j ON j.id = e.job_title_id
+       ORDER BY e.created_at DESC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('GET /api/employees error:', err);
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+  }
+});
+
 // ── GET /api/employees/me ─────────────────────────────────────
 router.get('/me', async (req, res) => {
   try {
@@ -124,6 +152,37 @@ router.get('/:employeeId', async (req, res) => {
   } catch (err) {
     console.error('GET /api/employees/:employeeId error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+  }
+});
+
+// ── PATCH /api/employees/:employeeId  (ADMIN only) ────────────
+// Body: { role?, isActive? }
+router.patch('/:employeeId', async (req, res) => {
+  if (req.user.role !== 'ADMIN') {
+    return res.status(403).json({ message: 'เฉพาะ Admin เท่านั้น' });
+  }
+  const { role, isActive } = req.body;
+  const validRoles = ['USER', 'GCP', 'ADMIN'];
+  if (role !== undefined && !validRoles.includes(role)) {
+    return res.status(400).json({ message: 'role ไม่ถูกต้อง' });
+  }
+  try {
+    const fields = [];
+    const params = [];
+    if (role !== undefined)     { params.push(role);     fields.push(`role = $${params.length}`); }
+    if (isActive !== undefined) { params.push(isActive); fields.push(`is_active = $${params.length}`); }
+    if (fields.length === 0) return res.status(400).json({ message: 'ไม่มีข้อมูลที่จะอัปเดต' });
+    params.push(req.params.employeeId);
+    const result = await pool.query(
+      `UPDATE employees SET ${fields.join(', ')}, updated_at = NOW()
+       WHERE employee_id = $${params.length} RETURNING employee_id`,
+      params
+    );
+    if (result.rows.length === 0) return res.status(404).json({ message: 'ไม่พบพนักงาน' });
+    res.json({ message: 'อัปเดตสำเร็จ' });
+  } catch (err) {
+    console.error('PATCH /api/employees/:employeeId error:', err);
+    res.status(500).json({ message: 'อัปเดตไม่สำเร็จ', error: err.message });
   }
 });
 

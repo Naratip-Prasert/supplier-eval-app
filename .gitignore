@@ -26,3 +26,16 @@ dist-ssr
 # Backend
 .env
 server/node_modules
+
+# Office Document & Temporary files (เช่น SPE_Presentation.pptx, ~$SPE_Presentation.pptx)
+*.pptx
+~$*
+
+# PDF Document (เช่น Supplier_Evaluation_FRD_v1.0.pdf)
+*.pdf
+
+# HTML Exported files (เช่น database-tables.html, tech-stack-table.html)
+*.html
+
+# Python script for ppt generation (เฉพาะไฟล์ make_ppt.py)
+make_ppt.py

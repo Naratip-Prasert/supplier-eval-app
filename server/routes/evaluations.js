@@ -18,11 +18,11 @@ async function computeScoreAndGrade(client, scoresInput, criteriaMap) {
   let totalRawScore      = 0;
   let totalPossibleWeight = 0;
 
+  // Use ALL submitted criteria (with their submitted weights) so the score
+  // is correct even for criteria codes not yet in the DB.
   for (const code of Object.keys(scoresInput)) {
-    const criterion = criteriaMap[code];
-    if (!criterion) continue;
     const entry  = scoresInput[code];
-    const weight = parseFloat(entry.weight ?? criterion.default_weight);
+    const weight = parseFloat(entry.weight ?? criteriaMap[code]?.default_weight ?? 1);
     totalPossibleWeight += weight;
     if (entry.score != null) {
       totalRawScore += (parseFloat(entry.score) / 5) * weight;
@@ -94,19 +94,7 @@ router.post('/', async (req, res) => {
     }
     const supplier = supResult.rows[0];
 
-    // 3. BU permission check
-    if (employee.role === 'BU') {
-      const permResult = await client.query(
-        `SELECT 1 FROM employee_supplier_permissions
-          WHERE employee_id = $1 AND supplier_id = $2`,
-        [employee.id, supplier.id]
-      );
-      if (permResult.rows.length === 0) {
-        await client.query('ROLLBACK');
-        console.warn(`[evaluations] BU ${employeeId} ไม่มีสิทธิ์ประเมิน vendor ${vendorCode}`);
-        return res.status(403).json({ message: 'ไม่มีสิทธิ์ประเมินซัพพลายเออร์นี้' });
-      }
-    }
+    // 3. BU permission check — disabled for now (all users can evaluate any supplier)
 
     // 4. Validate eval_type
     const validEvalTypes = ['new_supplier', 'post_eval'];
@@ -115,6 +103,9 @@ router.post('/', async (req, res) => {
       console.warn(`[evaluations] evalType ไม่ถูกต้อง: "${evalType}" (รับได้: ${validEvalTypes.join(', ')})`);
       return res.status(400).json({ message: 'ประเภทการประเมินไม่ถูกต้อง', field: 'evalType' });
     }
+
+    // USER, GCP, ADMIN are all valid roles for evaluation submissions
+    const evalRole = ['USER', 'GCP', 'ADMIN'].includes(employee.role) ? employee.role : 'USER';
 
     // 5. Find or create session for (supplier, period, evalType)
     const sessionResult = await client.query(
@@ -135,11 +126,11 @@ router.post('/', async (req, res) => {
       // Ensure this role hasn't already submitted for this session
       const dupResult = await client.query(
         `SELECT id FROM evaluations WHERE session_id = $1 AND role = $2`,
-        [sessionId, employee.role]
+        [sessionId, evalRole]
       );
       if (dupResult.rows.length > 0) {
         await client.query('ROLLBACK');
-        console.warn(`[evaluations] ${employeeId} (${employee.role}) ส่งผลซ้ำ session ${sessionId}`);
+        console.warn(`[evaluations] ${employeeId} (${evalRole}) ส่งผลซ้ำ session ${sessionId}`);
         return res.status(409).json({ message: 'คุณได้ส่งผลการประเมินสำหรับรายการนี้แล้ว' });
       }
     } else {
@@ -162,34 +153,33 @@ router.post('/', async (req, res) => {
     const criteriaMap = {};
     criteriaResult.rows.forEach(c => { criteriaMap[c.code] = c; });
 
-    // Reject if any submitted code is unknown
+    // Log unknown codes but do not reject (criteria table may be incomplete)
     const unknownCodes = codes.filter(c => !criteriaMap[c]);
     if (unknownCodes.length > 0) {
-      await client.query('ROLLBACK');
-      console.warn(`[evaluations] พบรหัสเกณฑ์ที่ไม่มีในระบบ: ${unknownCodes.join(', ')}`);
-      return res.status(400).json({ message: 'พบรหัสเกณฑ์ที่ไม่ถูกต้อง', unknownCodes });
+      console.warn(`[evaluations] รหัสเกณฑ์ไม่มีในตาราง (ข้ามการเก็บ): ${unknownCodes.join(', ')}`);
     }
 
     // 7. Compute total score and grade on the server (ignore frontend values)
     const { totalScore, grade } = await computeScoreAndGrade(client, scores, criteriaMap);
 
-    // 8. Insert evaluation record
+    // 8. Insert evaluation record (raw_scores stores every criterion submitted)
     const evalResult = await client.query(
       `INSERT INTO evaluations
-         (session_id, employee_id, role, product_type, status, total_score, grade, submitted_at)
-       VALUES ($1, $2, $3, $4, 'saved', $5, $6, NOW())
+         (session_id, employee_id, role, product_type, status, total_score, grade, submitted_at, raw_scores)
+       VALUES ($1, $2, $3, $4, 'saved', $5, $6, NOW(), $7)
        RETURNING id`,
-      [sessionId, employee.id, employee.role, productType, totalScore, grade]
+      [sessionId, employee.id, evalRole, productType, totalScore, grade, JSON.stringify(scores)]
     );
     const evaluationId = evalResult.rows[0].id;
 
-    // 9. Insert evaluation_scores
+    // 9. Insert evaluation_scores (only for criteria that exist in DB)
     for (const code of codes) {
       const criterion = criteriaMap[code];
-      const entry     = scores[code];
-      const weight    = parseFloat(entry.weight ?? criterion.default_weight);
-      const score     = entry.score != null ? parseInt(entry.score, 10) : null;
-      const note      = entry.note ?? '';
+      if (!criterion) continue; // skip codes not in criteria table
+      const entry  = scores[code];
+      const weight = parseFloat(entry.weight ?? criterion.default_weight);
+      const score  = entry.score != null ? parseInt(entry.score, 10) : null;
+      const note   = entry.note ?? '';
 
       await client.query(
         `INSERT INTO evaluation_scores (evaluation_id, criterion_id, weight, score, note)
@@ -240,6 +230,78 @@ router.get('/', async (req, res) => {
   }
 });
 
+// ── GET /api/evaluations/all  (ADMIN only) ───────────────────
+// Returns every evaluation in the system with evaluator info
+router.get('/all', async (req, res) => {
+  if (req.user.role !== 'ADMIN') {
+    return res.status(403).json({ message: 'เฉพาะ Admin เท่านั้น' });
+  }
+  try {
+    const result = await pool.query(
+      `SELECT
+         ev.id              AS "evalId",
+         s.vendor_code      AS "vendorCode",
+         s.supplier_name    AS "supplierName",
+         es.eval_type       AS "evalType",
+         es.period,
+         ev.product_type    AS "productType",
+         ev.total_score     AS "totalScore",
+         ev.grade,
+         ev.submitted_at    AS "submittedAt",
+         ev.role,
+         es.status          AS "sessionStatus",
+         es.final_score     AS "finalScore",
+         es.final_grade     AS "finalGrade",
+         emp.full_name      AS "evaluatorName",
+         emp.employee_id    AS "evaluatorId"
+       FROM evaluations ev
+       JOIN evaluation_sessions es  ON es.id  = ev.session_id
+       JOIN suppliers           s   ON s.id   = es.supplier_id
+       JOIN employees           emp ON emp.id = ev.employee_id
+       ORDER BY ev.submitted_at DESC
+       LIMIT 500`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('GET /api/evaluations/all error:', err);
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+  }
+});
+
+// ── GET /api/evaluations/my ───────────────────────────────────
+// Returns all evaluations submitted by the current user
+router.get('/my', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+         ev.id              AS "evalId",
+         s.vendor_code      AS "vendorCode",
+         s.supplier_name    AS "supplierName",
+         es.eval_type       AS "evalType",
+         es.period,
+         ev.product_type    AS "productType",
+         ev.total_score     AS "totalScore",
+         ev.grade,
+         ev.submitted_at    AS "submittedAt",
+         es.status          AS "sessionStatus",
+         es.final_score     AS "finalScore",
+         es.final_grade     AS "finalGrade"
+       FROM evaluations ev
+       JOIN evaluation_sessions es ON es.id = ev.session_id
+       JOIN suppliers           s  ON s.id  = es.supplier_id
+       JOIN employees           emp ON emp.id = ev.employee_id
+       WHERE emp.employee_id = $1
+       ORDER BY ev.submitted_at DESC
+       LIMIT 100`,
+      [req.user.empId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('GET /api/evaluations/my error:', err);
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+  }
+});
+
 // ── GET /api/evaluations/:id ─────────────────────────────────
 // Returns a single evaluation with all its scores
 router.get('/:id', async (req, res) => {
@@ -261,7 +323,11 @@ router.get('/:id', async (req, res) => {
          sup.supplier_name AS "supplierName",
          es.eval_type     AS "evalType",
          es.period,
-         ev.product_type  AS "productType"
+         ev.product_type  AS "productType",
+         es.status        AS "sessionStatus",
+         es.final_score   AS "finalScore",
+         es.final_grade   AS "finalGrade",
+         ev.raw_scores    AS "rawScores"
        FROM evaluations ev
        JOIN employees          emp ON emp.id = ev.employee_id
        LEFT JOIN departments   d   ON d.id   = emp.department_id

@@ -40,18 +40,18 @@ export const LEVEL_COLORS = [
 ];
 
 export const GRADE_MAP = {
-  A: "#1b5e20",
-  B: "#1565c0",
-  C: "#e65100",
-  D: "#b71c1c",
+  A: "#53af28",
+  B: "#92c015",
+  C: "#d7e600",
+  D: "#b72e1c",
   F: "#4a0000",
 };
 
 export const GRADE_GUIDE = [
-  { g: "A", range: "≥ 90", label: "ผ่านการรับรอง (Approved)",          color: "#1b5e20" },
-  { g: "B", range: "≥ 80", label: "ผ่านเงื่อนไข (Conditional)",        color: "#1565c0" },
-  { g: "C", range: "≥ 70", label: "ต้องปรับปรุง (Improvement Required)",color: "#e65100" },
-  { g: "D", range: "≥ 60", label: "ไม่ผ่าน — ระงับ (Suspended)",       color: "#b71c1c" },
+  { g: "A", range: "≥ 90", label: "ผ่านการรับรอง (Approved)",          color: "#53af28" },
+  { g: "B", range: "≥ 80", label: "ผ่านเงื่อนไข (Conditional)",        color: "#92c015" },
+  { g: "C", range: "≥ 70", label: "ต้องปรับปรุง (Improvement Required)",color: "#d7e600" },
+  { g: "D", range: "≥ 60", label: "ไม่ผ่าน — ระงับ (Suspended)",       color: "#b72e1c" },
   { g: "F", range: "< 60", label: "ไม่ผ่าน — ตัดออก (Disqualified)",   color: "#4a0000" },
 ];
 
