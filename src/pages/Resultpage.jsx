@@ -75,11 +75,22 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
       const rawScores  = result.scores  ?? {};
       const rawNotes   = result.notes   ?? {};
       const rawWeights = result.weights ?? {};
+
+      // Build maxLv lookup from CRITERIA so backend divides by correct max
+      const maxLvMap = {};
+      CRITERIA.forEach(sec => sec.items.forEach(item => {
+        if (!item.divider)
+          maxLvMap[item.no] = item.levelValues ? Math.max(...item.levelValues) : 5;
+      }));
+
       const mergedScores = Object.fromEntries(
-        Object.keys(rawScores).map(no => [
-          no,
-          { score: rawScores[no], weight: rawWeights[no], note: rawNotes[no] ?? "" },
-        ])
+        Object.keys(rawScores).map(no => {
+          const rawLv   = rawScores[no];
+          const maxLv   = maxLvMap[no] ?? 5;
+          // Normalize to 0-5 scale so backend formula (score/5)*weight is always correct
+          const normScore = rawLv != null ? (rawLv / maxLv) * 5 : rawLv;
+          return [no, { score: normScore, weight: rawWeights[no], note: rawNotes[no] ?? "" }];
+        })
       );
       const res = await authFetch("/api/evaluations", {
         method: "POST",
@@ -316,7 +327,7 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
                 {formData.supplierName || "—"}
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 20px", fontSize: 12, color: "#718096" }}>
-                <span>Vendor Code: <strong style={{ color: "#4a5568" }}>{formData.vendorCode || "—"}</strong></span>
+                <span>Tax ID: <strong style={{ color: "#4a5568" }}>{formData.vendorCode || "—"}</strong></span>
                 <span>Evaluated by: <strong style={{ color: "#4a5568" }}>{formData.empId || "—"}</strong></span>
                 <span>Dept: <strong style={{ color: "#4a5568" }}>{formData.dept || "—"}</strong></span>
                 <span>Period: <strong style={{ color: "#4a5568" }}>{formData.period || "—"}</strong></span>

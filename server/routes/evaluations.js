@@ -94,27 +94,7 @@ router.post('/', async (req, res) => {
     }
     const supplier = supResult.rows[0];
 
-    // 3. BU permission check (default-allow when no permissions are defined for this employee)
-    if (employee.role === 'BU') {
-      const anyPerm = await client.query(
-        `SELECT 1 FROM employee_supplier_permissions WHERE employee_id = $1 LIMIT 1`,
-        [employee.id]
-      );
-      if (anyPerm.rows.length > 0) {
-        // Employee has an explicit permission list — enforce it
-        const permResult = await client.query(
-          `SELECT 1 FROM employee_supplier_permissions
-            WHERE employee_id = $1 AND supplier_id = $2`,
-          [employee.id, supplier.id]
-        );
-        if (permResult.rows.length === 0) {
-          await client.query('ROLLBACK');
-          console.warn(`[evaluations] BU ${employeeId} ไม่มีสิทธิ์ประเมิน vendor ${vendorCode}`);
-          return res.status(403).json({ message: 'ไม่มีสิทธิ์ประเมินซัพพลายเออร์นี้' });
-        }
-      }
-      // If no permissions defined at all → default allow
-    }
+    // 3. BU permission check — disabled for now (all users can evaluate any supplier)
 
     // 4. Validate eval_type
     const validEvalTypes = ['new_supplier', 'post_eval'];
@@ -123,6 +103,9 @@ router.post('/', async (req, res) => {
       console.warn(`[evaluations] evalType ไม่ถูกต้อง: "${evalType}" (รับได้: ${validEvalTypes.join(', ')})`);
       return res.status(400).json({ message: 'ประเภทการประเมินไม่ถูกต้อง', field: 'evalType' });
     }
+
+    // Map ADMIN → 'GCP' so the INSERT passes the evaluations.role CHECK constraint
+    const evalRole = ['BU', 'GCP'].includes(employee.role) ? employee.role : 'GCP';
 
     // 5. Find or create session for (supplier, period, evalType)
     const sessionResult = await client.query(
@@ -143,11 +126,11 @@ router.post('/', async (req, res) => {
       // Ensure this role hasn't already submitted for this session
       const dupResult = await client.query(
         `SELECT id FROM evaluations WHERE session_id = $1 AND role = $2`,
-        [sessionId, employee.role]
+        [sessionId, evalRole]
       );
       if (dupResult.rows.length > 0) {
         await client.query('ROLLBACK');
-        console.warn(`[evaluations] ${employeeId} (${employee.role}) ส่งผลซ้ำ session ${sessionId}`);
+        console.warn(`[evaluations] ${employeeId} (${evalRole}) ส่งผลซ้ำ session ${sessionId}`);
         return res.status(409).json({ message: 'คุณได้ส่งผลการประเมินสำหรับรายการนี้แล้ว' });
       }
     } else {
@@ -185,7 +168,7 @@ router.post('/', async (req, res) => {
          (session_id, employee_id, role, product_type, status, total_score, grade, submitted_at)
        VALUES ($1, $2, $3, $4, 'saved', $5, $6, NOW())
        RETURNING id`,
-      [sessionId, employee.id, employee.role, productType, totalScore, grade]
+      [sessionId, employee.id, evalRole, productType, totalScore, grade]
     );
     const evaluationId = evalResult.rows[0].id;
 

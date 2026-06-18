@@ -113,7 +113,7 @@ function ProfileDropdown({ user, profilePic, themeColor, onProfile, onHistory, o
   );
 }
 
-export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, onProfile, onHistory }) {
+export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, onProfile, onHistory, onBack }) {
   const { showAlert, ModalEl } = useModal();
 
   // Derive role from auth token — no manual role selector needed
@@ -197,14 +197,32 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
       {ModalEl}
       <Header />
       <div style={{ padding: "14px 20px" }}>
-        <ProfileDropdown
-          user={authUser}
-          profilePic={profilePic}
-          themeColor={themeColor}
-          onProfile={onProfile}
-          onHistory={onHistory}
-          onLogout={onLogout}
-        />
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {onBack && (
+            <button
+              onClick={onBack}
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                background: "none", border: "1.5px solid #d0d0d0",
+                borderRadius: 20, padding: "6px 14px",
+                cursor: "pointer", fontSize: 13, color: "#555",
+                fontFamily: "Sarabun, sans-serif",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = themeColor; e.currentTarget.style.color = themeColor; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#d0d0d0"; e.currentTarget.style.color = "#555"; }}
+            >
+              ← หน้าหลัก
+            </button>
+          )}
+          <ProfileDropdown
+            user={authUser}
+            profilePic={profilePic}
+            themeColor={themeColor}
+            onProfile={onProfile}
+            onHistory={onHistory}
+            onLogout={onLogout}
+          />
+        </div>
       </div>
 
       <div style={{ maxWidth: 700, margin: "0 auto", padding: "40px 20px" }}>

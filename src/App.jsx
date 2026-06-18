@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { authFetch } from "./utils/api";
+import PortalPage         from "./pages/PortalPage";
 import LandingPage        from "./pages/LandingPage";
 import EvalForm           from "./pages/Evalform";
 import ResultPage         from "./pages/Resultpage";
@@ -27,7 +28,7 @@ function getStoredUser() {
 
 export default function App() {
   const [user,           setUser]           = useState(() => getStoredUser());
-  const [page,           setPage]           = useState("landing");
+  const [page,           setPage]           = useState(() => getStoredUser() ? "portal" : "landing");
   const [formData,       setFormData]       = useState({});
   const [result,         setResult]         = useState(null);
   const [evalSavedState, setEvalSavedState] = useState(null);
@@ -61,7 +62,7 @@ export default function App() {
   const handleLogin = (token, userData) => {
     localStorage.setItem("spe_token", token);
     setUser(userData);
-    setPage("landing");
+    setPage("portal");
   };
 
   const handleLogout = () => {
@@ -70,7 +71,7 @@ export default function App() {
     setFormData({});
     setResult(null);
     setEvalSavedState(null);
-    setPage("landing");
+    setPage("portal");
   };
 
   // ── Not logged in: show auth pages ───────────────────────────
@@ -96,15 +97,28 @@ export default function App() {
   }
 
   // ── Logged in: show main app pages ───────────────────────────
+  if (page === "portal") {
+    return (
+      <PortalPage
+        authUser={user}
+        profilePic={profilePic}
+        onLogout={handleLogout}
+        onProfile={() => setPage("profile")}
+        onHistory={() => setPage("history")}
+        onEvaluate={() => setPage("landing")}
+      />
+    );
+  }
+
   if (page === "history") {
-    return <HistoryPage authUser={user} onBack={() => setPage("landing")} />;
+    return <HistoryPage authUser={user} onBack={() => setPage("portal")} />;
   }
 
   if (page === "profile") {
     return (
       <ProfilePage
         authUser={user}
-        onBack={() => setPage("landing")}
+        onBack={() => setPage("portal")}
         onProfileUpdate={(token, userData, pic) => {
           localStorage.setItem("spe_token", token);
           setUser(userData);
@@ -139,7 +153,7 @@ export default function App() {
           setFormData({});
           setResult(null);
           setEvalSavedState(null);
-          setPage("landing");
+          setPage("portal");
         }}
       />
     );
@@ -153,6 +167,7 @@ export default function App() {
       onLogout={handleLogout}
       onProfile={() => setPage("profile")}
       onHistory={() => setPage("history")}
+      onBack={() => setPage("portal")}
     />
   );
 }
