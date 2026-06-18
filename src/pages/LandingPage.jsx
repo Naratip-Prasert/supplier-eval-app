@@ -314,7 +314,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                   {/* Vendor Code */}
                   <div style={{ flex: 1 }}>
                     <GreenInput
-                      label="เลขประจำตัวผู้เสียภาษี/Tex ID"
+                      label="เลขประจำตัวผู้เสียภาษี/Tax ID"
                       required
                       value={vendorCode}
                       onChange={(v) => {
