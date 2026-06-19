@@ -3,18 +3,23 @@
 // ============================================================
 
 import { useState, useRef, useEffect } from "react";
-import { Header, CustomSelect, GreenInput, GreenButton, useModal } from "../components";
+import { useModal } from "../components";
 import { authFetch } from "../utils/api";
-import { Info, Loader2, AlertCircle, User, LogOut, ChevronDown, ClipboardList } from "lucide-react";
+import {
+  Info, Loader2, AlertCircle, User, LogOut,
+  ChevronDown, ClipboardList, Search, CheckCircle2,
+  FileText, BarChart3, ArrowRight, Building2,
+} from "lucide-react";
+
 import { PRODUCT_TYPE_OPTIONS, EVAL_PERIOD_OPTIONS, PRE_PERIOD_OPTIONS } from "../constants";
 
 const PRODUCT_MAP   = { "สินค้า": "goods", "บริการ": "services", "สินค้าและบริการ": "both" };
 const PRODUCT_LABEL = { goods: "สินค้า", services: "บริการ", both: "สินค้าและบริการ" };
 
+// ── Profile dropdown ─────────────────────────────────────────
 function ProfileDropdown({ user, profilePic, themeColor, onProfile, onHistory, onLogout }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
-
   useEffect(() => {
     if (!open) return;
     const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
@@ -22,89 +27,69 @@ function ProfileDropdown({ user, profilePic, themeColor, onProfile, onHistory, o
     return () => document.removeEventListener("mousedown", close);
   }, [open]);
 
-  const initials = (user.fullName || "?")
-    .split(" ").map((w) => w[0] ?? "").join("").slice(0, 2).toUpperCase();
+  const initials = (user.fullName || "?").split(" ").map(w => w[0] ?? "").join("").slice(0, 2).toUpperCase();
 
   return (
-    <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
+    <div ref={ref} style={{ position: "relative" }}>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(v => !v)}
         style={{
-          display: "flex", alignItems: "center", gap: 12,
-          background: "#fff",
-          border: `2px solid ${open ? themeColor : "#d0d0d0"}`,
-          borderRadius: 50,
-          padding: "6px 14px 6px 6px",
-          cursor: "pointer",
-          boxShadow: open
-            ? `0 0 0 3px ${themeColor}22, 0 4px 12px rgba(0,0,0,0.1)`
-            : "0 2px 8px rgba(0,0,0,0.09)",
-          transition: "border-color 0.15s, box-shadow 0.15s",
-          fontFamily: "Sarabun, sans-serif",
+          display: "flex", alignItems: "center", gap: 10,
+          background: "rgba(255,255,255,0.15)",
+          backdropFilter: "blur(8px)",
+          border: "1.5px solid rgba(255,255,255,0.35)",
+          borderRadius: 50, padding: "5px 14px 5px 5px",
+          cursor: "pointer", fontFamily: "Sarabun, sans-serif",
+          transition: "background 0.2s",
         }}
-        onMouseEnter={(e) => {
-          if (!open) e.currentTarget.style.borderColor = themeColor;
-        }}
-        onMouseLeave={(e) => {
-          if (!open) e.currentTarget.style.borderColor = "#d0d0d0";
-        }}
+        onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.25)"}
+        onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.15)"}
       >
         <div style={{
-          width: 44, height: 44, borderRadius: "50%",
-          background: themeColor, color: "#fff",
+          width: 36, height: 36, borderRadius: "50%",
+          background: "rgba(255,255,255,0.3)", color: "#fff",
           display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 17, fontWeight: 700, flexShrink: 0, letterSpacing: 0.5,
-          overflow: "hidden",
+          fontSize: 14, fontWeight: 700, overflow: "hidden", flexShrink: 0,
         }}>
           {profilePic
             ? <img src={profilePic} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             : initials}
         </div>
-        <div style={{ textAlign: "left", lineHeight: 1.35 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1a1a" }}>{user.fullName}</div>
-          <div style={{ fontSize: 12, color: "#777", marginTop: 1 }}>
-            {user.empId} · {user.department}
-          </div>
+        <div style={{ textAlign: "left" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", lineHeight: 1.3 }}>{user.fullName}</div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.75)" }}>{user.empId}</div>
         </div>
-        <ChevronDown
-          size={16}
-          style={{
-            color: "#999", marginLeft: 2, flexShrink: 0,
-            transform: open ? "rotate(180deg)" : "rotate(0deg)",
-            transition: "transform 0.2s",
-          }}
-        />
+        <ChevronDown size={14} style={{
+          color: "rgba(255,255,255,0.8)", flexShrink: 0,
+          transform: open ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s",
+        }} />
       </button>
-
       {open && (
         <div style={{
-          position: "absolute", top: "calc(100% + 8px)", left: 0,
-          background: "#fff", borderRadius: 10,
-          boxShadow: "0 8px 32px rgba(0,0,0,0.15)",
-          border: "1px solid #e8e8e8",
-          zIndex: 300, minWidth: 200, overflow: "hidden",
+          position: "absolute", top: "calc(100% + 8px)", right: 0,
+          background: "#fff", borderRadius: 12,
+          boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
+          border: "1px solid #eee", zIndex: 300, minWidth: 210, overflow: "hidden",
         }}>
+          <div style={{ padding: "12px 16px", borderBottom: "1px solid #f0f0f0", background: "#fafafa" }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a" }}>{user.fullName}</div>
+            <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{user.department}</div>
+          </div>
           {[
-            { icon: <User size={15} />,          label: "ดูโปรไฟล์",        action: () => { setOpen(false); onProfile(); }, color: "#1a1a1a", hover: "#f0f7f0" },
-            { icon: <ClipboardList size={15} />, label: "ประวัติการประเมิน", action: () => { setOpen(false); onHistory(); }, color: "#1a1a1a", hover: "#f0f7f0" },
-            { icon: <LogOut size={15} />,        label: "ออกจากระบบ",        action: () => { setOpen(false); onLogout(); },  color: "#c62828", hover: "#fff5f5" },
-          ].map(({ icon, label, action, color, hover }, i, arr) => (
-            <button
-              key={label}
-              onClick={action}
-              style={{
-                display: "flex", alignItems: "center", gap: 10,
-                width: "100%", textAlign: "left", padding: "12px 16px",
-                fontSize: 14, background: "none",
-                border: "none",
-                borderTop: i > 0 ? "1px solid #f0f0f0" : "none",
-                cursor: "pointer", fontFamily: "Sarabun, sans-serif", color,
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = hover)}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-            >
-              <span style={{ color, display: "flex" }}>{icon}</span>
-              {label}
+            { icon: <User size={14} />,          label: "ดูโปรไฟล์",        action: () => { setOpen(false); onProfile(); }, color: "#2d3748", hover: "#f7faff" },
+            { icon: <ClipboardList size={14} />, label: "ประวัติการประเมิน", action: () => { setOpen(false); onHistory(); }, color: "#2d3748", hover: "#f7faff" },
+            { icon: <LogOut size={14} />,        label: "ออกจากระบบ",        action: () => { setOpen(false); onLogout(); },  color: "#c62828", hover: "#fff5f5" },
+          ].map(({ icon, label, action, color, hover }, i) => (
+            <button key={label} onClick={action} style={{
+              display: "flex", alignItems: "center", gap: 10,
+              width: "100%", textAlign: "left", padding: "11px 16px",
+              fontSize: 13, background: "none",
+              border: "none", borderTop: i > 0 ? "1px solid #f5f5f5" : "none",
+              cursor: "pointer", fontFamily: "Sarabun, sans-serif", color,
+            }}
+              onMouseEnter={e => e.currentTarget.style.background = hover}
+              onMouseLeave={e => e.currentTarget.style.background = "none"}>
+              <span style={{ color, display: "flex" }}>{icon}</span> {label}
             </button>
           ))}
         </div>
@@ -113,35 +98,123 @@ function ProfileDropdown({ user, profilePic, themeColor, onProfile, onHistory, o
   );
 }
 
+// ── Field wrapper ─────────────────────────────────────────────
+function Field({ label, required, hint, children }) {
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 7 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>{label}</span>
+        {required && <span style={{ color: "#ef4444", fontSize: 13 }}>*</span>}
+        {hint && <span style={{ fontSize: 11, color: "#9ca3af" }}>{hint}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// ── Read-only display box ─────────────────────────────────────
+function ReadBox({ value, placeholder, locked }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 8,
+      background: locked ? "#f3f4f6" : "#f9fafb",
+      border: `1.5px solid ${locked ? "#d1d5db" : "#e5e7eb"}`,
+      borderRadius: 9, padding: "9px 14px", minHeight: 42,
+      color: value ? "#111827" : "#9ca3af", fontSize: 14,
+    }}>
+      {locked && <Building2 size={14} style={{ color: "#9ca3af", flexShrink: 0 }} />}
+      <span>{value || <em style={{ fontStyle: "normal" }}>{placeholder}</em>}</span>
+      {locked && value && <CheckCircle2 size={14} style={{ color: "#22c55e", marginLeft: "auto", flexShrink: 0 }} />}
+    </div>
+  );
+}
+
+// ── Text input ────────────────────────────────────────────────
+function TextInput({ value, onChange, onBlur, placeholder, themeColor }) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 8,
+      border: `1.5px solid ${focused ? themeColor : "#d1d5db"}`,
+      borderRadius: 9, background: "#fff", padding: "0 14px",
+      boxShadow: focused ? `0 0 0 3px ${themeColor}18` : "none",
+      transition: "border-color 0.15s, box-shadow 0.15s",
+    }}>
+      <Search size={14} style={{ color: focused ? themeColor : "#9ca3af", flexShrink: 0, transition: "color 0.15s" }} />
+      <input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        onBlur={() => { setFocused(false); onBlur?.(); }}
+        onFocus={() => setFocused(true)}
+        placeholder={placeholder}
+        style={{
+          flex: 1, border: "none", outline: "none", background: "transparent",
+          fontSize: 14, fontFamily: "Sarabun, sans-serif", color: "#111827",
+          padding: "9px 0", minHeight: 42,
+        }}
+      />
+    </div>
+  );
+}
+
+// ── Styled native select ──────────────────────────────────────
+function StyledSelect({ value, onChange, options, placeholder, themeColor }) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <div style={{ position: "relative" }}>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        style={{
+          width: "100%", appearance: "none", WebkitAppearance: "none",
+          border: `1.5px solid ${focused ? themeColor : "#d1d5db"}`,
+          borderRadius: 9, background: "#fff", padding: "9px 36px 9px 14px",
+          fontSize: 14, fontFamily: "Sarabun, sans-serif", color: value ? "#111827" : "#9ca3af",
+          boxShadow: focused ? `0 0 0 3px ${themeColor}18` : "none",
+          transition: "border-color 0.15s, box-shadow 0.15s",
+          cursor: "pointer", outline: "none", minHeight: 42,
+        }}
+      >
+        <option value="" disabled>{placeholder || "-- เลือก --"}</option>
+        {options.map(opt => (
+          <option key={opt} value={opt}>{opt}</option>
+        ))}
+      </select>
+      <ChevronDown size={15} style={{
+        position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)",
+        color: focused ? themeColor : "#9ca3af", pointerEvents: "none",
+        transition: "color 0.15s",
+      }} />
+    </div>
+  );
+}
+
+// ── Main ─────────────────────────────────────────────────────
 export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, onProfile, onHistory, onBack }) {
   const { showAlert, ModalEl } = useModal();
 
-  // Derive role from auth token — no manual role selector needed
   const isGCP      = authUser.role === "GCP";
-  const themeColor = isGCP ? "#1565c0" : "#1a6b1a";
+  const themeColor = isGCP ? "#1d4ed8" : "#15803d";
+  const themeBg    = isGCP
+    ? "linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 60%, #2563eb 100%)"
+    : "linear-gradient(135deg, #14532d 0%, #15803d 60%, #16a34a 100%)";
 
   const [evalType,     setEvalType]     = useState("");
   const [vendorCode,   setVendorCode]   = useState("");
   const [supplierName, setSupplierName] = useState("");
   const [productType,  setProductType]  = useState("");
   const [period,       setPeriod]       = useState("");
-
   const [vendorLookup, setVendorLookup] = useState({ status: "idle", data: null });
 
-  // ── Vendor lookup (authenticated) ───────────────────────────
   const lookupVendor = async (code) => {
     if (!code.trim()) return "idle";
     setVendorLookup({ status: "loading", data: null });
     try {
       const res = await authFetch(`/api/suppliers/${encodeURIComponent(code.trim())}`);
-      if (res.status === 404) {
-        setVendorLookup({ status: "notfound", data: null });
-        return "notfound";
-      }
-      if (!res.ok) {
-        setVendorLookup({ status: "error", data: null });
-        return "error";
-      }
+      if (res.status === 404) { setVendorLookup({ status: "notfound", data: null }); return "notfound"; }
+      if (!res.ok)            { setVendorLookup({ status: "error",    data: null }); return "error"; }
       const data = await res.json();
       setVendorLookup({ status: "found", data });
       setSupplierName(data.supplierName || "");
@@ -153,302 +226,323 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
     }
   };
 
-  // ── Submit ──────────────────────────────────────────────────
   const handleSubmit = async () => {
     let vendorStatus = vendorLookup.status;
-    if (evalType && vendorCode.trim() && vendorLookup.status === "idle") {
+    if (evalType && vendorCode.trim() && vendorLookup.status === "idle")
       vendorStatus = await lookupVendor(vendorCode);
-    }
 
     const missing = [];
-    if (!evalType)                        missing.push("ประเภทประเมิน");
-    if (!vendorCode.trim())               missing.push("รหัสผู้ขาย / Vendor Code");
-    else if (vendorStatus === "notfound") missing.push("รหัสผู้ขาย (ไม่พบในระบบ)");
-    else if (vendorStatus === "error")    missing.push("รหัสผู้ขาย (เชื่อมต่อไม่ได้)");
-    if (!productType)  missing.push("ประเภทสินค้า");
-    if (!period)       missing.push("รอบการประเมิน");
+    if (!evalType)                        missing.push("ประเภทการประเมิน");
+    if (!vendorCode.trim())               missing.push("Tax ID / Vendor Code");
+    else if (vendorStatus === "notfound") missing.push("Tax ID / Vendor Code (ไม่พบในระบบ)");
+    else if (vendorStatus === "error")    missing.push("Tax ID / Vendor Code (เชื่อมต่อไม่ได้)");
+    if (!productType) missing.push("ประเภทสินค้า");
+    if (!period)      missing.push("รอบการประเมิน");
 
     if (missing.length > 0) {
-      await showAlert(
-        `กรุณากรอกข้อมูลให้ครบก่อนดำเนินการต่อ\n\nยังขาด:\n• ${missing.join("\n• ")}`,
-        "กรอกข้อมูลไม่ครบ"
-      );
+      await showAlert(`กรุณากรอกข้อมูลให้ครบก่อนดำเนินการต่อ\n\nยังขาด:\n• ${missing.join("\n• ")}`, "กรอกข้อมูลไม่ครบ");
       return;
     }
-
     onSubmit({
-      empId:       authUser.empId,
-      employeeId:  authUser.empId,
-      dept:        authUser.department,
-      evalType,
-      vendorCode,
-      supplierName,
-      productType: PRODUCT_MAP[productType] ?? productType,
-      period,
-      role:        authUser.role,
+      empId: authUser.empId, employeeId: authUser.empId,
+      dept: authUser.department, evalType, vendorCode,
+      supplierName, productType: PRODUCT_MAP[productType] ?? productType,
+      period, role: authUser.role,
     });
   };
 
   const vendorFound = vendorLookup.status === "found";
+  const step = evalType ? (vendorFound ? 3 : 2) : 1;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#fff", fontFamily: "Sarabun, sans-serif" }}>
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+    <div style={{ minHeight: "100vh", background: "#f8fafc", fontFamily: "Sarabun, sans-serif" }}>
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes fadeUp {
+          from { opacity: 0; transform: translateY(16px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .eval-type-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.12) !important; }
+      `}</style>
       {ModalEl}
-      <Header />
-      <div style={{ padding: "14px 20px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {onBack && (
-            <button
-              onClick={onBack}
-              style={{
+
+      {/* ── Top banner ── */}
+      <div style={{ background: themeBg, position: "relative" }}>
+        {/* decorative circles — clipped inside their own overflow:hidden wrapper */}
+        <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
+          <div style={{
+            position: "absolute", width: 320, height: 320, borderRadius: "50%",
+            background: "rgba(255,255,255,0.06)", top: -80, right: -60,
+          }} />
+          <div style={{
+            position: "absolute", width: 180, height: 180, borderRadius: "50%",
+            background: "rgba(255,255,255,0.04)", bottom: -40, left: 100,
+          }} />
+        </div>
+
+        {/* Nav row */}
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "16px 32px", position: "relative", zIndex: 10,
+        }}>
+          <div>
+            {onBack && (
+              <button onClick={onBack} style={{
                 display: "flex", alignItems: "center", gap: 6,
-                background: "none", border: "1.5px solid #d0d0d0",
+                background: "rgba(255,255,255,0.12)", border: "1.5px solid rgba(255,255,255,0.25)",
                 borderRadius: 20, padding: "6px 14px",
-                cursor: "pointer", fontSize: 13, color: "#555",
-                fontFamily: "Sarabun, sans-serif",
+                cursor: "pointer", fontSize: 13, color: "#fff",
+                fontFamily: "Sarabun, sans-serif", transition: "background 0.15s",
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.borderColor = themeColor; e.currentTarget.style.color = themeColor; }}
-              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#d0d0d0"; e.currentTarget.style.color = "#555"; }}
-            >
-              ← หน้าหลัก
-            </button>
-          )}
+                onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.22)"}
+                onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.12)"}
+              >
+                ← หน้าหลัก
+              </button>
+            )}
+          </div>
           <ProfileDropdown
-            user={authUser}
-            profilePic={profilePic}
-            themeColor={themeColor}
-            onProfile={onProfile}
-            onHistory={onHistory}
-            onLogout={onLogout}
+            user={authUser} profilePic={profilePic} themeColor={themeColor}
+            onProfile={onProfile} onHistory={onHistory} onLogout={onLogout}
           />
+        </div>
+
+        {/* Hero text */}
+        <div style={{ padding: "8px 32px 36px", position: "relative", zIndex: 1 }}>
+          <h1 style={{ fontSize: 28, fontWeight: 800, color: "#fff", margin: "0 0 8px", lineHeight: 1.2 }}>
+            ประเมิน Supplier
+          </h1>
+          <p style={{ fontSize: 14, color: "rgba(255,255,255,0.75)", margin: 0 }}>
+            กรอกข้อมูลด้านล่างเพื่อเริ่มต้นแบบประเมินผู้ขาย
+          </p>
         </div>
       </div>
 
-      <div style={{ maxWidth: 700, margin: "0 auto", padding: "40px 20px" }}>
-        <h1 style={{ fontSize: 26, fontWeight: 700, marginBottom: 24, textAlign: "center" }}>
-          ประเมิน Supplier
-        </h1>
-
+      {/* ── Form card ── */}
+      <div style={{ maxWidth: 680, margin: "-20px auto 40px", padding: "0 20px", position: "relative", zIndex: 2 }}>
         <div style={{
-          border: `3px solid ${themeColor}`,
-          borderRadius: 8, textAlign: "left",
+          background: "#fff", borderRadius: 16,
+          boxShadow: "0 4px 32px rgba(0,0,0,0.10)",
+          animation: "fadeUp 0.35s ease",
         }}>
-          <div style={{ background: themeColor, height: 8, borderRadius: "5px 5px 0 0" }} />
 
-          <div style={{ padding: "20px 24px" }}>
-
-            {/* Role badge */}
+          {/* User info strip */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 14,
+            padding: "16px 24px",
+            background: isGCP ? "#eff6ff" : "#f0fdf4",
+            borderBottom: `1px solid ${isGCP ? "#bfdbfe" : "#bbf7d0"}`,
+            borderRadius: "16px 16px 0 0",
+          }}>
             <div style={{
-              display: "flex", alignItems: "center", gap: 10, marginBottom: 18,
-              padding: "10px 14px",
-              background: isGCP ? "#e3f2fd" : "#f1f8e9",
-              border: `1.5px solid ${isGCP ? "#90caf9" : "#a5d6a7"}`,
-              borderRadius: 8,
+              width: 42, height: 42, borderRadius: 10,
+              background: themeColor, color: "#fff",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 16, fontWeight: 700, flexShrink: 0, overflow: "hidden",
             }}>
-              <div style={{
-                width: 40, height: 40, borderRadius: "50%",
-                background: themeColor, color: "#fff",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 18, fontWeight: 700, flexShrink: 0,
-              }}>
-                {authUser.fullName?.[0] ?? "?"}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: 14, color: themeColor }}>
-                  {authUser.fullName}
-                </div>
-                <div style={{ fontSize: 12, color: "#555", marginTop: 1 }}>
-                  {authUser.empId} · {authUser.department}
-                  {authUser.jobTitle && ` · ${authUser.jobTitle}`}
-                </div>
-              </div>
-              <span style={{
-                background: themeColor, color: "#fff",
-                borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 700, flexShrink: 0,
-              }}>
-                {isGCP ? "GCP" : "USER"}
-              </span>
+              {profilePic
+                ? <img src={profilePic} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                : (authUser.fullName?.[0] ?? "?")}
             </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#111827" }}>{authUser.fullName}</div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 1 }}>
+                {authUser.empId}{authUser.department ? ` · ${authUser.department}` : ""}
+                {authUser.jobTitle ? ` · ${authUser.jobTitle}` : ""}
+              </div>
+            </div>
+            <span style={{
+              background: themeColor, color: "#fff",
+              borderRadius: 6, padding: "4px 12px", fontSize: 11, fontWeight: 700, flexShrink: 0,
+            }}>
+              {authUser.role}
+            </span>
+          </div>
 
-            {isGCP && (
-              <div style={{
-                background: "#e3f2fd", border: "1.5px solid #90caf9",
-                borderRadius: 8, padding: "10px 14px", marginBottom: 16,
-                fontSize: 12, display: "flex", gap: 8, alignItems: "flex-start", color: "#1565c0",
-              }}>
-                <Info size={16} style={{ flexShrink: 0 }} />
-                <span>
-                  เจ้าหน้าที่ GCP จะเห็นแบบประเมินทั้งหมด แต่สามารถกรอกได้เฉพาะส่วนของฝ่ายจัดซื้อเท่านั้น
+          {isGCP && (
+            <div style={{
+              display: "flex", gap: 10, alignItems: "flex-start",
+              padding: "12px 24px",
+              background: "#eff6ff", borderBottom: "1px solid #bfdbfe",
+              fontSize: 12, color: "#1d4ed8",
+            }}>
+              <Info size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>เจ้าหน้าที่ GCP จะเห็นแบบประเมินทั้งหมด แต่สามารถกรอกได้เฉพาะส่วนของฝ่ายจัดซื้อเท่านั้น</span>
+            </div>
+          )}
+
+          <div style={{ padding: "28px 28px 32px" }}>
+
+            {/* Step 1: Eval type */}
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                <div style={{
+                  width: 24, height: 24, borderRadius: "50%",
+                  background: evalType ? themeColor : "#e5e7eb",
+                  color: evalType ? "#fff" : "#9ca3af",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 12, fontWeight: 700, flexShrink: 0, transition: "background 0.2s",
+                }}>1</div>
+                <span style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>
+                  ประเภทการประเมิน <span style={{ color: "#ef4444" }}>*</span>
                 </span>
               </div>
-            )}
-
-            {/* ── ประเภทประเมิน ── */}
-            <div style={{ marginBottom: evalType ? 14 : 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
-                ประเภทประเมิน<span style={{ color: "#e53935" }}>*</span>
-              </div>
-              <div style={{ display: "flex", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 {[
-                  { value: "new_supplier", label: "pre-Evaluation"  },
-                  { value: "post_eval",    label: "post-Evaluation" },
-                ].map(({ value: v, label }) => (
-                  <label
-                    key={v}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 8,
-                      border: `1.5px solid ${evalType === v ? themeColor : "#bbb"}`,
-                      borderRadius: 6, padding: "8px 18px",
-                      cursor: "pointer", fontSize: 13, fontFamily: "monospace",
-                      background: evalType === v
-                        ? (isGCP ? "#e3f2fd" : "#f1f8e9")
-                        : "#fff",
-                    }}
-                  >
-                    <input
-                      type="radio"
-                      name="evaltype"
-                      value={v}
-                      checked={evalType === v}
-                      onChange={() => {
-                        setEvalType(v);
-                        setPeriod(v === "new_supplier" ? PRE_PERIOD_OPTIONS[0] : "");
-                      }}
-                      style={{ accentColor: themeColor }}
-                    />
-                    {label}
-                  </label>
-                ))}
+                  { value: "new_supplier", label: "Pre-Evaluation",  desc: "ผู้ขายรายใหม่", icon: <FileText size={20} /> },
+                  { value: "post_eval",    label: "Post-Evaluation", desc: "ประเมินรายคาบ",  icon: <BarChart3 size={20} /> },
+                ].map(({ value: v, label, desc, icon }) => {
+                  const active = evalType === v;
+                  return (
+                    <label key={v} className="eval-type-card" style={{
+                      display: "flex", alignItems: "center", gap: 14,
+                      border: `2px solid ${active ? themeColor : "#e5e7eb"}`,
+                      borderRadius: 12, padding: "14px 18px",
+                      cursor: "pointer", background: active ? (isGCP ? "#eff6ff" : "#f0fdf4") : "#fafafa",
+                      boxShadow: active ? `0 4px 16px ${themeColor}28` : "0 1px 4px rgba(0,0,0,0.06)",
+                      transition: "all 0.2s", userSelect: "none",
+                    }}>
+                      <input type="radio" name="evaltype" value={v} checked={active}
+                        onChange={() => { setEvalType(v); setPeriod(v === "new_supplier" ? PRE_PERIOD_OPTIONS[0] : ""); }}
+                        style={{ display: "none" }} />
+                      <div style={{
+                        width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+                        background: active ? themeColor : "#e5e7eb",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        color: active ? "#fff" : "#9ca3af", transition: "all 0.2s",
+                      }}>{icon}</div>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: active ? themeColor : "#374151", transition: "color 0.2s" }}>
+                          {label}
+                        </div>
+                        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>{desc}</div>
+                      </div>
+                      {active && (
+                        <CheckCircle2 size={16} style={{ color: themeColor, marginLeft: "auto", flexShrink: 0 }} />
+                      )}
+                    </label>
+                  );
+                })}
               </div>
             </div>
 
-            {/* ── Supplier fields ── */}
+            {/* Step 2 & 3: Supplier fields */}
             {evalType && (
-              <div style={{
-                border: "1.5px solid #ccc", borderRadius: 8,
-                padding: 16, background: "#fafafa", marginTop: 14,
-              }}>
-                <div style={{ display: "flex", gap: 14, marginBottom: 14 }}>
+              <div style={{ animation: "fadeUp 0.25s ease" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
+                  <div style={{
+                    width: 24, height: 24, borderRadius: "50%",
+                    background: vendorFound ? themeColor : "#e5e7eb",
+                    color: vendorFound ? "#fff" : "#9ca3af",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 12, fontWeight: 700, flexShrink: 0, transition: "background 0.2s",
+                  }}>2</div>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>ข้อมูลผู้ขาย</span>
+                </div>
 
-                  {/* Vendor Code */}
-                  <div style={{ flex: 1 }}>
-                    <GreenInput
-                      label="เลขประจำตัวผู้เสียภาษี/Tex ID"
-                      required
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+                  {/* Vendor code */}
+                  <Field label="Tax ID / Vendor Code" required>
+                    <TextInput
                       value={vendorCode}
-                      onChange={(v) => {
-                        setVendorCode(v);
-                        setVendorLookup({ status: "idle", data: null });
-                        setSupplierName("");
-                        setProductType("");
-                      }}
+                      onChange={v => { setVendorCode(v); setVendorLookup({ status: "idle", data: null }); setSupplierName(""); setProductType(""); }}
                       onBlur={() => lookupVendor(vendorCode)}
                       placeholder="เช่น SUP-001"
+                      themeColor={themeColor}
                     />
-                    {vendorLookup.status === "loading" && (
-                      <div style={{ fontSize: 12, color: "#888", marginTop: 4, display: "flex", alignItems: "center", gap: 5 }}>
-                        <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> กำลังค้นหา...
-                      </div>
-                    )}
-                    {vendorLookup.status === "notfound" && (
-                      <div style={{ fontSize: 12, color: "#e53935", marginTop: 4, display: "flex", alignItems: "center", gap: 5 }}>
-                        <AlertCircle size={12} /> ไม่พบ Vendor Code นี้ในระบบ
-                      </div>
-                    )}
-                    {vendorLookup.status === "error" && (
-                      <div style={{ fontSize: 12, color: "#e53935", marginTop: 4, display: "flex", alignItems: "center", gap: 5 }}>
-                        <AlertCircle size={12} /> ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้</div>
-                    )}
-                  </div>
-
-                  {/* Supplier Name — auto-filled */}
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#222" }}>
-                      ชื่อผู้ขาย/Supplier
-                      {vendorFound && (
-                        <span style={{ fontSize: 11, color: "#888", fontWeight: 400 }}> (จากระบบ)</span>
+                    <div style={{ marginTop: 5, minHeight: 18 }}>
+                      {vendorLookup.status === "loading" && (
+                        <span style={{ fontSize: 11, color: "#6b7280", display: "flex", alignItems: "center", gap: 4 }}>
+                          <Loader2 size={11} style={{ animation: "spin 0.8s linear infinite" }} /> กำลังค้นหา...
+                        </span>
                       )}
-                    </div>
-                    <div style={{
-                      background: vendorFound ? "#f0f0f0" : "#d4f5c8",
-                      border: `1.5px solid ${vendorFound ? "#aaa" : "#888"}`,
-                      borderRadius: 8, padding: "8px 14px", fontSize: 14,
-                      color: supplierName ? "#222" : "#999",
-                      minHeight: 40, display: "flex", alignItems: "center",
-                    }}>
-                      {supplierName || (
-                        <span style={{ fontStyle: "italic", fontSize: 13 }}>
-                          กรอก Tex ID ก่อน
+                      {vendorLookup.status === "notfound" && (
+                        <span style={{ fontSize: 11, color: "#ef4444", display: "flex", alignItems: "center", gap: 4 }}>
+                          <AlertCircle size={11} /> ไม่พบ Vendor Code นี้ในระบบ
+                        </span>
+                      )}
+                      {vendorLookup.status === "error" && (
+                        <span style={{ fontSize: 11, color: "#ef4444", display: "flex", alignItems: "center", gap: 4 }}>
+                          <AlertCircle size={11} /> เชื่อมต่อเซิร์ฟเวอร์ไม่ได้
+                        </span>
+                      )}
+                      {vendorFound && (
+                        <span style={{ fontSize: 11, color: "#15803d", display: "flex", alignItems: "center", gap: 4 }}>
+                          <CheckCircle2 size={11} /> พบข้อมูลผู้ขายแล้ว
                         </span>
                       )}
                     </div>
-                  </div>
+                  </Field>
+
+                  {/* Supplier name */}
+                  <Field label="ชื่อผู้ขาย / Supplier" hint={vendorFound ? "(จากระบบ)" : ""}>
+                    <ReadBox
+                      value={supplierName}
+                      placeholder="จะแสดงอัตโนมัติ"
+                      locked={vendorFound}
+                    />
+                  </Field>
                 </div>
 
-                <div style={{ display: "flex", gap: 14 }}>
-
-                  {/* Product Type — auto-filled when vendor found */}
-                  <div style={{ flex: 1 }}>
-                    {vendorFound ? (
-                      <>
-                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#222" }}>
-                          ประเภทสินค้า <span style={{ fontSize: 11, color: "#888", fontWeight: 400 }}>(จากระบบ)</span>
-                        </div>
-                        <div style={{
-                          background: "#f0f0f0", border: "1.5px solid #aaa",
-                          borderRadius: 8, padding: "8px 14px", fontSize: 14, color: "#444",
-                        }}>
-                          {PRODUCT_LABEL[productType] ?? productType}
-                        </div>
-                      </>
-                    ) : (
-                      <CustomSelect
-                        label="ประเภทสินค้า"
-                        required
-                        options={PRODUCT_TYPE_OPTIONS}
-                        value={productType}
-                        onChange={setProductType}
-                      />
-                    )}
-                  </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                  {/* Product type */}
+                  <Field label="ประเภทสินค้า" required hint={vendorFound ? "(จากระบบ)" : ""}>
+                    {vendorFound
+                      ? <ReadBox value={PRODUCT_LABEL[productType] ?? productType} locked />
+                      : (
+                        <StyledSelect
+                          options={PRODUCT_TYPE_OPTIONS}
+                          value={productType}
+                          onChange={setProductType}
+                          placeholder="เลือกประเภท"
+                          themeColor={themeColor}
+                        />
+                      )
+                    }
+                  </Field>
 
                   {/* Period */}
-                  {evalType === "new_supplier" ? (
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#222" }}>
-                        รอบการประเมิน<span style={{ color: "#e53935" }}>*</span>
-                      </div>
-                      <div style={{
-                        background: "#f0f0f0", border: "1.5px solid #aaa",
-                        borderRadius: 8, padding: "8px 14px", fontSize: 14, color: "#444",
-                      }}>
-                        {PRE_PERIOD_OPTIONS[0]}
-                      </div>
-                    </div>
-                  ) : (
-                    <CustomSelect
-                      label="รอบการประเมิน"
-                      required
-                      options={EVAL_PERIOD_OPTIONS}
-                      value={period}
-                      onChange={setPeriod}
-                    />
-                  )}
+                  <Field label="รอบการประเมิน" required>
+                    {evalType === "new_supplier"
+                      ? <ReadBox value={PRE_PERIOD_OPTIONS[0]} locked />
+                      : (
+                        <StyledSelect
+                          options={EVAL_PERIOD_OPTIONS}
+                          value={period}
+                          onChange={setPeriod}
+                          placeholder="เลือกรอบ"
+                          themeColor={themeColor}
+                        />
+                      )
+                    }
+                  </Field>
                 </div>
               </div>
             )}
-          </div>
-        </div>
 
-        {/* Submit */}
-        <div style={{ textAlign: "center", marginTop: 28 }}>
-          <GreenButton
-            onClick={handleSubmit}
-            color={isGCP ? "#1565c0" : "#2e7d32"}
-          >
-            {isGCP ? "GCP เริ่มประเมิน Supplier" : "เริ่มประเมิน Supplier"}
-          </GreenButton>
+            {/* Submit */}
+            <div style={{ marginTop: 28 }}>
+              <button
+                onClick={handleSubmit}
+                style={{
+                  width: "100%", padding: "14px 24px",
+                  background: themeColor,
+                  border: "none", borderRadius: 10, cursor: "pointer",
+                  color: "#fff", fontSize: 15, fontWeight: 700,
+                  fontFamily: "Sarabun, sans-serif",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                  boxShadow: `0 4px 16px ${themeColor}50`,
+                  transition: "opacity 0.15s, transform 0.15s",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.opacity = "0.9"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                onMouseLeave={e => { e.currentTarget.style.opacity = "1";   e.currentTarget.style.transform = "translateY(0)"; }}
+              >
+                {isGCP ? "GCP เริ่มประเมิน Supplier" : "เริ่มประเมิน Supplier"}
+                <ArrowRight size={17} />
+              </button>
+            </div>
+
+          </div>
         </div>
       </div>
     </div>
