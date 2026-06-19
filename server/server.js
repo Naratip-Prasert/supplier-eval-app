@@ -59,6 +59,16 @@ pool.connect()
       `ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS raw_scores JSONB`
     ).catch(() => {});
 
+    // auth.js / the default-admin bootstrap below both need these columns,
+    // but no tracked migration ever created them — only present today
+    // because they were added directly on the live DB at some point.
+    await client.query(`
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS email VARCHAR(200) UNIQUE;
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS password_hash TEXT;
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS reset_token VARCHAR(100);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMPTZ;
+    `).catch(err => console.warn('employees auth columns migration warning:', err.message));
+
     // Rename role BU → USER, add ADMIN to evaluations constraint
     // UPDATE data FIRST, then ADD CONSTRAINT (constraint validates existing rows immediately)
     await client.query(`
@@ -176,12 +186,16 @@ pool.connect()
         CHECK (role IN ('USER', 'GCP', 'ADMIN', 'SUPERVISOR'))
     `).catch(err => console.warn('employees role migration warning:', err.message));
 
-    // evaluation_sessions: add new eval_type + status values
+    // evaluation_sessions: 'new_supplier' was really just the manual-entry
+    // name for what the task system calls 'pre_eval' — same meaning, two
+    // strings. Rename so there's one canonical value, then add new
+    // eval_type + status values.
     await client.query(`
       ALTER TABLE evaluation_sessions DROP CONSTRAINT IF EXISTS evaluation_sessions_eval_type_check;
+      UPDATE evaluation_sessions SET eval_type = 'pre_eval' WHERE eval_type = 'new_supplier';
       ALTER TABLE evaluation_sessions
         ADD CONSTRAINT evaluation_sessions_eval_type_check
-        CHECK (eval_type IN ('new_supplier','post_eval','pre_eval','half_year','yearly'));
+        CHECK (eval_type IN ('post_eval','pre_eval','half_year','yearly'));
 
       ALTER TABLE evaluation_sessions DROP CONSTRAINT IF EXISTS evaluation_sessions_status_check;
       ALTER TABLE evaluation_sessions
@@ -350,6 +364,23 @@ pool.connect()
         ADD CONSTRAINT evaluation_tasks_role_check
         CHECK (role IN ('ADMIN','USER','GCP','SUPERVISOR'));
     `).catch(err => console.warn('evaluation_tasks role migration warning:', err.message));
+
+    // evaluation_criteria: scope codes by criteria_set so PRE_CRITERIA and
+    // POST_CRITERIA (src/constants.js) can both store code "1.1" etc. with
+    // their own (different) meaning, then mirror constants.js into the DB
+    // so server-side scoring (routes/evaluations.js) recognizes every code
+    // the frontend form actually submits.
+    await client.query(`
+      ALTER TABLE evaluation_criteria ADD COLUMN IF NOT EXISTS criteria_set VARCHAR(10) NOT NULL DEFAULT 'legacy';
+      ALTER TABLE evaluation_criteria DROP CONSTRAINT IF EXISTS evaluation_criteria_code_key;
+      ALTER TABLE evaluation_criteria DROP CONSTRAINT IF EXISTS evaluation_criteria_set_code_key;
+      ALTER TABLE evaluation_criteria ADD CONSTRAINT evaluation_criteria_set_code_key UNIQUE (criteria_set, code);
+    `).catch(err => console.warn('evaluation_criteria criteria_set migration warning:', err.message));
+
+    const { seedCriteriaFromConstants } = require('./utils/seedCriteriaFromConstants');
+    await seedCriteriaFromConstants(client)
+      .then(() => console.log('✅ evaluation_criteria seeded from src/constants.js'))
+      .catch(err => console.warn('criteria seed warning:', err.message));
 
     // Create default ADMIN account if none exists
     const bcrypt = require('bcrypt');

@@ -178,7 +178,7 @@ router.post('/upload/pre-post', upload.single('file'), async (req, res) => {
           uploaderId]);
       const sessionId = sessionResult.rows[0].id;
 
-      // Match buyer (GCP) and evaluator (BU) by email
+      // Match buyer (GCP) and evaluator (USER) by email
       const gcpMatch = buyerEmail
         ? await client.query(`SELECT id, full_name, email FROM employees WHERE email = $1 AND is_active = TRUE LIMIT 1`, [buyerEmail])
         : { rows: [] };
@@ -199,7 +199,7 @@ router.post('/upload/pre-post', upload.single('file'), async (req, res) => {
         summary.warnings.push(`Buyer Email และ Evaluator Email เป็นคนเดียวกัน ("${buyerEmail}") สำหรับ "${supplierName}" — งานนี้จะไม่เข้าคิว supervisor ได้ ต้องใช้คนละคน`);
       }
 
-      // Create tasks for GCP and BU
+      // Create tasks for GCP and USER
       const taskRows = [
         { role: 'GCP', email: buyerEmail, name: buyerName, empId: gcpMatch.rows[0]?.id || null, empName: gcpMatch.rows[0]?.full_name || buyerName },
         { role: 'USER', email: evalEmail,  name: evalName,  empId: buMatch.rows[0]?.id  || null, empName: buMatch.rows[0]?.full_name  || evalName  },

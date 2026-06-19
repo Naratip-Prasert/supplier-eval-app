@@ -4,7 +4,6 @@ import { Header } from "../components";
 import { authFetch } from "../utils/api";
 
 const EVAL_TYPE_LABEL = {
-  new_supplier: "New Supplier",
   pre_eval:     "Pre-Evaluation",
   post_eval:    "Post 90 Days",
   half_year:    "Half-Year",

@@ -50,7 +50,7 @@ async function computeScoreAndGrade(client, scoresInput, criteriaMap) {
 // {
 //   employeeId: "EMP-001",
 //   vendorCode: "SUP-001",
-//   evalType:   "new_supplier" | "re_evaluation",
+//   evalType:   "pre_eval" | "post_eval" | "half_year" | "yearly",
 //   period:     "Annual / รายปี",
 //   productType:"goods" | "services" | "both",
 //   scores: {
@@ -103,14 +103,15 @@ router.post('/', async (req, res) => {
     const evalRole = ['USER', 'GCP', 'ADMIN'].includes(employee.role) ? employee.role : 'USER';
 
     let sessionId;
+    let sessionEvalType;
 
     // 4a. If submitted from an assigned task, attach to that exact session
-    // instead of fuzzy-matching by (supplier, period, evalType) — the task
-    // system uses eval_type values (pre_eval/half_year/yearly) the legacy
-    // manual-entry flow below doesn't produce, so they'd never match.
+    // instead of fuzzy-matching by (supplier, period, evalType) — task
+    // sessions must only be filled by their assigned employee, not by
+    // anyone who happens to submit a matching (supplier, period, evalType).
     if (taskSessionId) {
       const taskSessionResult = await client.query(
-        `SELECT id FROM evaluation_sessions
+        `SELECT id, eval_type FROM evaluation_sessions
           WHERE id = $1 AND supplier_id = $2 AND status IN ('pending', 'in_progress', 'returned')`,
         [taskSessionId, supplier.id]
       );
@@ -119,6 +120,7 @@ router.post('/', async (req, res) => {
         return res.status(400).json({ message: 'ไม่พบงานประเมินนี้ หรืองานถูกดำเนินการไปแล้ว', field: 'sessionId' });
       }
       sessionId = taskSessionResult.rows[0].id;
+      sessionEvalType = taskSessionResult.rows[0].eval_type;
 
       const dupResult = await client.query(
         `SELECT id FROM evaluations WHERE session_id = $1 AND role = $2`,
@@ -131,19 +133,25 @@ router.post('/', async (req, res) => {
       }
     } else {
       // 4b. Legacy manual-entry flow — validate eval_type, find or create session
-      const validEvalTypes = ['new_supplier', 'post_eval', 'pre_eval', 'half_year', 'yearly'];
+      const validEvalTypes = ['post_eval', 'pre_eval', 'half_year', 'yearly'];
       if (!validEvalTypes.includes(evalType)) {
         await client.query('ROLLBACK');
         console.warn(`[evaluations] evalType ไม่ถูกต้อง: "${evalType}" (รับได้: ${validEvalTypes.join(', ')})`);
         return res.status(400).json({ message: 'ประเภทการประเมินไม่ถูกต้อง', field: 'evalType' });
       }
 
+      // Exclude sessions already owned by the task-assignment system (admin
+      // bulk-upload flow) — they share eval_type/period values with this
+      // manual flow (e.g. both use "pre_eval" + "New Supplier / ผู้ขายรายใหม่"),
+      // so without this guard a manual submission could attach itself to a
+      // session that's meant to be filled only by its assigned task.
       const sessionResult = await client.query(
-        `SELECT id FROM evaluation_sessions
+        `SELECT id FROM evaluation_sessions es
           WHERE supplier_id = $1
             AND period      = $2
             AND eval_type   = $3
             AND status IN ('pending', 'in_progress', 'returned')
+            AND NOT EXISTS (SELECT 1 FROM evaluation_tasks et WHERE et.session_id = es.id)
           ORDER BY created_at DESC
           LIMIT 1`,
         [supplier.id, period, evalType]
@@ -169,15 +177,23 @@ router.post('/', async (req, res) => {
         );
         sessionId = newSession.rows[0].id;
       }
+      sessionEvalType = evalType;
     }
 
     // 6. Load criteria to resolve codes → UUIDs + default weights
+    // PRE_CRITERIA and POST_CRITERIA (src/constants.js) reuse the same code
+    // numbers (e.g. "1.1") for different criteria, so lookups must be scoped
+    // by criteria_set — same mapping the frontend's getCriteria/isPostEvalType
+    // (src/constants.js) use to choose between PRE_CRITERIA and POST_CRITERIA.
+    const criteriaSet = ['post_eval', 'half_year', 'yearly'].includes(sessionEvalType)
+      ? 'post_eval'
+      : 'pre_eval';
     const codes = Object.keys(scores);
     const criteriaResult = await client.query(
       `SELECT id, code, default_weight
          FROM evaluation_criteria
-        WHERE code = ANY($1) AND is_active = TRUE`,
-      [codes]
+        WHERE code = ANY($1) AND is_active = TRUE AND criteria_set = $2`,
+      [codes, criteriaSet]
     );
     const criteriaMap = {};
     criteriaResult.rows.forEach(c => { criteriaMap[c.code] = c; });

@@ -18,7 +18,7 @@ const GRADE_COLOR = {
   F: { bg: "#fce7f3", text: "#831843", bar: "#db2777" },
 };
 
-const EVAL_LABEL = { new_supplier: "Pre", post_eval: "Post" };
+const EVAL_LABEL = { pre_eval: "Pre", post_eval: "Post" };
 const PRODUCT_LABEL = { goods: "สินค้า", services: "บริการ", both: "สินค้า+บริการ" };
 
 function formatDate(iso) {
@@ -216,7 +216,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
                 <div>
                   <div style={{ fontSize: 11, color: "#9ca3af", fontWeight: 600, marginBottom: 6, textTransform: "uppercase" }}>ประเภท</div>
                   <div style={{ display: "flex", gap: 6 }}>
-                    {[["all","ทั้งหมด"],["new_supplier","Pre"],["post_eval","Post"]].map(([v,l]) => (
+                    {[["all","ทั้งหมด"],["pre_eval","Pre"],["post_eval","Post"]].map(([v,l]) => (
                       <Pill key={v} active={filterEval===v} onClick={()=>handleEvalFilter(v)} color={themeColor}>{l}</Pill>
                     ))}
                   </div>

@@ -16,7 +16,7 @@ const TASK_STATUS_COLORS = {
   overdue:   { bg: "#ffebee", color: "#c62828", label: "เกินกำหนด" },
 };
 const EVAL_TYPE_LABEL = {
-  new_supplier: "New Supplier", pre_eval: "Pre-Eval",
+  pre_eval: "Pre-Eval",
   post_eval: "Post 90d", half_year: "Half-Year", yearly: "Yearly",
 };
 

@@ -1295,6 +1295,18 @@ export const POST_CRITERIA = [
   },
 ];
 
+// post_eval/half_year/yearly all score against POST_CRITERIA; pre_eval (and
+// the now-retired "new_supplier") score against PRE_CRITERIA — same mapping
+// the backend uses (server/routes/evaluations.js criteriaSet resolution) so
+// the two stay in sync.
+export function isPostEvalType(evalType) {
+  return ["post_eval", "half_year", "yearly"].includes(evalType);
+}
+
+export function getCriteria(evalType) {
+  return isPostEvalType(evalType) ? POST_CRITERIA : PRE_CRITERIA;
+}
+
 export function getGrade(score) {
   const s = Math.round(score * 10) / 10; // round to 1dp — matches .toFixed(1) display
   if (s >= 90) return "A";

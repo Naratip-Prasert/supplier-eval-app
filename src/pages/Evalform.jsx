@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Header, GreenButton, useModal } from "../components";
-import { PRE_CRITERIA, POST_CRITERIA, LEVEL_COLORS, GRADE_MAP, GRADE_GUIDE, getGrade } from "../constants";
+import { getCriteria, isPostEvalType, LEVEL_COLORS, GRADE_MAP, GRADE_GUIDE, getGrade } from "../constants";
 import { AlertTriangle, FileText } from "lucide-react";
 
 const LEVEL_LABELS       = ["ต้องปรับปรุง (Unsatisfactory)", "ต่ำกว่าเกณฑ์ (Below Standard)", "ผ่านเกณฑ์ (Satisfactory)", "ดี (Good)", "ดีเยี่ยม (Excellent)"];
@@ -44,7 +44,7 @@ function initWeights(criteria) {
 // ---- main component ----------------------------------------
 
 export default function EvalForm({ formData, savedState, user, profilePic, onBack, onDone }) {
-  const CRITERIA = formData.evalType === "post_eval" ? POST_CRITERIA : PRE_CRITERIA;
+  const CRITERIA = getCriteria(formData.evalType);
 
   const { showConfirm, ModalEl } = useModal();
   const [scores,       setScores]       = useState(() => savedState?.scores      ?? {});
@@ -77,7 +77,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
   const grade      = getGrade(totalScore);
   const gradeColor = GRADE_MAP[grade];
   const subtitle   = `${formData.empId || "BJC-XXXXX"}|${formData.dept || "ฝ่าย"}`;
-  const evalLabel  = formData.evalType === "post_eval" ? "Post" : "Pre";
+  const evalLabel  = isPostEvalType(formData.evalType) ? "Post" : "Pre";
 
   const handleSectionWeightChange = (si, newVal) => {
     const clamped = Math.max(0, Math.min(100, Number(newVal) || 0));

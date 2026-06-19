@@ -17,7 +17,7 @@ const PRODUCT_MAP   = { "สินค้า": "goods", "บริการ": "se
 const PRODUCT_LABEL = { goods: "สินค้า", services: "บริการ", both: "สินค้าและบริการ" };
 
 const TASK_EVAL_TYPE_LABEL = {
-  pre_eval: "Pre-Evaluation (Supplier ใหม่)", new_supplier: "Pre-Evaluation",
+  pre_eval: "Pre-Evaluation (Supplier ใหม่)",
   post_eval: "Post-Evaluation (90 วัน)", half_year: "Half-Year Evaluation", yearly: "Yearly Evaluation",
 };
 const CRITERIA_EVAL_TYPE = { post_eval: "post_eval", half_year: "post_eval", yearly: "post_eval" };
@@ -233,7 +233,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
       empId:        authUser.empId,
       employeeId:   authUser.empId,
       dept:         authUser.department,
-      evalType:     CRITERIA_EVAL_TYPE[task.evalType] ?? "new_supplier",
+      evalType:     CRITERIA_EVAL_TYPE[task.evalType] ?? "pre_eval",
       vendorCode:   task.vendorCode,
       supplierName: task.supplierName,
       productType:  task.productType,
@@ -501,7 +501,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 {[
-                  { value: "new_supplier", label: "Pre-Evaluation",  desc: "ผู้ขายรายใหม่", icon: <FileText size={20} /> },
+                  { value: "pre_eval", label: "Pre-Evaluation",  desc: "ผู้ขายรายใหม่", icon: <FileText size={20} /> },
                   { value: "post_eval",    label: "Post-Evaluation", desc: "ประเมินรายคาบ",  icon: <BarChart3 size={20} /> },
                 ].map(({ value: v, label, desc, icon }) => {
                   const active = evalType === v;
@@ -515,7 +515,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                       transition: "all 0.2s", userSelect: "none",
                     }}>
                       <input type="radio" name="evaltype" value={v} checked={active}
-                        onChange={() => { setEvalType(v); setPeriod(v === "new_supplier" ? PRE_PERIOD_OPTIONS[0] : ""); }}
+                        onChange={() => { setEvalType(v); setPeriod(v === "pre_eval" ? PRE_PERIOD_OPTIONS[0] : ""); }}
                         style={{ display: "none" }} />
                       <div style={{
                         width: 40, height: 40, borderRadius: 10, flexShrink: 0,
@@ -615,7 +615,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
 
                   {/* Period */}
                   <Field label="รอบการประเมิน" required>
-                    {evalType === "new_supplier"
+                    {evalType === "pre_eval"
                       ? <ReadBox value={PRE_PERIOD_OPTIONS[0]} locked />
                       : (
                         <StyledSelect

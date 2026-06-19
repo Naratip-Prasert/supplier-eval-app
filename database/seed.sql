@@ -89,6 +89,12 @@ ON CONFLICT (code) DO NOTHING;
 
 -- ============================================================
 -- EVALUATION CRITERIA
+-- NOTE: the rows below are legacy/unused placeholder criteria
+-- (criteria_set defaults to 'legacy'). The criteria the frontend
+-- actually scores against (PRE_CRITERIA / POST_CRITERIA in
+-- src/constants.js) are seeded automatically on server startup —
+-- see server/utils/seedCriteriaFromConstants.js — so they stay in
+-- sync with constants.js instead of being duplicated here by hand.
 -- ============================================================
 INSERT INTO evaluation_criteria (category_id, code, name_th, name_en, detail_th, default_weight, display_order)
 VALUES

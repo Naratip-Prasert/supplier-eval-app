@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { authFetch } from "./utils/api";
-import { PRE_CRITERIA, POST_CRITERIA } from "./constants";
+import { getCriteria } from "./constants";
 import PortalPage         from "./pages/PortalPage";
 import LandingPage        from "./pages/LandingPage";
 import EvalForm           from "./pages/Evalform";
@@ -23,7 +23,7 @@ function EvalHistoryLoader({ evalId, user, profilePic, onBack }) {
     authFetch(`/api/evaluations/${evalId}`)
       .then(r => r.json())
       .then(d => {
-        const CRITERIA = d.evalType === "post_eval" ? POST_CRITERIA : PRE_CRITERIA;
+        const CRITERIA = getCriteria(d.evalType);
 
         // Scores are stored as 0-5 normalized (rawLv/maxLv*5) at submit time.
         // Reverse to raw level scale so sectionSummary formula (lv/maxLv)*weight works correctly.

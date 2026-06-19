@@ -11,12 +11,19 @@ const pool   = require('../db');
 // The frontend uses this to render the scoring table dynamically.
 router.get('/', async (req, res) => {
   try {
+    // criteria_set mirrors the frontend's PRE_CRITERIA/POST_CRITERIA split
+    // (src/constants.js) — codes like "1.1" are reused with different
+    // meanings across sets, so callers must pick one.
+    const criteriaSet = req.query.evalType === 'post_eval' ? 'post_eval' : 'pre_eval';
+
     const [categoriesResult, criteriaResult, levelsResult] = await Promise.all([
       pool.query(
         `SELECT id, code, name_th AS "nameTh", name_en AS "nameEn",
                 total_weight AS "totalWeight", display_order AS "displayOrder"
            FROM evaluation_categories
-          ORDER BY display_order`
+          WHERE code LIKE $1
+          ORDER BY display_order`,
+        [criteriaSet === 'post_eval' ? 'POST-%' : 'PRE-%']
       ),
       pool.query(
         `SELECT id, category_id AS "categoryId", code,
@@ -25,8 +32,9 @@ router.get('/', async (req, res) => {
                 default_weight AS "defaultWeight",
                 display_order AS "displayOrder"
            FROM evaluation_criteria
-          WHERE is_active = TRUE
-          ORDER BY display_order`
+          WHERE is_active = TRUE AND criteria_set = $1
+          ORDER BY display_order`,
+        [criteriaSet]
       ),
       pool.query(
         `SELECT criterion_id AS "criterionId", level, description

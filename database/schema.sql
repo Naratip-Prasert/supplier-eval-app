@@ -110,14 +110,19 @@ CREATE TABLE evaluation_categories (
 CREATE TABLE evaluation_criteria (
   id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   category_id     UUID        NOT NULL REFERENCES evaluation_categories(id) ON DELETE CASCADE,
-  code            VARCHAR(20) UNIQUE NOT NULL,       -- e.g. "1.1", "2.2"
+  code            VARCHAR(20) NOT NULL,              -- e.g. "1.1", "2.2"
   name_th         VARCHAR(400) NOT NULL,
   name_en         VARCHAR(400),
   detail_th       TEXT,                              -- full description of criteria
   default_weight  DECIMAL(5,2) NOT NULL DEFAULT 0,  -- baseline weight (%)
   display_order   INTEGER     NOT NULL,
   is_active       BOOLEAN     DEFAULT TRUE,
-  created_at      TIMESTAMPTZ DEFAULT NOW()
+  -- PRE_CRITERIA / POST_CRITERIA (src/constants.js) reuse the same code
+  -- numbers (e.g. "1.1") for different criteria, so codes are only unique
+  -- within a set, not globally.
+  criteria_set    VARCHAR(10) NOT NULL DEFAULT 'legacy',
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (criteria_set, code)
 );
 
 -- ============================================================

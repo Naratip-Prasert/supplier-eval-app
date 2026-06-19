@@ -4,7 +4,7 @@
 
 import { useState, useRef, Fragment } from "react";
 import { Header, GreenButton, useModal } from "../components";
-import { PRE_CRITERIA, POST_CRITERIA, GRADE_MAP, GRADE_GUIDE } from "../constants";
+import { getCriteria, isPostEvalType, GRADE_MAP, GRADE_GUIDE } from "../constants";
 import { authFetch } from "../utils/api";
 import { Download, Printer, CheckCircle2, XCircle } from "lucide-react";
 
@@ -34,8 +34,8 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
   const { totalScore, grade, scores = {} } = result;
   const gradeColor = GRADE_MAP[grade];
   const subtitle   = `${formData.empId || "BJC-XXXXX"}|${formData.dept || "ฝ่าย"}`;
-  const evalLabel  = formData.evalType === "post_eval" ? "Post" : "Pre";
-  const CRITERIA   = formData.evalType === "post_eval" ? POST_CRITERIA : PRE_CRITERIA;
+  const evalLabel  = isPostEvalType(formData.evalType) ? "Post" : "Pre";
+  const CRITERIA   = getCriteria(formData.evalType);
 
   const now     = new Date();
   const dateStr = `${String(now.getDate()).padStart(2,"0")}/${String(now.getMonth()+1).padStart(2,"0")}/${now.getFullYear()}`;
