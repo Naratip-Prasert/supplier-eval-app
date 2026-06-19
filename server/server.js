@@ -232,6 +232,53 @@ pool.connect()
         FOR EACH ROW EXECUTE FUNCTION recalculate_session_final_score();
     `).catch(err => console.warn('trigger migration warning:', err.message));
 
+    // Fix: a 'returned' session could never come back to 'pending_review'
+    // after re-submission, because the guard above excluded 'returned' —
+    // that's the exact status the supervisor "return for re-evaluation"
+    // flow sets, so the whole cycle was a dead end. Only 'completed'
+    // (already approved) should stay protected from being overwritten.
+    await client.query(`
+      CREATE OR REPLACE FUNCTION recalculate_session_final_score()
+      RETURNS TRIGGER AS $func$
+      DECLARE
+        v_session_id UUID;
+        v_user_score DECIMAL;
+        v_gcp_score  DECIMAL;
+        v_final      DECIMAL;
+        v_grade      VARCHAR(5);
+      BEGIN
+        v_session_id := NEW.session_id;
+        SELECT total_score INTO v_user_score
+          FROM evaluations
+         WHERE session_id = v_session_id AND role = 'USER' AND status = 'saved';
+        SELECT total_score INTO v_gcp_score
+          FROM evaluations
+         WHERE session_id = v_session_id AND role = 'GCP' AND status = 'saved';
+        IF v_user_score IS NOT NULL AND v_gcp_score IS NOT NULL THEN
+          v_final := ROUND((v_user_score + v_gcp_score) / 2.0, 2);
+          SELECT grade INTO v_grade
+            FROM grade_thresholds
+           WHERE ROUND(v_final, 1) >= min_score AND ROUND(v_final, 1) <= max_score
+           LIMIT 1;
+          UPDATE evaluation_sessions
+             SET final_score = v_final, final_grade = v_grade,
+                 status = 'pending_review'
+           WHERE id = v_session_id AND status != 'completed';
+        ELSE
+          UPDATE evaluation_sessions
+             SET status = 'in_progress'
+           WHERE id = v_session_id AND status IN ('pending', 'returned');
+        END IF;
+        RETURN NEW;
+      END;
+      $func$ LANGUAGE plpgsql;
+
+      DROP TRIGGER IF EXISTS trg_recalculate_score ON evaluations;
+      CREATE TRIGGER trg_recalculate_score
+        AFTER INSERT OR UPDATE ON evaluations
+        FOR EACH ROW EXECUTE FUNCTION recalculate_session_final_score();
+    `).catch(err => console.warn('returned-status trigger fix warning:', err.message));
+
     // New tables
     await client.query(`
       CREATE TABLE IF NOT EXISTS supplier_upload_batches (
@@ -253,7 +300,7 @@ pool.connect()
         assigned_employee_id UUID REFERENCES employees(id),
         assigned_email       VARCHAR(200) NOT NULL,
         assigned_name        VARCHAR(200),
-        role                 VARCHAR(10) CHECK (role IN ('GCP','BU','USER')),
+        role                 VARCHAR(10) CHECK (role IN ('ADMIN','USER','GCP','SUPERVISOR')),
         due_date             DATE NOT NULL,
         status               VARCHAR(20) DEFAULT 'pending'
                                CHECK (status IN ('pending','completed','overdue')),
@@ -293,6 +340,16 @@ pool.connect()
       CREATE INDEX IF NOT EXISTS idx_supervisor_reviews_session ON supervisor_reviews(session_id);
       CREATE INDEX IF NOT EXISTS idx_supervisor_reviews_status  ON supervisor_reviews(status);
     `).catch(err => console.warn('new tables migration warning:', err.message));
+
+    // evaluation_tasks: role 'BU' is legacy — employees.role was already
+    // renamed BU → USER, so evaluation_tasks must follow the same domain.
+    await client.query(`
+      UPDATE evaluation_tasks SET role = 'USER' WHERE role = 'BU';
+      ALTER TABLE evaluation_tasks DROP CONSTRAINT IF EXISTS evaluation_tasks_role_check;
+      ALTER TABLE evaluation_tasks
+        ADD CONSTRAINT evaluation_tasks_role_check
+        CHECK (role IN ('ADMIN','USER','GCP','SUPERVISOR'));
+    `).catch(err => console.warn('evaluation_tasks role migration warning:', err.message));
 
     // Create default ADMIN account if none exists
     const bcrypt = require('bcrypt');

@@ -357,44 +357,61 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
 
         {/* Assigned tasks */}
         {!tasksLoading && myTasks.length > 0 && (
-          <div style={{ marginBottom: 16, animation: "fadeUp 0.3s ease" }}>
+          <div style={{
+            background: "#fff", borderRadius: 16,
+            boxShadow: "0 4px 32px rgba(0,0,0,0.10)",
+            padding: "20px 24px", marginBottom: 16, animation: "fadeUp 0.3s ease",
+          }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 10, paddingLeft: 2 }}>
               งานที่มอบหมายให้คุณ ({myTasks.length})
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {myTasks.map(t => {
-                const due     = new Date(t.dueDate);
-                const overdue = t.status === "overdue" || (due < new Date());
+                const due       = new Date(t.dueDate);
+                const overdue   = t.status === "overdue" || (due < new Date());
+                const isReturned = t.sessionStatus === "returned";
                 return (
                   <div key={t.taskId} style={{
-                    border: `1.5px solid ${overdue ? "#ef9a9a" : "#a5d6a7"}`,
-                    background: overdue ? "#fff5f5" : "#f8fdf8",
-                    borderRadius: 12, padding: "12px 16px",
-                    display: "flex", alignItems: "center", gap: 12,
+                    border: `1.5px solid ${isReturned ? "#ffb74d" : overdue ? "#ef9a9a" : "#a5d6a7"}`,
+                    background: isReturned ? "#fff8e1" : overdue ? "#fff5f5" : "#f8fdf8",
+                    borderRadius: 12, overflow: "hidden",
                     boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
                   }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 14, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {t.supplierName}
+                    {isReturned && (
+                      <div style={{
+                        background: "#fb8c00", color: "#fff", fontSize: 12, fontWeight: 700,
+                        padding: "6px 16px", display: "flex", alignItems: "center", gap: 6,
+                      }}>
+                        ⚠ ส่งคืนจาก Supervisor — กรุณาประเมินใหม่
+                        {t.supervisorNotes && (
+                          <span style={{ fontWeight: 400, opacity: 0.95 }}>· {t.supervisorNotes}</span>
+                        )}
                       </div>
-                      <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
-                        {t.vendorCode} · {TASK_EVAL_TYPE_LABEL[t.evalType] || t.evalType}
+                    )}
+                    <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {t.supplierName}
+                        </div>
+                        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
+                          {t.vendorCode} · {TASK_EVAL_TYPE_LABEL[t.evalType] || t.evalType}
+                        </div>
                       </div>
+                      <div style={{ fontSize: 12, color: overdue ? "#c62828" : "#6b7280", fontWeight: overdue ? 700 : 400, whiteSpace: "nowrap" }}>
+                        {overdue ? "เกินกำหนด " : "ครบกำหนด "}{due.toLocaleDateString("th-TH")}
+                      </div>
+                      <button
+                        onClick={() => startTask(t)}
+                        style={{
+                          background: isReturned ? "#fb8c00" : themeColor, color: "#fff", border: "none",
+                          borderRadius: 8, padding: "7px 16px", cursor: "pointer",
+                          fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 13,
+                          whiteSpace: "nowrap", flexShrink: 0,
+                        }}
+                      >
+                        {isReturned ? "ประเมินใหม่" : "เริ่มประเมิน"}
+                      </button>
                     </div>
-                    <div style={{ fontSize: 12, color: overdue ? "#c62828" : "#6b7280", fontWeight: overdue ? 700 : 400, whiteSpace: "nowrap" }}>
-                      {overdue ? "เกินกำหนด " : "ครบกำหนด "}{due.toLocaleDateString("th-TH")}
-                    </div>
-                    <button
-                      onClick={() => startTask(t)}
-                      style={{
-                        background: themeColor, color: "#fff", border: "none",
-                        borderRadius: 8, padding: "7px 16px", cursor: "pointer",
-                        fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 13,
-                        whiteSpace: "nowrap", flexShrink: 0,
-                      }}
-                    >
-                      เริ่มประเมิน
-                    </button>
                   </div>
                 );
               })}
@@ -404,8 +421,10 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
 
         {!tasksLoading && !canManualEntry && myTasks.length === 0 && (
           <div style={{
-            border: "1.5px dashed #ccc", borderRadius: 10,
-            padding: "40px 20px", textAlign: "center", color: "#999",
+            background: "#fff", border: "1.5px dashed #d1d5db", borderRadius: 16,
+            boxShadow: "0 4px 32px rgba(0,0,0,0.10)",
+            padding: "40px 20px", textAlign: "center", color: "#9ca3af",
+            animation: "fadeUp 0.3s ease",
           }}>
             ไม่มีงานที่ต้องประเมินในขณะนี้
           </div>

@@ -9,6 +9,18 @@ const router = require('express').Router();
 const pool   = require('../db');
 const { sendSupervisorResultEmail } = require('../utils/emailService');
 
+// Current assignees for a session — read from evaluation_tasks (the live
+// source of truth, kept up to date by admin edits) rather than
+// suppliers.buyer_email/evaluator_email (a stale snapshot from upload time).
+async function getCurrentAssignees(client, sessionId) {
+  const result = await client.query(
+    `SELECT role, assigned_email AS email, assigned_name AS name
+       FROM evaluation_tasks WHERE session_id = $1`,
+    [sessionId]
+  );
+  return result.rows;
+}
+
 // middleware: SUPERVISOR or ADMIN only
 router.use((req, res, next) => {
   if (!['SUPERVISOR', 'ADMIN'].includes(req.user?.role)) {
@@ -125,8 +137,7 @@ router.post('/sessions/:id/approve', async (req, res) => {
     // Fetch session + supplier
     const sessionResult = await client.query(`
       SELECT es.id, es.eval_type, es.final_score, es.final_grade,
-             s.id AS "supplierId", s.supplier_name, s.vendor_code,
-             s.buyer_email, s.evaluator_email, s.buyer_name, s.evaluator_name
+             s.id AS "supplierId", s.supplier_name, s.vendor_code
         FROM evaluation_sessions es
         JOIN suppliers s ON s.id = es.supplier_id
        WHERE es.id = $1 AND es.status = 'pending_review'
@@ -137,6 +148,7 @@ router.post('/sessions/:id/approve', async (req, res) => {
       return res.status(404).json({ message: 'ไม่พบ session หรือสถานะไม่ถูกต้อง' });
     }
     const session = sessionResult.rows[0];
+    const assignees = await getCurrentAssignees(client, sessionId);
 
     // Update session → completed
     await client.query(`
@@ -163,14 +175,12 @@ router.post('/sessions/:id/approve', async (req, res) => {
 
     await client.query('COMMIT');
 
-    // Send result emails (fire-and-forget)
+    // Send result emails (fire-and-forget) — to whoever is CURRENTLY
+    // assigned, not whoever the Excel upload originally named.
     const supplier = { supplier_name: session.supplier_name, vendor_code: session.vendor_code };
-    if (session.buyer_email) {
-      sendSupervisorResultEmail(session.buyer_email, session.buyer_name, supplier, 'approved', notes)
-        .catch(e => console.warn('[supervisor] email error:', e.message));
-    }
-    if (session.evaluator_email) {
-      sendSupervisorResultEmail(session.evaluator_email, session.evaluator_name, supplier, 'approved', notes)
+    for (const a of assignees) {
+      if (!a.email) continue;
+      sendSupervisorResultEmail(a.email, a.name, supplier, 'approved', notes)
         .catch(e => console.warn('[supervisor] email error:', e.message));
     }
 
@@ -200,8 +210,7 @@ router.post('/sessions/:id/return', async (req, res) => {
 
     const sessionResult = await client.query(`
       SELECT es.id, es.eval_type,
-             s.supplier_name, s.vendor_code,
-             s.buyer_email, s.evaluator_email, s.buyer_name, s.evaluator_name
+             s.supplier_name, s.vendor_code
         FROM evaluation_sessions es
         JOIN suppliers s ON s.id = es.supplier_id
        WHERE es.id = $1 AND es.status = 'pending_review'
@@ -212,15 +221,25 @@ router.post('/sessions/:id/return', async (req, res) => {
       return res.status(404).json({ message: 'ไม่พบ session หรือสถานะไม่ถูกต้อง' });
     }
     const session = sessionResult.rows[0];
+    const assignees = await getCurrentAssignees(client, sessionId);
 
-    // Reset session → returned, evaluations → draft
+    // Reset session → returned
     await client.query(`
       UPDATE evaluation_sessions SET status = 'returned' WHERE id = $1
     `, [sessionId]);
 
+    // Delete (not soft-mark) the rejected evaluations — the submit
+    // duplicate-check only looks at row existence, not status, so leaving
+    // a stale row behind would permanently block resubmission. Cascades
+    // to evaluation_scores automatically (ON DELETE CASCADE).
+    await client.query(`DELETE FROM evaluations WHERE session_id = $1`, [sessionId]);
+
+    // Re-open both tasks so they reappear in GCP/USER's "my tasks" list —
+    // otherwise they're stuck at status='completed' from the first round
+    // and the evaluator has no visible way to know they need to redo it.
     await client.query(`
-      UPDATE evaluations SET status = 'draft', submitted_at = NULL
-       WHERE session_id = $1
+      UPDATE evaluation_tasks SET status = 'pending'
+       WHERE session_id = $1 AND status = 'completed'
     `, [sessionId]);
 
     // Update supervisor_review
@@ -234,14 +253,12 @@ router.post('/sessions/:id/return', async (req, res) => {
 
     await client.query('COMMIT');
 
-    // Send result emails
+    // Send result emails — to whoever is CURRENTLY assigned (post-edit),
+    // since that's also who the task list now points at for re-evaluation.
     const supplier = { supplier_name: session.supplier_name, vendor_code: session.vendor_code };
-    if (session.buyer_email) {
-      sendSupervisorResultEmail(session.buyer_email, session.buyer_name, supplier, 'returned', notes)
-        .catch(e => console.warn('[supervisor] email error:', e.message));
-    }
-    if (session.evaluator_email) {
-      sendSupervisorResultEmail(session.evaluator_email, session.evaluator_name, supplier, 'returned', notes)
+    for (const a of assignees) {
+      if (!a.email) continue;
+      sendSupervisorResultEmail(a.email, a.name, supplier, 'returned', notes)
         .catch(e => console.warn('[supervisor] email error:', e.message));
     }
 

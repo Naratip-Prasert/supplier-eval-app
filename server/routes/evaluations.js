@@ -7,7 +7,7 @@
 // ============================================================
 const router = require('express').Router();
 const pool   = require('../db');
-const { sendSupervisorNotifyEmail } = require('../utils/emailService');
+const { sendSupervisorNotifyEmail, sendThankyouEmail } = require('../utils/emailService');
 
 // ── helpers ──────────────────────────────────────────────────
 
@@ -111,7 +111,7 @@ router.post('/', async (req, res) => {
     if (taskSessionId) {
       const taskSessionResult = await client.query(
         `SELECT id FROM evaluation_sessions
-          WHERE id = $1 AND supplier_id = $2 AND status IN ('pending', 'in_progress')`,
+          WHERE id = $1 AND supplier_id = $2 AND status IN ('pending', 'in_progress', 'returned')`,
         [taskSessionId, supplier.id]
       );
       if (taskSessionResult.rows.length === 0) {
@@ -143,7 +143,7 @@ router.post('/', async (req, res) => {
           WHERE supplier_id = $1
             AND period      = $2
             AND eval_type   = $3
-            AND status IN ('pending', 'in_progress')
+            AND status IN ('pending', 'in_progress', 'returned')
           ORDER BY created_at DESC
           LIMIT 1`,
         [supplier.id, period, evalType]
@@ -192,14 +192,15 @@ router.post('/', async (req, res) => {
     const { totalScore, grade } = await computeScoreAndGrade(client, scores, criteriaMap);
 
     // 8. Mark evaluation_task as completed if task-based assignment exists
-    await client.query(`
+    const completedTask = await client.query(`
       UPDATE evaluation_tasks
          SET status = 'completed'
        WHERE session_id = $1
          AND (assigned_employee_id = $2
               OR assigned_email = (SELECT email FROM employees WHERE id = $2 LIMIT 1))
          AND status != 'completed'
-    `, [sessionId, employee.id]).catch(() => {});
+       RETURNING id, assigned_email, assigned_name, due_date, thankyou_sent_at
+    `, [sessionId, employee.id]).catch(() => ({ rows: [] }));
 
     // 9. Insert evaluation record (raw_scores stores every criterion submitted)
     const evalResult = await client.query(
@@ -228,6 +229,21 @@ router.post('/', async (req, res) => {
     }
 
     await client.query('COMMIT');
+
+    // Send thank-you immediately (cron also catches any missed ones daily,
+    // but evaluators shouldn't wait until next morning to hear back)
+    const task = completedTask.rows[0];
+    if (task && !task.thankyou_sent_at) {
+      pool.query(
+        `SELECT supplier_name, vendor_code FROM suppliers s
+           JOIN evaluation_sessions es ON es.supplier_id = s.id WHERE es.id = $1`,
+        [sessionId]
+      ).then(async supRes => {
+        if (supRes.rows.length === 0) return;
+        await sendThankyouEmail(task, supRes.rows[0]);
+        await pool.query(`UPDATE evaluation_tasks SET thankyou_sent_at = NOW() WHERE id = $1`, [task.id]);
+      }).catch(e => console.warn('[evaluations] thankyou email error:', e.message));
+    }
 
     // After commit: check if both BU+GCP have submitted for this session
     // If yes → create supervisor_review and notify supervisors (fire-and-forget)
@@ -395,15 +411,18 @@ router.get('/my-tasks', async (req, res) => {
         es.id               AS "sessionId",
         es.eval_type        AS "evalType",
         es.period,
+        es.status           AS "sessionStatus",
         s.vendor_code       AS "vendorCode",
         s.supplier_name     AS "supplierName",
-        s.product_type      AS "productType"
+        s.product_type      AS "productType",
+        sr.notes            AS "supervisorNotes"
       FROM evaluation_tasks et
       JOIN evaluation_sessions es ON es.id = et.session_id
       JOIN suppliers s             ON s.id = et.supplier_id
+      LEFT JOIN supervisor_reviews sr ON sr.session_id = es.id AND sr.status = 'returned'
       WHERE et.assigned_email = $1
         AND et.status != 'completed'
-        AND es.status IN ('pending', 'in_progress')
+        AND es.status IN ('pending', 'in_progress', 'returned')
       ORDER BY et.due_date ASC
     `, [req.user.email]);
     res.json(result.rows);

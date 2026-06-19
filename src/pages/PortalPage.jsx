@@ -2,11 +2,12 @@
 //  pages/PortalPage.jsx  —  Role-based portal hub after login
 // ============================================================
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Header } from "../components";
+import { authFetch } from "../utils/api";
 import {
   ClipboardList, Clock, BarChart2, Shield, CheckSquare,
-  User, LogOut, ArrowRight, Upload,
+  User, LogOut, ArrowRight, Upload, AlertTriangle,
 } from "lucide-react";
 
 // ── Module definitions ────────────────────────────────────────
@@ -111,6 +112,18 @@ export default function PortalPage({
 }) {
   const role    = authUser?.role ?? "USER";
   const badge   = ROLE_BADGE[role] ?? ROLE_BADGE.USER;
+
+  // Surface "returned by supervisor" right here on the Portal — previously
+  // evaluators only found out by happening to open the evaluate module.
+  const [returnedTasks, setReturnedTasks] = useState([]);
+  useEffect(() => {
+    if (!["USER", "GCP", "ADMIN"].includes(role)) return;
+    authFetch("/api/evaluations/my-tasks")
+      .then(r => r.ok ? r.json() : [])
+      .then(data => setReturnedTasks(Array.isArray(data) ? data.filter(t => t.sessionStatus === "returned") : []))
+      .catch(() => {});
+  }, [role]);
+
   const modules = MODULES
     .filter((m) => m.roles.includes(role))
     .sort((a, b) => {
@@ -247,6 +260,35 @@ export default function PortalPage({
           </div>
         </div>
 
+        {/* ── Returned-by-supervisor alert ── */}
+        {returnedTasks.length > 0 && (
+          <div
+            onClick={onEvaluate}
+            style={{
+              background: "#fff3e0", border: "1.5px solid #ffb74d", borderRadius: 14,
+              padding: "14px 20px", marginBottom: 24, cursor: "pointer",
+              display: "flex", alignItems: "center", gap: 14,
+              boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
+            }}
+          >
+            <div style={{
+              width: 38, height: 38, borderRadius: "50%", background: "#fb8c00",
+              display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+            }}>
+              <AlertTriangle size={19} color="#fff" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#e65100" }}>
+                มีงานถูกส่งคืนจาก Supervisor {returnedTasks.length} รายการ — ต้องประเมินใหม่
+              </div>
+              <div style={{ fontSize: 12, color: "#bf6c00", marginTop: 2 }}>
+                {returnedTasks.map(t => t.supplierName).join(", ")}
+              </div>
+            </div>
+            <ArrowRight size={18} style={{ color: "#e65100", flexShrink: 0 }} />
+          </div>
+        )}
+
         {/* ── Section label ── */}
         <div style={{ fontSize: 15, fontWeight: 700, color: "#555", marginBottom: 16, letterSpacing: 0.3 }}>
           เลือกโมดูล
@@ -266,6 +308,7 @@ export default function PortalPage({
                 mod={mod}
                 Icon={Icon}
                 onClick={() => handleModule(mod)}
+                badgeCount={mod.key === "evaluate" ? returnedTasks.length : 0}
               />
             );
           })}
@@ -469,7 +512,7 @@ const CARD_ART = {
 };
 
 // ── ModuleCard ────────────────────────────────────────────────
-function ModuleCard({ mod, Icon, onClick }) {
+function ModuleCard({ mod, Icon, onClick, badgeCount = 0 }) {
   const [hovered, setHovered] = useState(false);
   const art      = CARD_ART[mod.key];
   const circleBg = CIRCLE_BG[mod.key] ?? "radial-gradient(circle,#f5f5f5,#e0e0e0)";
@@ -501,6 +544,19 @@ function ModuleCard({ mod, Icon, onClick }) {
           background: "#f0f0f0", borderRadius: 20,
           padding: "2px 9px", fontSize: 9, color: "#999", fontWeight: 800, letterSpacing: 0.5,
         }}>SOON</div>
+      )}
+
+      {/* Returned-task notification badge */}
+      {badgeCount > 0 && (
+        <div style={{
+          position: "absolute", top: 10, right: 10,
+          background: "#e53935", color: "#fff", borderRadius: 20,
+          minWidth: 22, height: 22, padding: "0 6px",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 11, fontWeight: 800, boxShadow: "0 2px 6px rgba(229,57,53,0.5)",
+        }}>
+          {badgeCount}
+        </div>
       )}
 
       {/* Circle illustration */}

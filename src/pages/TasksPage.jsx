@@ -30,28 +30,40 @@ export default function TasksPage({ authUser, onBack }) {
   const [remindingId,     setRemindingId]     = useState(null);
   const [remindMsg,       setRemindMsg]       = useState(null);
   const [statusFilter,    setStatusFilter]    = useState("all");
+  const [typeFilter,      setTypeFilter]      = useState("all");
   const [search,          setSearch]          = useState("");
   const [editingId,       setEditingId]       = useState(null);
-  const [editDraft,       setEditDraft]       = useState({ assignedName: "", assignedEmail: "", dueDate: "" });
+  const [editDraft,       setEditDraft]       = useState({ assignedEmail: "", dueDate: "" });
   const [savingEdit,      setSavingEdit]      = useState(false);
   const [deletingId,      setDeletingId]      = useState(null);
+  const [employees,       setEmployees]       = useState([]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [taskRes, batchRes] = await Promise.all([
+      const [taskRes, batchRes, empRes] = await Promise.all([
         authFetch("/api/admin/tasks").then(r => r.json()).catch(() => []),
         authFetch("/api/admin/batches").then(r => r.json()).catch(() => []),
+        authFetch("/api/employees").then(r => r.json()).catch(() => []),
       ]);
       setTasks(Array.isArray(taskRes) ? taskRes : []);
       setBatches(Array.isArray(batchRes) ? batchRes : []);
+      setEmployees(Array.isArray(empRes) ? empRes.filter(e => e.isActive) : []);
     } catch (e) {
       setError("โหลดข้อมูลไม่สำเร็จ");
     } finally {
       setLoading(false);
     }
   }, []);
+
+  // Email is the only thing admin edits — the name is always whatever the
+  // matched employee record says, so name/email can never drift apart.
+  const findEmployeeByEmail = (email) => {
+    const q = email.trim().toLowerCase();
+    if (!q) return null;
+    return employees.find(e => e.email?.toLowerCase() === q) || null;
+  };
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -76,15 +88,29 @@ export default function TasksPage({ authUser, onBack }) {
   function startEdit(t) {
     setEditingId(t.id);
     setEditDraft({
-      assignedName:  t.assignedName || "",
       assignedEmail: t.assignedEmail || "",
       dueDate:       new Date(t.dueDate).toISOString().slice(0, 10),
     });
   }
 
-  async function saveEdit(taskId) {
+  async function saveEdit(taskId, sessionId, currentRole) {
+    const matched = findEmployeeByEmail(editDraft.assignedEmail);
+
+    // Same guard as the backend, checked client-side first for instant feedback
+    const collision = tasks.find(t =>
+      t.sessionId === sessionId && t.id !== taskId && t.role !== currentRole &&
+      t.assignedEmail?.toLowerCase() === editDraft.assignedEmail.trim().toLowerCase()
+    );
+    if (collision) {
+      await showAlert(
+        `email นี้ถูกมอบหมายเป็น ${collision.role} ของการประเมินนี้อยู่แล้ว คนคนเดียวไม่สามารถเป็นทั้ง GCP และ USER ของรายการเดียวกันได้`,
+        "มอบหมายไม่ได้"
+      );
+      return;
+    }
+
     const ok = await showConfirm(
-      `บันทึกการแก้ไขผู้รับผิดชอบ/ครบกำหนดใหม่ใช่ไหม?\n\nผู้รับผิดชอบ: ${editDraft.assignedName || "-"} (${editDraft.assignedEmail || "-"})\nครบกำหนด: ${editDraft.dueDate}`,
+      `บันทึกการแก้ไขผู้รับผิดชอบ/ครบกำหนดใหม่ใช่ไหม?\n\nผู้รับผิดชอบ: ${matched ? matched.fullName : "(ไม่พบในระบบ — บันทึกเป็นผู้รับเชิญภายนอก)"} (${editDraft.assignedEmail || "-"})\nครบกำหนด: ${editDraft.dueDate}`,
       "ยืนยันการแก้ไข"
     );
     if (!ok) return;
@@ -131,9 +157,15 @@ export default function TasksPage({ authUser, onBack }) {
 
   const filtered = tasks.filter(t => {
     const matchStatus = statusFilter === "all" || t.status === statusFilter;
-    const matchSearch = !search || t.supplierName?.toLowerCase().includes(search.toLowerCase())
-      || t.assignedEmail?.toLowerCase().includes(search.toLowerCase());
-    return matchStatus && matchSearch;
+    const matchType   = typeFilter === "all" || t.evalType === typeFilter;
+    const q = search.trim().toLowerCase();
+    const matchSearch = !q
+      || t.supplierName?.toLowerCase().includes(q)
+      || t.taxId?.toLowerCase().includes(q)
+      || t.vendorCode?.toLowerCase().includes(q)
+      || t.assignedEmail?.toLowerCase().includes(q)
+      || t.assignedName?.toLowerCase().includes(q);
+    return matchStatus && matchType && matchSearch;
   });
 
   const pendingCount = tasks.filter(t => t.status === "pending").length;
@@ -223,12 +255,12 @@ export default function TasksPage({ authUser, onBack }) {
         )}
 
         {/* Filters */}
-        <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
           <div style={{ position: "relative", flex: 1, minWidth: 200 }}>
             <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#aaa" }} />
             <input
               value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="ค้นหา supplier / email…"
+              placeholder="ค้นหา supplier / Tax ID / ชื่อ-email ผู้รับผิดชอบ…"
               style={{ width: "100%", paddingLeft: 32, padding: "8px 10px 8px 32px", border: "1px solid #e0e0e0", borderRadius: 7, fontFamily: "Sarabun, sans-serif", fontSize: 13, boxSizing: "border-box" }}
             />
           </div>
@@ -240,6 +272,19 @@ export default function TasksPage({ authUser, onBack }) {
             ))}
           </div>
         </div>
+
+        {/* Eval type filter */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+          {[["all","ทั้งหมด"],["pre_eval","Pre-Eval"],["post_eval","Post-Eval"],["half_year","Half-Year"],["yearly","Yearly"]].map(([v, l]) => (
+            <button key={v} onClick={() => setTypeFilter(v)} style={{ padding: "6px 14px", borderRadius: 20, border: typeFilter === v ? "2px solid #00695c" : "1px solid #ddd", background: typeFilter === v ? "#e0f2f1" : "#fff", color: typeFilter === v ? "#00695c" : "#555", fontFamily: "Sarabun, sans-serif", fontSize: 12, cursor: "pointer", fontWeight: typeFilter === v ? 700 : 400 }}>
+              {l}
+            </button>
+          ))}
+        </div>
+
+        <datalist id="emp-email-list">
+          {employees.filter(e => e.email).map(e => <option key={e.employeeId} value={e.email} label={`${e.fullName} (${e.role})`} />)}
+        </datalist>
 
         {/* Tasks table */}
         {filtered.length === 0 ? (
@@ -268,22 +313,30 @@ export default function TasksPage({ authUser, onBack }) {
                         <span style={{ background: t.role === "GCP" ? "#e3f2fd" : "#e8f5e9", color: t.role === "GCP" ? "#1565c0" : "#2e7d32", borderRadius: 10, padding: "2px 8px", fontSize: 11, fontWeight: 700 }}>{t.role}</span>
                       </td>
                       <td style={{ padding: "10px 12px" }}>
-                        {isEditing ? (
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                            <input
-                              value={editDraft.assignedName}
-                              onChange={e => setEditDraft(d => ({ ...d, assignedName: e.target.value }))}
-                              placeholder="ชื่อผู้รับผิดชอบ"
-                              style={{ fontSize: 12, padding: "3px 6px", border: "1px solid #ccc", borderRadius: 4, fontFamily: "Sarabun, sans-serif" }}
-                            />
-                            <input
-                              value={editDraft.assignedEmail}
-                              onChange={e => setEditDraft(d => ({ ...d, assignedEmail: e.target.value }))}
-                              placeholder="email"
-                              style={{ fontSize: 11, padding: "3px 6px", border: "1px solid #ccc", borderRadius: 4, fontFamily: "Sarabun, sans-serif" }}
-                            />
-                          </div>
-                        ) : (
+                        {isEditing ? (() => {
+                          const matched = findEmployeeByEmail(editDraft.assignedEmail);
+                          return (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 180 }}>
+                              <input
+                                list="emp-email-list"
+                                value={editDraft.assignedEmail}
+                                onChange={e => setEditDraft(d => ({ ...d, assignedEmail: e.target.value }))}
+                                placeholder="พิมพ์หรือเลือก email…"
+                                style={{ fontSize: 12, padding: "3px 6px", border: "1px solid #ccc", borderRadius: 4, fontFamily: "Sarabun, sans-serif" }}
+                              />
+                              <div style={{
+                                fontSize: 11, fontStyle: matched ? "normal" : "italic",
+                                color: editDraft.assignedEmail
+                                  ? (matched ? "#2e7d32" : "#e65100")
+                                  : "#aaa",
+                              }}>
+                                {editDraft.assignedEmail
+                                  ? (matched ? `✓ ${matched.fullName} (${matched.role})` : "ไม่พบ email นี้ในระบบ — จะบันทึกเป็นผู้รับเชิญภายนอก")
+                                  : "ชื่อจะดึงจากระบบอัตโนมัติตาม email"}
+                              </div>
+                            </div>
+                          );
+                        })() : (
                           <>
                             <div style={{ fontSize: 12 }}>{t.assignedName || "-"}</div>
                             <div style={{ fontSize: 11, color: "#aaa" }}>{t.assignedEmail}</div>
@@ -313,7 +366,7 @@ export default function TasksPage({ authUser, onBack }) {
                             <>
                               <button
                                 disabled={savingEdit}
-                                onClick={() => saveEdit(t.id)}
+                                onClick={() => saveEdit(t.id, t.sessionId, t.role)}
                                 title="บันทึก"
                                 style={{ display: "flex", alignItems: "center", gap: 4, background: "#e8f5e9", color: "#2e7d32", border: "1px solid #a5d6a7", borderRadius: 6, padding: "5px 8px", cursor: "pointer", fontSize: 12 }}
                               >

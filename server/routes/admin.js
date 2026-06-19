@@ -192,11 +192,17 @@ router.post('/upload/pre-post', upload.single('file'), async (req, res) => {
       if (evalEmail && buMatch.rows.length === 0) {
         summary.warnings.push(`ไม่พบ Evaluator email "${evalEmail}" ในระบบ`);
       }
+      // Same person can't hold both GCP and USER tasks for the same row —
+      // it silently breaks the supervisor approval trigger later (it needs
+      // one evaluation each from a distinct USER role and a distinct GCP role).
+      if (buyerEmail && evalEmail && buyerEmail === evalEmail) {
+        summary.warnings.push(`Buyer Email และ Evaluator Email เป็นคนเดียวกัน ("${buyerEmail}") สำหรับ "${supplierName}" — งานนี้จะไม่เข้าคิว supervisor ได้ ต้องใช้คนละคน`);
+      }
 
       // Create tasks for GCP and BU
       const taskRows = [
         { role: 'GCP', email: buyerEmail, name: buyerName, empId: gcpMatch.rows[0]?.id || null, empName: gcpMatch.rows[0]?.full_name || buyerName },
-        { role: 'BU',  email: evalEmail,  name: evalName,  empId: buMatch.rows[0]?.id  || null, empName: buMatch.rows[0]?.full_name  || evalName  },
+        { role: 'USER', email: evalEmail,  name: evalName,  empId: buMatch.rows[0]?.id  || null, empName: buMatch.rows[0]?.full_name  || evalName  },
       ];
 
       for (const t of taskRows) {
@@ -340,10 +346,13 @@ router.post('/upload/periodic', upload.single('file'), async (req, res) => {
 
       if (buyerEmail && gcpMatch.rows.length === 0) summary.warnings.push(`ไม่พบ Buyer email "${buyerEmail}"`);
       if (evalEmail  && buMatch.rows.length === 0)  summary.warnings.push(`ไม่พบ Evaluator email "${evalEmail}"`);
+      if (buyerEmail && evalEmail && buyerEmail === evalEmail) {
+        summary.warnings.push(`Buyer Email และ Evaluator Email เป็นคนเดียวกัน ("${buyerEmail}") สำหรับ "${supplierName}" — งานนี้จะไม่เข้าคิว supervisor ได้ ต้องใช้คนละคน`);
+      }
 
       const taskRows = [
         { role: 'GCP', email: buyerEmail, name: buyerName, empId: gcpMatch.rows[0]?.id || null, empName: gcpMatch.rows[0]?.full_name || buyerName },
-        { role: 'BU',  email: evalEmail,  name: evalName,  empId: buMatch.rows[0]?.id  || null, empName: buMatch.rows[0]?.full_name  || evalName  },
+        { role: 'USER', email: evalEmail,  name: evalName,  empId: buMatch.rows[0]?.id  || null, empName: buMatch.rows[0]?.full_name  || evalName  },
       ];
 
       for (const t of taskRows) {
@@ -417,6 +426,7 @@ router.get('/tasks', async (req, res) => {
         et.thankyou_sent_at    AS "thankyouSentAt",
         et.created_at          AS "createdAt",
         s.vendor_code          AS "vendorCode",
+        s.tax_id               AS "taxId",
         s.supplier_name        AS "supplierName",
         es.id                  AS "sessionId",
         es.eval_type           AS "evalType",
@@ -465,7 +475,12 @@ router.post('/tasks/:id/remind', async (req, res) => {
 });
 
 // ── PATCH /api/admin/tasks/:id ────────────────────────────────
-// Edit the assignee (name/email) and/or due_date of a task.
+// Edit the assignee (by email) and/or due_date of a task.
+// The name is never taken from client input when the email matches
+// a real employee — it's always pulled from that employee's record,
+// so assigned_name can never drift out of sync with assigned_email.
+// `assignedName` is only used as a fallback label for an email that
+// doesn't match anyone in the system (ad-hoc external recipient).
 // Re-arms reminder/overdue emails when due_date changes, and
 // re-arms the full invite cycle when the assignee changes.
 router.patch('/tasks/:id', async (req, res) => {
@@ -485,18 +500,42 @@ router.patch('/tasks/:id', async (req, res) => {
     const dueChanged    = dueDate && new Date(dueDate).toISOString().slice(0, 10) !== new Date(task.due_date).toISOString().slice(0, 10);
 
     let assignedEmployeeId = task.assigned_employee_id;
+    let resolvedName       = assignedName || task.assigned_name;
+    const finalEmail       = assignedEmail ? assignedEmail.trim().toLowerCase() : task.assigned_email;
+
     if (emailChanged) {
       const empMatch = await pool.query(
-        `SELECT id FROM employees WHERE email = $1 AND is_active = TRUE LIMIT 1`,
-        [assignedEmail.trim().toLowerCase()]
+        `SELECT id, full_name FROM employees WHERE email = $1 AND is_active = TRUE LIMIT 1`,
+        [finalEmail]
       );
-      assignedEmployeeId = empMatch.rows[0]?.id || null;
+      if (empMatch.rows.length > 0) {
+        assignedEmployeeId = empMatch.rows[0].id;
+        resolvedName       = empMatch.rows[0].full_name; // always trust the system's record, ignore client name
+      } else {
+        assignedEmployeeId = null; // external/ad-hoc recipient not in the system
+      }
+
+      // Guard: the same person can't end up holding both the GCP and the
+      // USER/evaluator task for the same evaluation — if they did, every
+      // submission they make resolves to their own single account role,
+      // so the session can never collect both a USER and a GCP evaluation
+      // and will sit invisible to Supervisor forever.
+      const collision = await pool.query(`
+        SELECT role FROM evaluation_tasks
+         WHERE session_id = $1 AND id != $2 AND role != $3
+           AND (assigned_email = $4 OR ($5::uuid IS NOT NULL AND assigned_employee_id = $5))
+      `, [task.session_id, task.id, task.role, finalEmail, assignedEmployeeId]);
+      if (collision.rows.length > 0) {
+        return res.status(400).json({
+          message: `ไม่สามารถมอบหมายได้ — email นี้ถูกมอบหมายเป็น ${collision.rows[0].role} ของการประเมินนี้อยู่แล้ว คนคนเดียวไม่สามารถเป็นทั้ง GCP และ USER ของ session เดียวกันได้ (จะทำให้ supervisor ไม่เห็นรายการนี้)`,
+        });
+      }
     }
 
     const result = await pool.query(`
       UPDATE evaluation_tasks SET
-        assigned_name        = COALESCE($1, assigned_name),
-        assigned_email        = COALESCE($2, assigned_email),
+        assigned_name        = $1,
+        assigned_email        = $2,
         assigned_employee_id  = $3,
         due_date              = COALESCE($4, due_date),
         status                = CASE WHEN status = 'overdue' THEN 'pending' ELSE status END,
@@ -507,8 +546,8 @@ router.patch('/tasks/:id', async (req, res) => {
       WHERE id = $7
       RETURNING id
     `, [
-      assignedName || null,
-      assignedEmail ? assignedEmail.trim().toLowerCase() : null,
+      resolvedName || null,
+      finalEmail,
       assignedEmployeeId,
       dueDate || null,
       emailChanged,
