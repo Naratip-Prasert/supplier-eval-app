@@ -90,7 +90,7 @@ pool.connect()
           v_final := ROUND((v_user_score + v_gcp_score) / 2.0, 2);
           SELECT grade INTO v_grade
             FROM grade_thresholds
-           WHERE v_final >= min_score AND v_final <= max_score
+           WHERE ROUND(v_final, 1) >= min_score AND ROUND(v_final, 1) <= max_score
            LIMIT 1;
           UPDATE evaluation_sessions
              SET final_score = v_final, final_grade = v_grade,
@@ -116,8 +116,8 @@ pool.connect()
       UPDATE evaluation_sessions es
          SET final_score  = sub.avg_score,
              final_grade  = (SELECT grade FROM grade_thresholds
-                              WHERE sub.avg_score >= min_score
-                                AND sub.avg_score <= max_score
+                              WHERE ROUND(sub.avg_score, 1) >= min_score
+                                AND ROUND(sub.avg_score, 1) <= max_score
                               LIMIT 1),
              status       = 'completed',
              completed_at = COALESCE(es.completed_at, NOW())

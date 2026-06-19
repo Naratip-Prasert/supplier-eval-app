@@ -1296,7 +1296,7 @@ export const POST_CRITERIA = [
 ];
 
 export function getGrade(score) {
-  const s = Math.round(score * 100) / 100; // round to 2dp before compare
+  const s = Math.round(score * 10) / 10; // round to 1dp — matches .toFixed(1) display
   if (s >= 90) return "A";
   if (s >= 80) return "B";
   if (s >= 70) return "C";
