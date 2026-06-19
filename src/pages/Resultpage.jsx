@@ -544,6 +544,47 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
             </div>
           </div>
 
+          {/* ── Signature table ── */}
+          <div className="result-signature" style={{ ...card({ padding: 0, overflow: "hidden", marginBottom: 20 }) }}>
+            <div style={{
+              padding: "11px 18px", borderBottom: "1px solid #e0e6e0",
+              fontWeight: 700, fontSize: 13, color: "#2d3748", letterSpacing: 0.2,
+            }}>
+              ลายมือชื่อผู้เกี่ยวข้อง / Authorized Signatures
+            </div>
+            <div style={{
+              display: "grid", gridTemplateColumns: "1fr 1fr",
+              gap: 0,
+            }}>
+              {[
+                { th: "ผู้ประเมิน / Evaluator" },
+                { th: "หัวหน้าแผนก / Supervisor" },
+              ].map((col, ci) => (
+                <div key={ci} style={{
+                  padding: "20px 32px 28px",
+                  borderRight: ci === 0 ? "1px solid #e0e6e0" : "none",
+                }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: "#2d3748", marginBottom: 24 }}>
+                    {col.th}
+                  </div>
+                  {["ลายมือชื่อ", "ชื่อ", "ตำแหน่ง", "วันที่"].map((label) => (
+                    <div key={label} style={{
+                      display: "flex", alignItems: "flex-end", gap: 8, marginBottom: 18,
+                    }}>
+                      <span style={{ fontSize: 13, color: "#4a5568", flexShrink: 0, minWidth: 72 }}>
+                        {label}:
+                      </span>
+                      <div style={{
+                        flex: 1, borderBottom: "1.5px solid #4a5568",
+                        minHeight: label === "ลายมือชื่อ" ? 44 : 22,
+                      }} />
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+
           {/* ── Done button — hidden in read-only (history view) ── */}
           {!readOnly && <div className="no-print">
             <GreenButton fullWidth onClick={handleDone} disabled={doneStatus === "saving" || doneStatus === "saved"}>
