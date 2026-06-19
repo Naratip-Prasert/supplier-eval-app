@@ -285,10 +285,12 @@ export default function PortalPage({
 
 // ── Circle bg per module ─────────────────────────────────────
 const CIRCLE_BG = {
-  evaluate: "radial-gradient(circle at 38% 35%, #f1f8e9, #a5d6a7 130%)",
-  history:  "radial-gradient(circle at 38% 35%, #e8f4fd, #90caf9 130%)",
-  dashboard:"radial-gradient(circle at 38% 35%, #f8f0ff, #ce93d8 130%)",
-  admin:    "radial-gradient(circle at 38% 35%, #fff3e0, #ffab91 130%)",
+  evaluate:   "radial-gradient(circle at 38% 35%, #f1f8e9, #a5d6a7 130%)",
+  history:    "radial-gradient(circle at 38% 35%, #e8f4fd, #90caf9 130%)",
+  dashboard:  "radial-gradient(circle at 38% 35%, #f8f0ff, #ce93d8 130%)",
+  admin:      "radial-gradient(circle at 38% 35%, #fff3e0, #ffab91 130%)",
+  tasks:      "radial-gradient(circle at 38% 35%, #e0f7f5, #80cbc4 130%)",
+  supervisor: "radial-gradient(circle at 38% 35%, #f3e8fd, #b39ddb 130%)",
 };
 
 // ── Compact 3D-flat illustrations (82 × 82) ──────────────────
@@ -409,6 +411,59 @@ const CARD_ART = {
       <path d="M6 35 C6 30 16 30 16 35" stroke="white" strokeWidth="1.3" strokeLinecap="round" fill="none" opacity=".8"/>
       <circle cx="11" cy="50" r="6" fill="rgba(191,54,12,.4)" stroke="white" strokeWidth="1.3"/>
       <path d="M6 59 C6 54 16 54 16 59" stroke="white" strokeWidth="1.3" strokeLinecap="round" fill="none" opacity=".7"/>
+    </svg>
+  ),
+  tasks: (
+    <svg width="82" height="82" viewBox="0 0 82 82" fill="none">
+      <defs>
+        <linearGradient id="tk_sheet" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#4db6ac"/><stop offset="100%" stopColor="#00695c"/></linearGradient>
+        <linearGradient id="tk_up"    x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#80ffce"/><stop offset="100%" stopColor="#00c853"/></linearGradient>
+      </defs>
+      {/* sheet 3D side */}
+      <rect x="13" y="20" width="6"  height="52" rx="2" fill="#004d40"/>
+      <rect x="13" y="66" width="46" height="6"  rx="2" fill="#004d40"/>
+      {/* sheet body */}
+      <rect x="17" y="14" width="46" height="58" rx="6" fill="url(#tk_sheet)"/>
+      {/* folded corner */}
+      <path d="M50 14 L63 27 L50 27 Z" fill="#26a69a"/>
+      {/* spreadsheet grid */}
+      <rect x="23" y="34" width="34" height="4"  rx="1.5" fill="rgba(255,255,255,.85)"/>
+      <rect x="23" y="42" width="15" height="4"  rx="1.5" fill="rgba(255,255,255,.6)"/>
+      <rect x="41" y="42" width="16" height="4"  rx="1.5" fill="rgba(255,255,255,.6)"/>
+      <rect x="23" y="50" width="15" height="4"  rx="1.5" fill="rgba(255,255,255,.6)"/>
+      <rect x="41" y="50" width="16" height="4"  rx="1.5" fill="rgba(255,255,255,.6)"/>
+      <rect x="23" y="58" width="15" height="4"  rx="1.5" fill="rgba(255,255,255,.4)"/>
+      <rect x="41" y="58" width="16" height="4"  rx="1.5" fill="rgba(255,255,255,.4)"/>
+      {/* upload badge */}
+      <circle cx="62" cy="59" r="15" fill="url(#tk_up)" stroke="white" strokeWidth="2"/>
+      <path d="M62 65v-12M56 59l6-6 6 6" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+      {/* sparkle */}
+      <path d="M68 12l1.3 2.7 3 .4-2.2 2.1.5 3-2.6-1.4-2.6 1.4.5-3-2.2-2.1 3-.4z" fill="#ffd740" opacity=".85"/>
+    </svg>
+  ),
+  supervisor: (
+    <svg width="82" height="82" viewBox="0 0 82 82" fill="none">
+      <defs>
+        <linearGradient id="sv_stamp" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#b388ff"/><stop offset="100%" stopColor="#6a1b9a"/></linearGradient>
+        <linearGradient id="sv_chk"   x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#ea80fc"/><stop offset="100%" stopColor="#aa00ff"/></linearGradient>
+      </defs>
+      {/* document 3D side */}
+      <rect x="12" y="20" width="6"  height="44" rx="2" fill="#4a148c"/>
+      {/* document body */}
+      <rect x="16" y="14" width="40" height="50" rx="6" fill="rgba(243,229,245,.55)" stroke="#9c27b0" strokeWidth="1.5"/>
+      <rect x="23" y="25" width="26" height="4" rx="1.5" fill="#9c27b0" opacity=".55"/>
+      <rect x="23" y="34" width="20" height="4" rx="1.5" fill="#9c27b0" opacity=".4"/>
+      <rect x="23" y="43" width="24" height="4" rx="1.5" fill="#9c27b0" opacity=".4"/>
+      {/* approval stamp circle, tilted */}
+      <g transform="rotate(-14 56 50)">
+        <circle cx="56" cy="50" r="20" fill="url(#sv_stamp)" stroke="white" strokeWidth="2.5"/>
+        <circle cx="56" cy="50" r="14" fill="none" stroke="rgba(255,255,255,.55)" strokeWidth="1.5" strokeDasharray="3 3"/>
+        <path d="M48 50l5.5 6 13-14" stroke="white" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round"/>
+      </g>
+      {/* signature flourish */}
+      <path d="M14 70 C20 66 24 72 30 68 C36 64 40 70 46 67" stroke="#7b1fa2" strokeWidth="2" strokeLinecap="round" fill="none" opacity=".75"/>
+      {/* sparkle */}
+      <path d="M66 16l1.3 2.7 3 .4-2.2 2.1.5 3-2.6-1.4-2.6 1.4.5-3-2.2-2.1 3-.4z" fill="#ffd740" opacity=".8"/>
     </svg>
   ),
 };

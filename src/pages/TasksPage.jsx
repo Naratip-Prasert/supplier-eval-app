@@ -5,7 +5,7 @@
 //  evaluation cycles).
 // ============================================================
 import { useState, useEffect, useCallback } from "react";
-import { Header } from "../components";
+import { Header, useModal } from "../components";
 import { authFetch } from "../utils/api";
 import { ArrowLeft, RefreshCw, AlertCircle, Search, Upload, Send, Pencil, Trash2, X, Check } from "lucide-react";
 import AdminUploadModal from "./AdminUploadModal";
@@ -21,6 +21,7 @@ const EVAL_TYPE_LABEL = {
 };
 
 export default function TasksPage({ authUser, onBack }) {
+  const { showAlert, showConfirm, ModalEl } = useModal();
   const [tasks,           setTasks]           = useState([]);
   const [batches,         setBatches]         = useState([]);
   const [loading,         setLoading]         = useState(false);
@@ -54,7 +55,9 @@ export default function TasksPage({ authUser, onBack }) {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  async function handleRemind(taskId) {
+  async function handleRemind(taskId, supplierName) {
+    const ok = await showConfirm(`ส่งอีเมล Reminder ไปยังผู้รับผิดชอบของ "${supplierName}" ใช่ไหม?`, "ยืนยันส่ง Reminder");
+    if (!ok) return;
     setRemindingId(taskId);
     try {
       const res  = await authFetch(`/api/admin/tasks/${taskId}/remind`, { method: "POST" });
@@ -80,6 +83,11 @@ export default function TasksPage({ authUser, onBack }) {
   }
 
   async function saveEdit(taskId) {
+    const ok = await showConfirm(
+      `บันทึกการแก้ไขผู้รับผิดชอบ/ครบกำหนดใหม่ใช่ไหม?\n\nผู้รับผิดชอบ: ${editDraft.assignedName || "-"} (${editDraft.assignedEmail || "-"})\nครบกำหนด: ${editDraft.dueDate}`,
+      "ยืนยันการแก้ไข"
+    );
+    if (!ok) return;
     setSavingEdit(true);
     try {
       const res  = await authFetch(`/api/admin/tasks/${taskId}`, {
@@ -100,8 +108,12 @@ export default function TasksPage({ authUser, onBack }) {
     }
   }
 
-  async function handleDelete(sessionId) {
-    if (!window.confirm("ลบรายการประเมินนี้ใช่ไหม? (ทั้ง GCP และ USER task ของซัพพลายเออร์นี้จะถูกลบ)")) return;
+  async function handleDelete(sessionId, supplierName) {
+    const ok = await showConfirm(
+      `ลบรายการประเมินของ "${supplierName}" ใช่ไหม?\n\nทั้ง GCP และ USER task ของซัพพลายเออร์นี้จะถูกลบทั้งหมด — ใช้สำหรับแก้ไขกรณีอัพโหลดผิดเท่านั้น`,
+      "ยืนยันการลบรายการ"
+    );
+    if (!ok) return;
     setDeletingId(sessionId);
     try {
       const res  = await authFetch(`/api/admin/sessions/${sessionId}`, { method: "DELETE" });
@@ -129,6 +141,7 @@ export default function TasksPage({ authUser, onBack }) {
 
   return (
     <>
+    {ModalEl}
     {showUploadModal && (
       <AdminUploadModal onClose={() => { setShowUploadModal(false); fetchAll(); }} />
     )}
@@ -320,7 +333,7 @@ export default function TasksPage({ authUser, onBack }) {
                               {t.status !== "completed" && (
                                 <button
                                   disabled={remindingId === t.id}
-                                  onClick={() => handleRemind(t.id)}
+                                  onClick={() => handleRemind(t.id, t.supplierName)}
                                   title="ส่ง Reminder"
                                   style={{ display: "flex", alignItems: "center", gap: 5, background: "#fff3e0", color: "#e65100", border: "1px solid #ffe0b2", borderRadius: 6, padding: "5px 8px", cursor: "pointer", fontFamily: "Sarabun, sans-serif", fontSize: 12, opacity: remindingId === t.id ? 0.6 : 1 }}
                                 >
@@ -338,7 +351,7 @@ export default function TasksPage({ authUser, onBack }) {
                               )}
                               <button
                                 disabled={deletingId === t.sessionId}
-                                onClick={() => handleDelete(t.sessionId)}
+                                onClick={() => handleDelete(t.sessionId, t.supplierName)}
                                 title="ลบรายการประเมินนี้"
                                 style={{ display: "flex", alignItems: "center", gap: 5, background: "#ffebee", color: "#c62828", border: "1px solid #ef9a9a", borderRadius: 6, padding: "5px 8px", cursor: "pointer", fontSize: 12, opacity: deletingId === t.sessionId ? 0.6 : 1 }}
                               >

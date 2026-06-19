@@ -126,6 +126,9 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
   // Derive role from auth token — no manual role selector needed
   const isGCP      = authUser.role === "GCP";
   const themeColor = isGCP ? "#1565c0" : "#1a6b1a";
+  // USER/GCP can only evaluate suppliers explicitly assigned to them via the
+  // task system — free-typing a vendor code is reserved for ADMIN (ad-hoc use).
+  const canManualEntry = authUser.role === "ADMIN";
 
   const [evalType,     setEvalType]     = useState("");
   const [vendorCode,   setVendorCode]   = useState("");
@@ -306,6 +309,17 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
           </div>
         )}
 
+        {!tasksLoading && !canManualEntry && myTasks.length === 0 && (
+          <div style={{
+            border: "1.5px dashed #ccc", borderRadius: 10,
+            padding: "40px 20px", textAlign: "center", color: "#999",
+          }}>
+            ไม่มีงานที่ต้องประเมินในขณะนี้
+          </div>
+        )}
+
+        {canManualEntry && (
+        <>
         <div style={{
           border: `3px solid ${themeColor}`,
           borderRadius: 8, textAlign: "left",
@@ -526,6 +540,8 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
             {isGCP ? "GCP เริ่มประเมิน Supplier" : "เริ่มประเมิน Supplier"}
           </GreenButton>
         </div>
+        </>
+        )}
       </div>
     </div>
   );
