@@ -7,8 +7,8 @@ import { Header } from "../components";
 import { ShieldCheck, Edit3, Check, X, Camera } from "lucide-react";
 import { authFetch } from "../utils/api";
 
-const ROLE_LABEL = { gcp: "GCP", bu: "USER", user: "USER", admin: "ADMIN" };
-const ROLE_COLOR = { gcp: "#1565c0", bu: "#1a6b1a", user: "#1a6b1a", admin: "#6a1b9a" };
+const ROLE_LABEL = { gcp: "GCP", user: "USER", admin: "ADMIN", supervisor: "SUPERVISOR" };
+const ROLE_COLOR = { gcp: "#1565c0", user: "#1a6b1a", admin: "#6a1b9a", supervisor: "#b56a00" };
 
 export default function ProfilePage({ authUser, onBack, onProfileUpdate }) {
   const themeColor = ROLE_COLOR[authUser.role?.toLowerCase()] ?? "#1a6b1a";

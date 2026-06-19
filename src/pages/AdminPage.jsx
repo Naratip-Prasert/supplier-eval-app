@@ -707,7 +707,7 @@ function SessionsTab({ sessions }) {
                   <div style={{ fontSize: 11, color: "#aaa", fontFamily: "monospace" }}>{s.vendorCode}</div>
                 </td>
                 <td style={{ padding: "11px 14px", fontSize: 12, color: "#555" }}>
-                  {s.evalType === "pre_eval" ? "Pre-Evaluation" : "Post-Evaluation"}
+                  {{ pre_eval: "Pre-Evaluation", post_eval: "Post-Evaluation", half_year: "Half-Year", yearly: "Yearly" }[s.evalType] ?? s.evalType}
                 </td>
                 <td style={{ padding: "11px 14px", fontSize: 12, color: "#666" }}>{s.period}</td>
                 <td style={{ padding: "11px 14px" }}><StatusBadge status={s.status} /></td>

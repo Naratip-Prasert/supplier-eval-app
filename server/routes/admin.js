@@ -249,8 +249,10 @@ router.post('/upload/pre-post', upload.single('file'), async (req, res) => {
     res.status(201).json({ message: 'อัพโหลดสำเร็จ', batchId, ...summary });
   } catch (err) {
     await client.query('ROLLBACK');
-    await pool.query(`UPDATE supplier_upload_batches SET status='error', error_msg=$1 WHERE id=$2`,
-      [err.message, 'unknown']).catch(() => {});
+    if (typeof batchId !== 'undefined') {
+      await pool.query(`UPDATE supplier_upload_batches SET status='error', error_msg=$1 WHERE id=$2`,
+        [err.message, batchId]).catch(() => {});
+    }
     console.error('POST /api/admin/upload/pre-post error:', err);
     res.status(500).json({ message: 'อัพโหลดไม่สำเร็จ', error: err.message });
   } finally {

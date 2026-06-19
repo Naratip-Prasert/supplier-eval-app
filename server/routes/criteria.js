@@ -14,7 +14,9 @@ router.get('/', async (req, res) => {
     // criteria_set mirrors the frontend's PRE_CRITERIA/POST_CRITERIA split
     // (src/constants.js) — codes like "1.1" are reused with different
     // meanings across sets, so callers must pick one.
-    const criteriaSet = req.query.evalType === 'post_eval' ? 'post_eval' : 'pre_eval';
+    const criteriaSet = ['post_eval', 'half_year', 'yearly'].includes(req.query.evalType)
+      ? 'post_eval'
+      : 'pre_eval';
 
     const [categoriesResult, criteriaResult, levelsResult] = await Promise.all([
       pool.query(

@@ -20,7 +20,6 @@ const TASK_EVAL_TYPE_LABEL = {
   pre_eval: "Pre-Evaluation (Supplier ใหม่)",
   post_eval: "Post-Evaluation (90 วัน)", half_year: "Half-Year Evaluation", yearly: "Yearly Evaluation",
 };
-const CRITERIA_EVAL_TYPE = { post_eval: "post_eval", half_year: "post_eval", yearly: "post_eval" };
 
 // ── Profile dropdown ─────────────────────────────────────────
 function ProfileDropdown({ user, profilePic, themeColor, onProfile, onHistory, onLogout }) {
@@ -233,7 +232,11 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
       empId:        authUser.empId,
       employeeId:   authUser.empId,
       dept:         authUser.department,
-      evalType:     CRITERIA_EVAL_TYPE[task.evalType] ?? "pre_eval",
+      // Passed straight through — getCriteria/isPostEvalType (constants.js)
+      // already handle pre_eval/post_eval/half_year/yearly directly, and
+      // the backend ignores this field for task-based submissions (it reads
+      // the session's own eval_type instead), so no remapping is needed here.
+      evalType:     task.evalType,
       vendorCode:   task.vendorCode,
       supplierName: task.supplierName,
       productType:  task.productType,

@@ -162,7 +162,7 @@ router.patch('/:employeeId', async (req, res) => {
     return res.status(403).json({ message: 'เฉพาะ Admin เท่านั้น' });
   }
   const { role, isActive } = req.body;
-  const validRoles = ['USER', 'GCP', 'ADMIN'];
+  const validRoles = ['USER', 'GCP', 'ADMIN', 'SUPERVISOR'];
   if (role !== undefined && !validRoles.includes(role)) {
     return res.status(400).json({ message: 'role ไม่ถูกต้อง' });
   }
