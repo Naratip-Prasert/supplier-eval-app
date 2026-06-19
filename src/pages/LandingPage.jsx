@@ -16,6 +16,12 @@ import { PRODUCT_TYPE_OPTIONS, EVAL_PERIOD_OPTIONS, PRE_PERIOD_OPTIONS } from ".
 const PRODUCT_MAP   = { "สินค้า": "goods", "บริการ": "services", "สินค้าและบริการ": "both" };
 const PRODUCT_LABEL = { goods: "สินค้า", services: "บริการ", both: "สินค้าและบริการ" };
 
+const TASK_EVAL_TYPE_LABEL = {
+  pre_eval: "Pre-Evaluation (Supplier ใหม่)", new_supplier: "Pre-Evaluation",
+  post_eval: "Post-Evaluation (90 วัน)", half_year: "Half-Year Evaluation", yearly: "Yearly Evaluation",
+};
+const CRITERIA_EVAL_TYPE = { post_eval: "post_eval", half_year: "post_eval", yearly: "post_eval" };
+
 // ── Profile dropdown ─────────────────────────────────────────
 function ProfileDropdown({ user, profilePic, themeColor, onProfile, onHistory, onLogout }) {
   const [open, setOpen] = useState(false);
@@ -208,6 +214,32 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
   const [period,       setPeriod]       = useState("");
   const [vendorLookup, setVendorLookup] = useState({ status: "idle", data: null });
 
+  const [myTasks,      setMyTasks]      = useState([]);
+  const [tasksLoading, setTasksLoading] = useState(true);
+
+  useEffect(() => {
+    authFetch("/api/evaluations/my-tasks")
+      .then(r => r.ok ? r.json() : [])
+      .then(data => setMyTasks(Array.isArray(data) ? data : []))
+      .catch(() => setMyTasks([]))
+      .finally(() => setTasksLoading(false));
+  }, []);
+
+  const startTask = (task) => {
+    onSubmit({
+      empId:        authUser.empId,
+      employeeId:   authUser.empId,
+      dept:         authUser.department,
+      evalType:     CRITERIA_EVAL_TYPE[task.evalType] ?? "new_supplier",
+      vendorCode:   task.vendorCode,
+      supplierName: task.supplierName,
+      productType:  task.productType,
+      period:       task.period,
+      role:         authUser.role,
+      sessionId:    task.sessionId,
+    });
+  };
+
   const lookupVendor = async (code) => {
     if (!code.trim()) return "idle";
     setVendorLookup({ status: "loading", data: null });
@@ -252,7 +284,6 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
   };
 
   const vendorFound = vendorLookup.status === "found";
-  const step = evalType ? (vendorFound ? 3 : 2) : 1;
 
   return (
     <div style={{ minHeight: "100vh", background: "#f8fafc", fontFamily: "Sarabun, sans-serif" }}>
@@ -320,6 +351,54 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
 
       {/* ── Form card ── */}
       <div style={{ maxWidth: 680, margin: "-20px auto 40px", padding: "0 20px", position: "relative", zIndex: 2 }}>
+
+        {/* Assigned tasks */}
+        {!tasksLoading && myTasks.length > 0 && (
+          <div style={{ marginBottom: 16, animation: "fadeUp 0.3s ease" }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 10, paddingLeft: 2 }}>
+              งานที่มอบหมายให้คุณ ({myTasks.length})
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {myTasks.map(t => {
+                const due     = new Date(t.dueDate);
+                const overdue = t.status === "overdue" || (due < new Date());
+                return (
+                  <div key={t.taskId} style={{
+                    border: `1.5px solid ${overdue ? "#ef9a9a" : "#a5d6a7"}`,
+                    background: overdue ? "#fff5f5" : "#f8fdf8",
+                    borderRadius: 12, padding: "12px 16px",
+                    display: "flex", alignItems: "center", gap: 12,
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+                  }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {t.supplierName}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
+                        {t.vendorCode} · {TASK_EVAL_TYPE_LABEL[t.evalType] || t.evalType}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 12, color: overdue ? "#c62828" : "#6b7280", fontWeight: overdue ? 700 : 400, whiteSpace: "nowrap" }}>
+                      {overdue ? "เกินกำหนด " : "ครบกำหนด "}{due.toLocaleDateString("th-TH")}
+                    </div>
+                    <button
+                      onClick={() => startTask(t)}
+                      style={{
+                        background: themeColor, color: "#fff", border: "none",
+                        borderRadius: 8, padding: "7px 16px", cursor: "pointer",
+                        fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 13,
+                        whiteSpace: "nowrap", flexShrink: 0,
+                      }}
+                    >
+                      เริ่มประเมิน
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <div style={{
           background: "#fff", borderRadius: 16,
           boxShadow: "0 4px 32px rgba(0,0,0,0.10)",

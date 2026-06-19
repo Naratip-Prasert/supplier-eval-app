@@ -101,6 +101,7 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
           evalType:    formData.evalType,
           period:      formData.period,
           productType: formData.productType,
+          sessionId:   formData.sessionId,
           scores:      mergedScores,
         }),
       });

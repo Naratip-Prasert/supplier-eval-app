@@ -5,8 +5,8 @@
 import { useState } from "react";
 import { Header } from "../components";
 import {
-  ClipboardList, Clock, BarChart2, Shield,
-  User, LogOut, ArrowRight,
+  ClipboardList, Clock, BarChart2, Shield, CheckSquare,
+  User, LogOut, ArrowRight, Upload,
 } from "lucide-react";
 
 // ── Module definitions ────────────────────────────────────────
@@ -67,30 +67,67 @@ const MODULES = [
     available: true,
     buttonLabel: "เข้าสู่ระบบจัดการ",
   },
+  {
+    key: "tasks",
+    icon: Upload,
+    title: "งานประเมิน (อัพโหลด)",
+    titleEn: "Evaluation Task Management",
+    desc: "อัพโหลด Excel/CSV เพื่อสร้างงานประเมิน Pre/Post Evaluation และ Half-Year/Yearly พร้อมติดตามสถานะและส่ง Reminder",
+    color: "#00695c",
+    bg: "linear-gradient(135deg, #e0f2f1 0%, #e8f5e9 100%)",
+    border: "#80cbc4",
+    accent: "#00897b",
+    roles: ["ADMIN"],
+    available: true,
+    buttonLabel: "เข้าสู่หน้างานประเมิน",
+  },
+  {
+    key: "supervisor",
+    icon: CheckSquare,
+    title: "อนุมัติผลการประเมิน",
+    titleEn: "Approve Evaluations",
+    desc: "ตรวจสอบและอนุมัติหรือส่งคืนผลการประเมิน Supplier หลังจากที่ GCP และ USER ส่งผลเรียบร้อยแล้ว",
+    color: "#6a1b9a",
+    bg: "linear-gradient(135deg, #f3e5f5 0%, #ede7f6 100%)",
+    border: "#ce93d8",
+    accent: "#7b1fa2",
+    roles: ["SUPERVISOR", "ADMIN"],
+    available: true,
+    buttonLabel: "เข้าสู่หน้าอนุมัติ",
+  },
 ];
 
 const ROLE_BADGE = {
-  USER:  { label: "USER — ผู้ใช้งานทั่วไป",  bg: "#e8f5e9", color: "#1b5e20" },
-  GCP:   { label: "GCP — เจ้าหน้าที่จัดซื้อ",   bg: "#e3f2fd", color: "#1565c0" },
-  ADMIN: { label: "Admin — Administrator", bg: "#fce4ec", color: "#880e4f" },
+  USER:       { label: "USER — ผู้ใช้งานทั่วไป",        bg: "#e8f5e9", color: "#1b5e20" },
+  GCP:        { label: "GCP — เจ้าหน้าที่จัดซื้อ",      bg: "#e3f2fd", color: "#1565c0" },
+  ADMIN:      { label: "Admin — Administrator",       bg: "#fce4ec", color: "#880e4f" },
+  SUPERVISOR: { label: "Supervisor — ผู้อนุมัติ",       bg: "#f3e5f5", color: "#6a1b9a" },
 };
 
 // ── PortalPage ────────────────────────────────────────────────
 export default function PortalPage({
   authUser, profilePic,
-  onLogout, onProfile, onHistory, onEvaluate, onAdmin,
+  onLogout, onProfile, onHistory, onEvaluate, onAdmin, onSupervisor, onTasks,
 }) {
   const role    = authUser?.role ?? "USER";
   const badge   = ROLE_BADGE[role] ?? ROLE_BADGE.USER;
   const modules = MODULES
     .filter((m) => m.roles.includes(role))
-    .sort((a, b) => role === "ADMIN" && a.key === "admin" ? -1 : role === "ADMIN" && b.key === "admin" ? 1 : 0);
+    .sort((a, b) => {
+      if (role === "ADMIN" && a.key === "admin") return -1;
+      if (role === "ADMIN" && b.key === "admin") return 1;
+      if (role === "SUPERVISOR" && a.key === "supervisor") return -1;
+      if (role === "SUPERVISOR" && b.key === "supervisor") return 1;
+      return 0;
+    });
 
   const handleModule = (mod) => {
     if (!mod.available) return;
-    if (mod.key === "evaluate") onEvaluate?.();
-    if (mod.key === "history")  onHistory?.();
-    if (mod.key === "admin")    onAdmin?.();
+    if (mod.key === "evaluate")   onEvaluate?.();
+    if (mod.key === "history")    onHistory?.();
+    if (mod.key === "admin")      onAdmin?.();
+    if (mod.key === "supervisor") onSupervisor?.();
+    if (mod.key === "tasks")      onTasks?.();
   };
 
   const initials = (authUser?.fullName || "?")

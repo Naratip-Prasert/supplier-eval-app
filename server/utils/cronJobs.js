@@ -1,0 +1,202 @@
+'use strict';
+const cron = require('node-cron');
+const pool = require('../db');
+const {
+  sendReminderEmail,
+  sendOverdueEmail,
+  sendThankyouEmail,
+  sendSupervisorNotifyEmail,
+} = require('./emailService');
+
+// ── Daily job: 08:00 Asia/Bangkok ─────────────────────────────
+function startCronJobs() {
+  cron.schedule('0 8 * * *', runDailyEmailJobs, { timezone: 'Asia/Bangkok' });
+  console.log('✅ Cron jobs started (daily 08:00 Bangkok)');
+}
+
+async function runDailyEmailJobs() {
+  console.log('[cron] running daily email jobs...');
+  await sendReminderEmails();
+  await sendOverdueEmails();
+  await sendThankyouEmails();
+  await notifySupervisors();
+  console.log('[cron] daily email jobs done');
+}
+
+// ── 1. Reminder: 7 วันก่อน due ───────────────────────────────
+async function sendReminderEmails() {
+  try {
+    const result = await pool.query(`
+      SELECT et.id, et.assigned_email, et.assigned_name, et.due_date,
+             et.role, et.session_id,
+             s.supplier_name, s.vendor_code
+        FROM evaluation_tasks et
+        JOIN suppliers s ON s.id = et.supplier_id
+       WHERE et.status = 'pending'
+         AND et.reminder_sent_at IS NULL
+         AND et.due_date = CURRENT_DATE + INTERVAL '7 days'
+    `);
+
+    for (const task of result.rows) {
+      try {
+        await sendReminderEmail(task, { supplier_name: task.supplier_name, vendor_code: task.vendor_code });
+        await pool.query(`UPDATE evaluation_tasks SET reminder_sent_at = NOW() WHERE id = $1`, [task.id]);
+        console.log(`[cron] reminder sent → ${task.assigned_email} for ${task.supplier_name}`);
+      } catch (e) {
+        console.warn(`[cron] reminder failed for task ${task.id}:`, e.message);
+      }
+    }
+  } catch (e) {
+    console.error('[cron] sendReminderEmails error:', e.message);
+  }
+}
+
+// ── 2. Overdue: 3 วันหลัง due ────────────────────────────────
+async function sendOverdueEmails() {
+  try {
+    const result = await pool.query(`
+      SELECT et.id, et.assigned_email, et.assigned_name, et.due_date,
+             et.role, et.session_id,
+             s.supplier_name, s.vendor_code
+        FROM evaluation_tasks et
+        JOIN suppliers s ON s.id = et.supplier_id
+       WHERE et.status = 'pending'
+         AND et.overdue_sent_at IS NULL
+         AND et.due_date = CURRENT_DATE - INTERVAL '3 days'
+    `);
+
+    for (const task of result.rows) {
+      try {
+        await sendOverdueEmail(task, { supplier_name: task.supplier_name, vendor_code: task.vendor_code });
+        await pool.query(`
+          UPDATE evaluation_tasks SET overdue_sent_at = NOW(), status = 'overdue' WHERE id = $1
+        `, [task.id]);
+        console.log(`[cron] overdue sent → ${task.assigned_email} for ${task.supplier_name}`);
+      } catch (e) {
+        console.warn(`[cron] overdue failed for task ${task.id}:`, e.message);
+      }
+    }
+  } catch (e) {
+    console.error('[cron] sendOverdueEmails error:', e.message);
+  }
+}
+
+// ── 3. Thank-you: หลัง submit แล้วยังไม่ได้ส่ง ───────────────
+async function sendThankyouEmails() {
+  try {
+    const result = await pool.query(`
+      SELECT et.id, et.assigned_email, et.assigned_name, et.due_date,
+             et.session_id,
+             s.supplier_name, s.vendor_code
+        FROM evaluation_tasks et
+        JOIN suppliers s ON s.id = et.supplier_id
+       WHERE et.status = 'completed'
+         AND et.thankyou_sent_at IS NULL
+    `);
+
+    for (const task of result.rows) {
+      try {
+        await sendThankyouEmail(task, { supplier_name: task.supplier_name, vendor_code: task.vendor_code });
+        await pool.query(`UPDATE evaluation_tasks SET thankyou_sent_at = NOW() WHERE id = $1`, [task.id]);
+        console.log(`[cron] thankyou sent → ${task.assigned_email} for ${task.supplier_name}`);
+      } catch (e) {
+        console.warn(`[cron] thankyou failed for task ${task.id}:`, e.message);
+      }
+    }
+  } catch (e) {
+    console.error('[cron] sendThankyouEmails error:', e.message);
+  }
+}
+
+// ── 4. Notify supervisors for new pending_review sessions ─────
+async function notifySupervisors() {
+  try {
+    // Find reviews that haven't notified supervisor yet
+    const result = await pool.query(`
+      SELECT sr.id AS "reviewId", sr.review_due AS "reviewDue",
+             es.id AS "sessionId", es.eval_type AS "evalType",
+             es.final_score AS "finalScore",
+             s.supplier_name, s.vendor_code
+        FROM supervisor_reviews sr
+        JOIN evaluation_sessions es ON es.id = sr.session_id
+        JOIN suppliers s ON s.id = es.supplier_id
+       WHERE sr.status = 'pending'
+         AND sr.created_at::date = CURRENT_DATE
+    `);
+
+    if (result.rows.length === 0) return;
+
+    // Get all supervisors
+    const supervisors = await pool.query(`
+      SELECT id, full_name, email FROM employees
+       WHERE role = 'SUPERVISOR' AND is_active = TRUE AND email IS NOT NULL
+    `);
+
+    for (const review of result.rows) {
+      for (const sup of supervisors.rows) {
+        try {
+          await sendSupervisorNotifyEmail(
+            sup.email, sup.full_name,
+            { supplier_name: review.supplier_name, eval_type: review.evalType, final_score: review.finalScore },
+            review.reviewDue
+          );
+        } catch (e) {
+          console.warn(`[cron] supervisor notify failed for ${sup.email}:`, e.message);
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[cron] notifySupervisors error:', e.message);
+  }
+}
+
+// ── Also handle post_eval invitation: 7 วันก่อน due ──────────
+// This is separate from the daily job since post_eval due = pta + 90 days
+// Cron: หา tasks ที่ invitation_sent_at IS NULL AND due_date = TODAY + 7 (post_eval only)
+async function sendPostEvalInvitations() {
+  try {
+    const result = await pool.query(`
+      SELECT et.id, et.assigned_email, et.assigned_name, et.due_date, et.role,
+             s.supplier_name, s.vendor_code,
+             es.eval_type
+        FROM evaluation_tasks et
+        JOIN suppliers s            ON s.id  = et.supplier_id
+        JOIN evaluation_sessions es ON es.id = et.session_id
+       WHERE et.status = 'pending'
+         AND et.invitation_sent_at IS NULL
+         AND es.eval_type = 'post_eval'
+         AND et.due_date = CURRENT_DATE + INTERVAL '7 days'
+    `);
+
+    const { sendInvitationEmail } = require('./emailService');
+    for (const task of result.rows) {
+      try {
+        await sendInvitationEmail(
+          { ...task, eval_type_label: 'Post Evaluation (90 วัน)' },
+          { supplier_name: task.supplier_name, vendor_code: task.vendor_code }
+        );
+        await pool.query(`UPDATE evaluation_tasks SET invitation_sent_at = NOW() WHERE id = $1`, [task.id]);
+        console.log(`[cron] post_eval invitation sent → ${task.assigned_email}`);
+      } catch (e) {
+        console.warn(`[cron] post_eval invitation failed for task ${task.id}:`, e.message);
+      }
+    }
+  } catch (e) {
+    console.error('[cron] sendPostEvalInvitations error:', e.message);
+  }
+}
+
+// Add post_eval invitations to the daily run
+const _origRun = runDailyEmailJobs;
+async function runDailyEmailJobsWithPostEval() {
+  await _origRun();
+  await sendPostEvalInvitations();
+}
+
+// Override cron schedule to include post_eval invitations
+function startCronJobsFull() {
+  cron.schedule('0 8 * * *', runDailyEmailJobsWithPostEval, { timezone: 'Asia/Bangkok' });
+  console.log('✅ Cron jobs started (daily 08:00 Bangkok)');
+}
+
+module.exports = { startCronJobs: startCronJobsFull };

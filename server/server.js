@@ -1,30 +1,30 @@
 'use strict';
-const express = require('express');
-const cors    = require('cors');
-require('dotenv').config();
+const express = require('express'); // express เป็น framework ที่ทำให้ node.js รับ http request ได้ง่าย
+const cors    = require('cors'); // เช็คว่าโดเมนที่เรียกเข้ามา ได้รับอนุญาตให้ดึงข้อมูลจาก API ของเราไหม
+require('dotenv').config(); // ใช้ค่าจาก .env จะได้ไม่ต้องทำ Hardcode
 
 const pool = require('./db');
 
-const app  = express();
+const app  = express(); //สร้าง Express Application — app คือ object หลักที่เราจะ config ทุกอย่างลงไป
 const PORT = process.env.PORT || 5000;
 
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin || /^http:\/\/localhost:\d+$/.test(origin)) cb(null, true);
+app.use(cors({ // app.use(...) คือการเพิ่ม middleware - บอก express ว่าใช้ cor middleware กับทุก req
+  origin: (origin, cb) => {  //กำหนด function ตรวจสอบ origin
+    if (!origin || /^http:\/\/localhost:\d+$/.test(origin)) cb(null, true); // ถ้าไม่มี origin หรือ เป็น localhost ตามด้วยเลขอะไรก็ได้ - ถือว่าอนุญาต = cb(null , true)
     else cb(new Error('Not allowed by CORS'));
   },
   credentials: true,
 }));
-app.use(express.json({ limit: '8mb' }));
+app.use(express.json({ limit: '8mb' })); //บอก Express ให้แปลง JSON ที่ส่งมาใน request body เป็น JavaScript object อัตโนมัติ
 
 // ── Request logger ────────────────────────────────────────────
-app.use((req, res, next) => {
-  const start = Date.now();
+app.use((req, res, next) => { // เพิ่ม middleware ที่จะรันกับทุก request — รับ parameter 3 ตัวเสมอ: req (request), res (response), next (ฟังก์ชันที่บอกให้ไปต่อ)
+  const start = Date.now(); // จดเวลาที่ request เข้ามา (millisecond) — ใช้คำนวณว่า request ใช้เวลานานแค่ไหน
   res.on('finish', () => {
     const ms      = Date.now() - start;
     const status  = res.statusCode;
     const emoji   = status >= 500 ? '❌' : status >= 400 ? '⚠️ ' : '✅';
-    const line    = `${emoji} ${req.method.padEnd(6)} ${req.originalUrl.padEnd(45)} ${status}  (${ms}ms)`;
+    const line    = `${emoji} ${req.method.padEnd(6)} ${req.originalUrl.padEnd(45)} ${status}  (${ms}ms)`; //เลือก emoji ตาม status — 500+ คือ server error (❌), 400+ คือ client error (⚠️), อื่นๆ คือสำเร็จ (✅) — เขียนแบบ ternary ซ้อนกัน
     if (status >= 500)      console.error(line);
     else if (status >= 400) console.warn(line);
     else                    console.log(line);
@@ -44,6 +44,10 @@ app.use('/api/employees',   requireAuth, require('./routes/employees'));
 app.use('/api/suppliers',   requireAuth, require('./routes/suppliers'));
 app.use('/api/criteria',    requireAuth, require('./routes/criteria'));
 app.use('/api/sessions',    requireAuth, require('./routes/sessions'));
+app.use('/api/admin',       requireAuth, require('./routes/admin'));
+app.use('/api/supervisor',  requireAuth, require('./routes/supervisor'));
+
+const { startCronJobs } = require('./utils/cronJobs');
 
 pool.connect()
   .then(async client => {
@@ -149,6 +153,147 @@ pool.connect()
         color_hex = EXCLUDED.color_hex
     `).catch(err => console.warn('grade_thresholds migration warning:', err.message));
 
+    // ── New schema migrations (v3) ──────────────────────────────
+    // suppliers: extra columns from Upload_Template
+    await client.query(`
+      ALTER TABLE suppliers
+        ADD COLUMN IF NOT EXISTS tax_id           VARCHAR(30),
+        ADD COLUMN IF NOT EXISTS category         VARCHAR(100),
+        ADD COLUMN IF NOT EXISTS function_owner   VARCHAR(100),
+        ADD COLUMN IF NOT EXISTS job_value_thb    DECIMAL(15,2),
+        ADD COLUMN IF NOT EXISTS pta_approve_date DATE,
+        ADD COLUMN IF NOT EXISTS buyer_name       VARCHAR(200),
+        ADD COLUMN IF NOT EXISTS buyer_email      VARCHAR(200),
+        ADD COLUMN IF NOT EXISTS evaluator_name   VARCHAR(200),
+        ADD COLUMN IF NOT EXISTS evaluator_email  VARCHAR(200)
+    `).catch(err => console.warn('suppliers migration warning:', err.message));
+
+    // employees: add SUPERVISOR role
+    await client.query(`
+      ALTER TABLE employees DROP CONSTRAINT IF EXISTS employees_role_check;
+      ALTER TABLE employees
+        ADD CONSTRAINT employees_role_check
+        CHECK (role IN ('USER', 'GCP', 'ADMIN', 'SUPERVISOR'))
+    `).catch(err => console.warn('employees role migration warning:', err.message));
+
+    // evaluation_sessions: add new eval_type + status values
+    await client.query(`
+      ALTER TABLE evaluation_sessions DROP CONSTRAINT IF EXISTS evaluation_sessions_eval_type_check;
+      ALTER TABLE evaluation_sessions
+        ADD CONSTRAINT evaluation_sessions_eval_type_check
+        CHECK (eval_type IN ('new_supplier','post_eval','pre_eval','half_year','yearly'));
+
+      ALTER TABLE evaluation_sessions DROP CONSTRAINT IF EXISTS evaluation_sessions_status_check;
+      ALTER TABLE evaluation_sessions
+        ADD CONSTRAINT evaluation_sessions_status_check
+        CHECK (status IN ('pending','in_progress','pending_review','completed','returned'))
+    `).catch(err => console.warn('sessions constraint migration warning:', err.message));
+
+    // Update trigger: both saved → pending_review (not completed directly)
+    await client.query(`
+      CREATE OR REPLACE FUNCTION recalculate_session_final_score()
+      RETURNS TRIGGER AS $func$
+      DECLARE
+        v_session_id UUID;
+        v_user_score DECIMAL;
+        v_gcp_score  DECIMAL;
+        v_final      DECIMAL;
+        v_grade      VARCHAR(5);
+      BEGIN
+        v_session_id := NEW.session_id;
+        SELECT total_score INTO v_user_score
+          FROM evaluations
+         WHERE session_id = v_session_id AND role = 'USER' AND status = 'saved';
+        SELECT total_score INTO v_gcp_score
+          FROM evaluations
+         WHERE session_id = v_session_id AND role = 'GCP' AND status = 'saved';
+        IF v_user_score IS NOT NULL AND v_gcp_score IS NOT NULL THEN
+          v_final := ROUND((v_user_score + v_gcp_score) / 2.0, 2);
+          SELECT grade INTO v_grade
+            FROM grade_thresholds
+           WHERE ROUND(v_final, 1) >= min_score AND ROUND(v_final, 1) <= max_score
+           LIMIT 1;
+          UPDATE evaluation_sessions
+             SET final_score = v_final, final_grade = v_grade,
+                 status = 'pending_review'
+           WHERE id = v_session_id AND status NOT IN ('completed','returned');
+        ELSE
+          UPDATE evaluation_sessions
+             SET status = 'in_progress'
+           WHERE id = v_session_id AND status = 'pending';
+        END IF;
+        RETURN NEW;
+      END;
+      $func$ LANGUAGE plpgsql;
+
+      DROP TRIGGER IF EXISTS trg_recalculate_score ON evaluations;
+      CREATE TRIGGER trg_recalculate_score
+        AFTER INSERT OR UPDATE ON evaluations
+        FOR EACH ROW EXECUTE FUNCTION recalculate_session_final_score();
+    `).catch(err => console.warn('trigger migration warning:', err.message));
+
+    // New tables
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS supplier_upload_batches (
+        id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        uploaded_by  UUID REFERENCES employees(id),
+        batch_type   VARCHAR(20) CHECK (batch_type IN ('pre_post_eval','half_year','yearly')),
+        filename     VARCHAR(300),
+        row_count    INTEGER DEFAULT 0,
+        status       VARCHAR(20) DEFAULT 'processing' CHECK (status IN ('processing','done','error')),
+        error_msg    TEXT,
+        created_at   TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS evaluation_tasks (
+        id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        batch_id             UUID REFERENCES supplier_upload_batches(id),
+        session_id           UUID REFERENCES evaluation_sessions(id),
+        supplier_id          UUID REFERENCES suppliers(id),
+        assigned_employee_id UUID REFERENCES employees(id),
+        assigned_email       VARCHAR(200) NOT NULL,
+        assigned_name        VARCHAR(200),
+        role                 VARCHAR(10) CHECK (role IN ('GCP','BU','USER')),
+        due_date             DATE NOT NULL,
+        status               VARCHAR(20) DEFAULT 'pending'
+                               CHECK (status IN ('pending','completed','overdue')),
+        invitation_sent_at   TIMESTAMPTZ,
+        reminder_sent_at     TIMESTAMPTZ,
+        overdue_sent_at      TIMESTAMPTZ,
+        thankyou_sent_at     TIMESTAMPTZ,
+        created_at           TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_tasks_session   ON evaluation_tasks(session_id);
+      CREATE INDEX IF NOT EXISTS idx_tasks_employee  ON evaluation_tasks(assigned_employee_id);
+      CREATE INDEX IF NOT EXISTS idx_tasks_due_date  ON evaluation_tasks(due_date);
+      CREATE INDEX IF NOT EXISTS idx_tasks_status    ON evaluation_tasks(status);
+
+      CREATE TABLE IF NOT EXISTS email_logs (
+        id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        task_id     UUID REFERENCES evaluation_tasks(id),
+        email_type  VARCHAR(30),
+        to_email    VARCHAR(200) NOT NULL,
+        subject     VARCHAR(300),
+        status      VARCHAR(10) DEFAULT 'sent',
+        error_msg   TEXT,
+        sent_at     TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS supervisor_reviews (
+        id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        session_id     UUID NOT NULL REFERENCES evaluation_sessions(id),
+        supervisor_id  UUID REFERENCES employees(id),
+        status         VARCHAR(20) DEFAULT 'pending'
+                         CHECK (status IN ('pending','approved','returned')),
+        notes          TEXT,
+        review_due     TIMESTAMPTZ,
+        reviewed_at    TIMESTAMPTZ,
+        created_at     TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_supervisor_reviews_session ON supervisor_reviews(session_id);
+      CREATE INDEX IF NOT EXISTS idx_supervisor_reviews_status  ON supervisor_reviews(status);
+    `).catch(err => console.warn('new tables migration warning:', err.message));
+
     // Create default ADMIN account if none exists
     const bcrypt = require('bcrypt');
     const adminExists = await client.query(
@@ -167,9 +312,10 @@ pool.connect()
 
     client.release();
     console.log('✅ PostgreSQL connected');
-    app.listen(PORT, () =>
-      console.log(`🚀 Server running on http://localhost:${PORT}`)
-    );
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on http://localhost:${PORT}`);
+      startCronJobs();
+    });
   })
   .catch(err => {
     console.error('❌ PostgreSQL connection error:', err.message);
