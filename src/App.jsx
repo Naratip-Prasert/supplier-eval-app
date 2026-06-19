@@ -8,6 +8,8 @@ import ResultPage         from "./pages/Resultpage";
 import ProfilePage        from "./pages/ProfilePage";
 import HistoryPage        from "./pages/HistoryPage";
 import AdminPage          from "./pages/AdminPage";
+import TasksPage          from "./pages/TasksPage";
+import SupervisorPage     from "./pages/SupervisorPage";
 import LoginPage          from "./pages/LoginPage";
 import RegisterPage       from "./pages/RegisterPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
@@ -213,6 +215,8 @@ export default function App() {
         onHistory={() => setPage("history")}
         onEvaluate={() => setPage("landing")}
         onAdmin={() => setPage("admin")}
+        onSupervisor={() => setPage("supervisor")}
+        onTasks={() => setPage("tasks")}
       />
     );
   }
@@ -220,6 +224,24 @@ export default function App() {
   if (page === "admin") {
     return (
       <AdminPage
+        authUser={user}
+        onBack={() => setPage("portal")}
+      />
+    );
+  }
+
+  if (page === "tasks") {
+    return (
+      <TasksPage
+        authUser={user}
+        onBack={() => setPage("portal")}
+      />
+    );
+  }
+
+  if (page === "supervisor") {
+    return (
+      <SupervisorPage
         authUser={user}
         onBack={() => setPage("portal")}
       />

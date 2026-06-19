@@ -12,14 +12,17 @@ import {
 
 // ── Constants ─────────────────────────────────────────────────
 const ROLE_COLORS = {
-  USER:  { bg: "#e8f5e9", color: "#1b5e20", label: "USER" },
-  GCP:   { bg: "#e3f2fd", color: "#1565c0", label: "GCP"  },
-  ADMIN: { bg: "#fce4ec", color: "#880e4f", label: "ADMIN" },
+  USER:       { bg: "#e8f5e9", color: "#1b5e20", label: "USER"       },
+  GCP:        { bg: "#e3f2fd", color: "#1565c0", label: "GCP"        },
+  ADMIN:      { bg: "#fce4ec", color: "#880e4f", label: "ADMIN"      },
+  SUPERVISOR: { bg: "#f3e5f5", color: "#6a1b9a", label: "SUPERVISOR" },
 };
 const STATUS_COLORS = {
-  pending:     { bg: "#fff8e1", color: "#f57f17", label: "รอการประเมิน" },
-  in_progress: { bg: "#e3f2fd", color: "#1565c0", label: "กำลังประเมิน" },
-  completed:   { bg: "#e8f5e9", color: "#1b5e20", label: "เสร็จสิ้น"    },
+  pending:        { bg: "#fff8e1", color: "#f57f17", label: "รอการประเมิน"  },
+  in_progress:    { bg: "#e3f2fd", color: "#1565c0", label: "กำลังประเมิน"  },
+  pending_review: { bg: "#f3e5f5", color: "#6a1b9a", label: "รออนุมัติ"     },
+  completed:      { bg: "#e8f5e9", color: "#1b5e20", label: "เสร็จสิ้น"     },
+  returned:       { bg: "#ffebee", color: "#c62828", label: "ส่งคืน"        },
 };
 const GRADE_COLORS = {
   A: "#1b5e20", B: "#1565c0", C: "#e65100", D: "#b71c1c", F: "#4a0000",
@@ -33,12 +36,12 @@ const TABS = [
 
 // ── AdminPage ─────────────────────────────────────────────────
 export default function AdminPage({ authUser, onBack }) {
-  const [tab,        setTab]        = useState("overview");
-  const [employees,  setEmployees]  = useState([]);
-  const [suppliers,  setSuppliers]  = useState([]);
-  const [sessions,   setSessions]   = useState([]);
-  const [loading,    setLoading]    = useState(false);
-  const [error,      setError]      = useState(null);
+  const [tab,             setTab]             = useState("overview");
+  const [employees,       setEmployees]       = useState([]);
+  const [suppliers,       setSuppliers]       = useState([]);
+  const [sessions,        setSessions]        = useState([]);
+  const [loading,         setLoading]         = useState(false);
+  const [error,           setError]           = useState(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);

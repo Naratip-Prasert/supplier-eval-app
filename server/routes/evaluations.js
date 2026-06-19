@@ -7,6 +7,7 @@
 // ============================================================
 const router = require('express').Router();
 const pool   = require('../db');
+const { sendSupervisorNotifyEmail } = require('../utils/emailService');
 
 // ── helpers ──────────────────────────────────────────────────
 
@@ -58,7 +59,7 @@ async function computeScoreAndGrade(client, scoresInput, criteriaMap) {
 //   }
 // }
 router.post('/', async (req, res) => {
-  const { employeeId, vendorCode, evalType, period, productType, scores } = req.body;
+  const { employeeId, vendorCode, evalType, period, productType, scores, sessionId: taskSessionId } = req.body;
 
   const missing = missingFields(req.body, ['employeeId', 'vendorCode', 'evalType', 'period', 'productType', 'scores']);
   if (missing.length > 0) {
@@ -98,34 +99,27 @@ router.post('/', async (req, res) => {
 
     // 3. BU permission check — disabled for now (all users can evaluate any supplier)
 
-    // 4. Validate eval_type
-    const validEvalTypes = ['new_supplier', 'post_eval'];
-    if (!validEvalTypes.includes(evalType)) {
-      await client.query('ROLLBACK');
-      console.warn(`[evaluations] evalType ไม่ถูกต้อง: "${evalType}" (รับได้: ${validEvalTypes.join(', ')})`);
-      return res.status(400).json({ message: 'ประเภทการประเมินไม่ถูกต้อง', field: 'evalType' });
-    }
-
     // USER, GCP, ADMIN are all valid roles for evaluation submissions
     const evalRole = ['USER', 'GCP', 'ADMIN'].includes(employee.role) ? employee.role : 'USER';
 
-    // 5. Find or create session for (supplier, period, evalType)
-    const sessionResult = await client.query(
-      `SELECT id FROM evaluation_sessions
-        WHERE supplier_id = $1
-          AND period      = $2
-          AND eval_type   = $3
-          AND status IN ('pending', 'in_progress')
-        ORDER BY created_at DESC
-        LIMIT 1`,
-      [supplier.id, period, evalType]
-    );
-
     let sessionId;
-    if (sessionResult.rows.length > 0) {
-      sessionId = sessionResult.rows[0].id;
 
-      // Ensure this role hasn't already submitted for this session
+    // 4a. If submitted from an assigned task, attach to that exact session
+    // instead of fuzzy-matching by (supplier, period, evalType) — the task
+    // system uses eval_type values (pre_eval/half_year/yearly) the legacy
+    // manual-entry flow below doesn't produce, so they'd never match.
+    if (taskSessionId) {
+      const taskSessionResult = await client.query(
+        `SELECT id FROM evaluation_sessions
+          WHERE id = $1 AND supplier_id = $2 AND status IN ('pending', 'in_progress')`,
+        [taskSessionId, supplier.id]
+      );
+      if (taskSessionResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ message: 'ไม่พบงานประเมินนี้ หรืองานถูกดำเนินการไปแล้ว', field: 'sessionId' });
+      }
+      sessionId = taskSessionResult.rows[0].id;
+
       const dupResult = await client.query(
         `SELECT id FROM evaluations WHERE session_id = $1 AND role = $2`,
         [sessionId, evalRole]
@@ -136,12 +130,45 @@ router.post('/', async (req, res) => {
         return res.status(409).json({ message: 'คุณได้ส่งผลการประเมินสำหรับรายการนี้แล้ว' });
       }
     } else {
-      const newSession = await client.query(
-        `INSERT INTO evaluation_sessions (supplier_id, eval_type, period, initiated_by)
-          VALUES ($1, $2, $3, $4) RETURNING id`,
-        [supplier.id, evalType, period, employee.id]
+      // 4b. Legacy manual-entry flow — validate eval_type, find or create session
+      const validEvalTypes = ['new_supplier', 'post_eval', 'pre_eval', 'half_year', 'yearly'];
+      if (!validEvalTypes.includes(evalType)) {
+        await client.query('ROLLBACK');
+        console.warn(`[evaluations] evalType ไม่ถูกต้อง: "${evalType}" (รับได้: ${validEvalTypes.join(', ')})`);
+        return res.status(400).json({ message: 'ประเภทการประเมินไม่ถูกต้อง', field: 'evalType' });
+      }
+
+      const sessionResult = await client.query(
+        `SELECT id FROM evaluation_sessions
+          WHERE supplier_id = $1
+            AND period      = $2
+            AND eval_type   = $3
+            AND status IN ('pending', 'in_progress')
+          ORDER BY created_at DESC
+          LIMIT 1`,
+        [supplier.id, period, evalType]
       );
-      sessionId = newSession.rows[0].id;
+
+      if (sessionResult.rows.length > 0) {
+        sessionId = sessionResult.rows[0].id;
+
+        const dupResult = await client.query(
+          `SELECT id FROM evaluations WHERE session_id = $1 AND role = $2`,
+          [sessionId, evalRole]
+        );
+        if (dupResult.rows.length > 0) {
+          await client.query('ROLLBACK');
+          console.warn(`[evaluations] ${employeeId} (${evalRole}) ส่งผลซ้ำ session ${sessionId}`);
+          return res.status(409).json({ message: 'คุณได้ส่งผลการประเมินสำหรับรายการนี้แล้ว' });
+        }
+      } else {
+        const newSession = await client.query(
+          `INSERT INTO evaluation_sessions (supplier_id, eval_type, period, initiated_by)
+            VALUES ($1, $2, $3, $4) RETURNING id`,
+          [supplier.id, evalType, period, employee.id]
+        );
+        sessionId = newSession.rows[0].id;
+      }
     }
 
     // 6. Load criteria to resolve codes → UUIDs + default weights
@@ -164,7 +191,17 @@ router.post('/', async (req, res) => {
     // 7. Compute total score and grade on the server (ignore frontend values)
     const { totalScore, grade } = await computeScoreAndGrade(client, scores, criteriaMap);
 
-    // 8. Insert evaluation record (raw_scores stores every criterion submitted)
+    // 8. Mark evaluation_task as completed if task-based assignment exists
+    await client.query(`
+      UPDATE evaluation_tasks
+         SET status = 'completed'
+       WHERE session_id = $1
+         AND (assigned_employee_id = $2
+              OR assigned_email = (SELECT email FROM employees WHERE id = $2 LIMIT 1))
+         AND status != 'completed'
+    `, [sessionId, employee.id]).catch(() => {});
+
+    // 9. Insert evaluation record (raw_scores stores every criterion submitted)
     const evalResult = await client.query(
       `INSERT INTO evaluations
          (session_id, employee_id, role, product_type, status, total_score, grade, submitted_at, raw_scores)
@@ -191,6 +228,44 @@ router.post('/', async (req, res) => {
     }
 
     await client.query('COMMIT');
+
+    // After commit: check if both BU+GCP have submitted for this session
+    // If yes → create supervisor_review and notify supervisors (fire-and-forget)
+    pool.query(
+      `SELECT COUNT(*) AS cnt FROM evaluations WHERE session_id = $1 AND status = 'saved'`,
+      [sessionId]
+    ).then(async r => {
+      if (parseInt(r.rows[0].cnt, 10) < 2) return;
+
+      // Both submitted — create supervisor review record
+      const reviewDue = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      await pool.query(`
+        INSERT INTO supervisor_reviews (session_id, review_due)
+        VALUES ($1, $2)
+        ON CONFLICT DO NOTHING
+      `, [sessionId, reviewDue]);
+
+      // Fetch session + supplier for email
+      const sessionInfo = await pool.query(`
+        SELECT es.eval_type, es.final_score, s.supplier_name, s.vendor_code
+          FROM evaluation_sessions es
+          JOIN suppliers s ON s.id = es.supplier_id
+         WHERE es.id = $1
+      `, [sessionId]);
+
+      if (sessionInfo.rows.length === 0) return;
+      const sess = sessionInfo.rows[0];
+
+      // Notify all active supervisors
+      const supervisors = await pool.query(`
+        SELECT email, full_name FROM employees
+         WHERE role = 'SUPERVISOR' AND is_active = TRUE AND email IS NOT NULL
+      `);
+      for (const sup of supervisors.rows) {
+        sendSupervisorNotifyEmail(sup.email, sup.full_name, sess, reviewDue)
+          .catch(e => console.warn('[evaluations] supervisor notify error:', e.message));
+      }
+    }).catch(e => console.warn('[evaluations] post-commit supervisor check error:', e.message));
 
     res.status(201).json({
       message: 'บันทึกสำเร็จ',
@@ -300,6 +375,40 @@ router.get('/my', async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error('GET /api/evaluations/my error:', err);
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+  }
+});
+
+// ── GET /api/evaluations/my-tasks ─────────────────────────────
+// Returns pending/overdue evaluation tasks assigned to the current user
+// (by email), so GCP/USER can see which suppliers they must evaluate
+// instead of typing a vendor code blind.
+router.get('/my-tasks', async (req, res) => {
+  if (!req.user.email) return res.json([]);
+  try {
+    const result = await pool.query(`
+      SELECT
+        et.id              AS "taskId",
+        et.role,
+        et.due_date        AS "dueDate",
+        et.status,
+        es.id               AS "sessionId",
+        es.eval_type        AS "evalType",
+        es.period,
+        s.vendor_code       AS "vendorCode",
+        s.supplier_name     AS "supplierName",
+        s.product_type      AS "productType"
+      FROM evaluation_tasks et
+      JOIN evaluation_sessions es ON es.id = et.session_id
+      JOIN suppliers s             ON s.id = et.supplier_id
+      WHERE et.assigned_email = $1
+        AND et.status != 'completed'
+        AND es.status IN ('pending', 'in_progress')
+      ORDER BY et.due_date ASC
+    `, [req.user.email]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('GET /api/evaluations/my-tasks error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
 });
