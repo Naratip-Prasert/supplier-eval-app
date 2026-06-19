@@ -36,6 +36,9 @@ server/node_modules
 
 # HTML Exported files (เช่น database-tables.html, tech-stack-table.html)
 *.html
+*.xlsx
+*.xls
+*.csv
 
 # Python script for ppt generation (เฉพาะไฟล์ make_ppt.py)
 make_ppt.py
