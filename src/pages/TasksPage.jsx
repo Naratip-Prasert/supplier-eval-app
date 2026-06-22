@@ -9,6 +9,7 @@ import { Header, useModal } from "../components";
 import { authFetch } from "../utils/api";
 import { ArrowLeft, RefreshCw, AlertCircle, Search, Upload, Send, Pencil, Trash2, X, Check } from "lucide-react";
 import AdminUploadModal from "./AdminUploadModal";
+import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter } from "../utils/dateFilter";
 
 const TASK_STATUS_COLORS = {
   pending:   { bg: "#fff8e1", color: "#f57f17", label: "รอประเมิน" },
@@ -20,7 +21,7 @@ const EVAL_TYPE_LABEL = {
   post_eval: "Post 90d", half_year: "Half-Year", yearly: "Yearly",
 };
 
-export default function TasksPage({ authUser, onBack }) {
+export default function TasksPage({ authUser, onBack, embedded = false }) {
   const { showAlert, showConfirm, ModalEl } = useModal();
   const [tasks,           setTasks]           = useState([]);
   const [batches,         setBatches]         = useState([]);
@@ -31,6 +32,7 @@ export default function TasksPage({ authUser, onBack }) {
   const [remindMsg,       setRemindMsg]       = useState(null);
   const [statusFilter,    setStatusFilter]    = useState("all");
   const [typeFilter,      setTypeFilter]      = useState("all");
+  const [dateFilter,      setDateFilter]      = useState(DEFAULT_DATE_FILTER);
   const [search,          setSearch]          = useState("");
   const [editingId,       setEditingId]       = useState(null);
   const [editDraft,       setEditDraft]       = useState({ assignedEmail: "", dueDate: "" });
@@ -165,56 +167,52 @@ export default function TasksPage({ authUser, onBack }) {
       || t.vendorCode?.toLowerCase().includes(q)
       || t.assignedEmail?.toLowerCase().includes(q)
       || t.assignedName?.toLowerCase().includes(q);
-    return matchStatus && matchType && matchSearch;
+    const matchDate = matchesDateFilter(t.createdAt, dateFilter);
+    return matchStatus && matchType && matchSearch && matchDate;
   });
 
   const pendingCount = tasks.filter(t => t.status === "pending").length;
   const overdueCount = tasks.filter(t => t.status === "overdue").length;
 
-  return (
+  const content = (
     <>
-    {ModalEl}
-    {showUploadModal && (
-      <AdminUploadModal onClose={() => { setShowUploadModal(false); fetchAll(); }} />
-    )}
-    <div style={{ minHeight: "100vh", background: "#f0f4f0", fontFamily: "Sarabun, sans-serif" }}>
-      <Header titleOverride="Supplier Evaluation System" />
-
-      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 20px 48px" }}>
-
-        {/* ── Breadcrumb bar ── */}
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
-          <button
-            onClick={onBack}
-            style={{
-              display: "flex", alignItems: "center", gap: 6,
-              background: "none", border: "none", cursor: "pointer",
-              color: "#1b5e20", fontSize: 14, fontWeight: 700,
-              fontFamily: "Sarabun, sans-serif", padding: 0,
-            }}
-          >
-            <ArrowLeft size={16} /> หน้าหลัก
-          </button>
-          <span style={{ color: "#ccc" }}>/</span>
-          <span style={{ fontSize: 14, fontWeight: 700, color: "#333" }}>งานประเมิน</span>
-
-          <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-            {loading && <span style={{ fontSize: 12, color: "#aaa" }}>กำลังโหลด…</span>}
+        {!embedded && (
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
             <button
-              onClick={fetchAll}
-              disabled={loading}
+              onClick={onBack}
               style={{
-                display: "flex", alignItems: "center", gap: 5,
-                background: "#fff", border: "1px solid #ddd", borderRadius: 8,
-                padding: "6px 12px", cursor: "pointer", fontSize: 12,
-                color: "#555", fontFamily: "Sarabun, sans-serif",
+                display: "flex", alignItems: "center", gap: 6,
+                background: "none", border: "none", cursor: "pointer",
+                color: "#1b5e20", fontSize: 14, fontWeight: 700,
+                fontFamily: "Sarabun, sans-serif", padding: 0,
               }}
             >
-              <RefreshCw size={13} style={{ animation: loading ? "spin 1s linear infinite" : "none" }} />
-              รีเฟรช
+              <ArrowLeft size={16} /> หน้าหลัก
             </button>
+            <span style={{ color: "#ccc" }}>/</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: "#333" }}>งานประเมิน</span>
+
+            <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+              {loading && <span style={{ fontSize: 12, color: "#aaa" }}>กำลังโหลด…</span>}
+              <button
+                onClick={fetchAll}
+                disabled={loading}
+                style={{
+                  display: "flex", alignItems: "center", gap: 5,
+                  background: "#fff", border: "1px solid #ddd", borderRadius: 8,
+                  padding: "6px 12px", cursor: "pointer", fontSize: 12,
+                  color: "#555", fontFamily: "Sarabun, sans-serif",
+                }}
+              >
+                <RefreshCw size={13} style={{ animation: loading ? "spin 1s linear infinite" : "none" }} />
+                รีเฟรช
+              </button>
+            </div>
           </div>
-        </div>
+        )}
+        {embedded && loading && (
+          <div style={{ fontSize: 12, color: "#aaa", marginBottom: 12 }}>กำลังโหลด…</div>
+        )}
 
         {error && (
           <div style={{
@@ -274,12 +272,17 @@ export default function TasksPage({ authUser, onBack }) {
         </div>
 
         {/* Eval type filter */}
-        <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
           {[["all","ทั้งหมด"],["pre_eval","Pre-Eval"],["post_eval","Post-Eval"],["half_year","Half-Year"],["yearly","Yearly"]].map(([v, l]) => (
             <button key={v} onClick={() => setTypeFilter(v)} style={{ padding: "6px 14px", borderRadius: 20, border: typeFilter === v ? "2px solid #00695c" : "1px solid #ddd", background: typeFilter === v ? "#e0f2f1" : "#fff", color: typeFilter === v ? "#00695c" : "#555", fontFamily: "Sarabun, sans-serif", fontSize: 12, cursor: "pointer", fontWeight: typeFilter === v ? 700 : 400 }}>
               {l}
             </button>
           ))}
+        </div>
+
+        {/* Upload date filter */}
+        <div style={{ marginBottom: 14 }}>
+          <DateFilterBar filter={dateFilter} onChange={setDateFilter} label="วันที่อัพโหลด" />
         </div>
 
         <datalist id="emp-email-list">
@@ -290,12 +293,12 @@ export default function TasksPage({ authUser, onBack }) {
         {filtered.length === 0 ? (
           <div style={{ textAlign: "center", padding: 40, color: "#aaa" }}>ไม่มีรายการ</div>
         ) : (
-          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e0e0e0", overflow: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #dde3dd", overflow: "auto" }}>
+            <table className="admin-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
-                <tr style={{ background: "#f5f5f5" }}>
-                  {["Supplier","ประเภท","Role","ผู้รับผิดชอบ","ครบกำหนด","สถานะ","Email ล่าสุด","จัดการ"].map(h => (
-                    <th key={h} style={{ padding: "10px 12px", textAlign: "left", borderBottom: "1px solid #e0e0e0", fontWeight: 700, whiteSpace: "nowrap" }}>{h}</th>
+                <tr>
+                  {["Supplier","ประเภท","อัพโหลดเมื่อ","Role","ผู้รับผิดชอบ","ครบกำหนด","สถานะ","Email ล่าสุด","จัดการ"].map(h => (
+                    <th key={h} style={{ whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -306,9 +309,12 @@ export default function TasksPage({ authUser, onBack }) {
                   const isPast = dueDate < new Date();
                   const isEditing = editingId === t.id;
                   return (
-                    <tr key={t.id} style={{ borderBottom: "1px solid #f5f5f5", background: isEditing ? "#f8fdf8" : "transparent" }}>
+                    <tr key={t.id} style={isEditing ? { background: "#f8fdf8" } : undefined}>
                       <td style={{ padding: "10px 12px", fontWeight: 600 }}>{t.supplierName}</td>
                       <td style={{ padding: "10px 12px", fontSize: 11 }}>{EVAL_TYPE_LABEL[t.evalType] || t.evalType}</td>
+                      <td style={{ padding: "10px 12px", fontSize: 11, color: "#888", whiteSpace: "nowrap" }}>
+                        {t.createdAt ? new Date(t.createdAt).toLocaleDateString("th-TH") : "—"}
+                      </td>
                       <td style={{ padding: "10px 12px" }}>
                         <span style={{ background: t.role === "GCP" ? "#e3f2fd" : "#e8f5e9", color: t.role === "GCP" ? "#1565c0" : "#2e7d32", borderRadius: 10, padding: "2px 8px", fontSize: 11, fontWeight: 700 }}>{t.role}</span>
                       </td>
@@ -426,18 +432,18 @@ export default function TasksPage({ authUser, onBack }) {
         {batches.length > 0 && (
           <div style={{ marginTop: 28 }}>
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10, color: "#555" }}>ประวัติการอัพโหลด</div>
-            <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e0e0e0", overflow: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #dde3dd", overflow: "auto" }}>
+              <table className="admin-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                 <thead>
-                  <tr style={{ background: "#f5f5f5" }}>
+                  <tr>
                     {["ไฟล์","ประเภท","จำนวน","สถานะ","ผู้อัพโหลด","วันที่"].map(h => (
-                      <th key={h} style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #e0e0e0", fontWeight: 700 }}>{h}</th>
+                      <th key={h}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {batches.map(b => (
-                    <tr key={b.id} style={{ borderBottom: "1px solid #f5f5f5" }}>
+                    <tr key={b.id}>
                       <td style={{ padding: "8px 12px", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.filename}</td>
                       <td style={{ padding: "8px 12px" }}>{b.batchType}</td>
                       <td style={{ padding: "8px 12px" }}>{b.rowCount}</td>
@@ -453,10 +459,45 @@ export default function TasksPage({ authUser, onBack }) {
             </div>
           </div>
         )}
-      </div>
 
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
-    </div>
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .admin-table { width: 100%; border-collapse: collapse; }
+        .admin-table thead tr { background: #eaf0ea; }
+        .admin-table th {
+          padding: 12px 14px; text-align: left; font-weight: 700;
+          color: #3c4a3c; font-size: 11.5px; text-transform: uppercase; letter-spacing: .4px;
+          border: 1px solid #cfdacf;
+        }
+        .admin-table td { padding: 11px 14px; border: 1px solid #e6e6e6; }
+        .admin-table tbody tr:nth-child(even) { background: #fafbfa; }
+        .admin-table tbody tr:hover { background: #f1f7f1; }
+      `}</style>
+    </>
+  );
+
+  const modals = (
+    <>
+      {ModalEl}
+      {showUploadModal && (
+        <AdminUploadModal onClose={() => { setShowUploadModal(false); fetchAll(); }} />
+      )}
+    </>
+  );
+
+  if (embedded) {
+    return <>{modals}{content}</>;
+  }
+
+  return (
+    <>
+      {modals}
+      <div style={{ minHeight: "100vh", background: "#f0f4f0", fontFamily: "Sarabun, sans-serif" }}>
+        <Header titleOverride="Supplier Evaluation System" />
+        <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 20px 48px" }}>
+          {content}
+        </div>
+      </div>
     </>
   );
 }

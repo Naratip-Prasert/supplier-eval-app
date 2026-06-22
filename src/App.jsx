@@ -8,7 +8,6 @@ import ResultPage         from "./pages/Resultpage";
 import ProfilePage        from "./pages/ProfilePage";
 import HistoryPage        from "./pages/HistoryPage";
 import AdminPage          from "./pages/AdminPage";
-import TasksPage          from "./pages/TasksPage";
 import SupervisorPage     from "./pages/SupervisorPage";
 import LoginPage          from "./pages/LoginPage";
 import RegisterPage       from "./pages/RegisterPage";
@@ -141,6 +140,7 @@ export default function App() {
   const [profilePic,     setProfilePic]     = useState(null);
   const [evalDetailId,   setEvalDetailId]   = useState(null);
   const [prevPage,       setPrevPage]       = useState(null);
+  const [adminSessionId, setAdminSessionId] = useState(null);
 
   useEffect(() => {
     if (!user) { setProfilePic(null); return; }
@@ -214,9 +214,8 @@ export default function App() {
         onProfile={() => setPage("profile")}
         onHistory={() => setPage("history")}
         onEvaluate={() => setPage("landing")}
-        onAdmin={() => setPage("admin")}
+        onAdmin={() => { setAdminSessionId(null); setPage("admin"); }}
         onSupervisor={() => setPage("supervisor")}
-        onTasks={() => setPage("tasks")}
       />
     );
   }
@@ -226,15 +225,13 @@ export default function App() {
       <AdminPage
         authUser={user}
         onBack={() => setPage("portal")}
-      />
-    );
-  }
-
-  if (page === "tasks") {
-    return (
-      <TasksPage
-        authUser={user}
-        onBack={() => setPage("portal")}
+        initialSessionId={adminSessionId}
+        onViewEvaluation={(id, sessionId) => {
+          setAdminSessionId(sessionId);
+          setPrevPage("admin");
+          setEvalDetailId(id);
+          setPage("evalDetail");
+        }}
       />
     );
   }

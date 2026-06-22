@@ -7,7 +7,7 @@ import { Header } from "../components";
 import { authFetch } from "../utils/api";
 import {
   ClipboardList, Clock, BarChart2, Shield, CheckSquare,
-  User, LogOut, ArrowRight, Upload, AlertTriangle,
+  User, LogOut, ArrowRight, AlertTriangle,
 } from "lucide-react";
 
 // ── Module definitions ────────────────────────────────────────
@@ -36,7 +36,7 @@ const MODULES = [
     bg: "linear-gradient(135deg, #e3f2fd 0%, #ede7f6 100%)",
     border: "#90caf9",
     accent: "#1976d2",
-    roles: ["USER", "GCP", "ADMIN"],
+    roles: ["USER", "GCP"],
     available: true,
     buttonLabel: "ดูประวัติ",
   },
@@ -57,9 +57,9 @@ const MODULES = [
   {
     key: "admin",
     icon: Shield,
-    title: "จัดการระบบ",
+    title: "ADMIN",
     titleEn: "Administration",
-    desc: "จัดการข้อมูลซัพพลายเออร์ พนักงาน สิทธิ์การประเมิน เกณฑ์คะแนน และตั้งค่าระบบ",
+    desc: "จัดการพนักงาน ซัพพลายเออร์ งานประเมิน (อัพโหลด) และผล/ประวัติการประเมินทั้งหมด",
     color: "#bf360c",
     bg: "linear-gradient(135deg, #fbe9e7 0%, #fff8e1 100%)",
     border: "#ffab91",
@@ -67,20 +67,6 @@ const MODULES = [
     roles: ["ADMIN"],
     available: true,
     buttonLabel: "เข้าสู่ระบบจัดการ",
-  },
-  {
-    key: "tasks",
-    icon: Upload,
-    title: "งานประเมิน (อัพโหลด)",
-    titleEn: "Evaluation Task Management",
-    desc: "อัพโหลด Excel/CSV เพื่อสร้างงานประเมิน Pre/Post Evaluation และ Half-Year/Yearly พร้อมติดตามสถานะและส่ง Reminder",
-    color: "#00695c",
-    bg: "linear-gradient(135deg, #e0f2f1 0%, #e8f5e9 100%)",
-    border: "#80cbc4",
-    accent: "#00897b",
-    roles: ["ADMIN"],
-    available: true,
-    buttonLabel: "เข้าสู่หน้างานประเมิน",
   },
   {
     key: "supervisor",
@@ -108,7 +94,7 @@ const ROLE_BADGE = {
 // ── PortalPage ────────────────────────────────────────────────
 export default function PortalPage({
   authUser, profilePic,
-  onLogout, onProfile, onHistory, onEvaluate, onAdmin, onSupervisor, onTasks,
+  onLogout, onProfile, onHistory, onEvaluate, onAdmin, onSupervisor,
 }) {
   const role    = authUser?.role ?? "USER";
   const badge   = ROLE_BADGE[role] ?? ROLE_BADGE.USER;
@@ -140,7 +126,6 @@ export default function PortalPage({
     if (mod.key === "history")    onHistory?.();
     if (mod.key === "admin")      onAdmin?.();
     if (mod.key === "supervisor") onSupervisor?.();
-    if (mod.key === "tasks")      onTasks?.();
   };
 
   const initials = (authUser?.fullName || "?")
@@ -332,7 +317,6 @@ const CIRCLE_BG = {
   history:    "radial-gradient(circle at 38% 35%, #e8f4fd, #90caf9 130%)",
   dashboard:  "radial-gradient(circle at 38% 35%, #f8f0ff, #ce93d8 130%)",
   admin:      "radial-gradient(circle at 38% 35%, #fff3e0, #ffab91 130%)",
-  tasks:      "radial-gradient(circle at 38% 35%, #e0f7f5, #80cbc4 130%)",
   supervisor: "radial-gradient(circle at 38% 35%, #f3e8fd, #b39ddb 130%)",
 };
 
@@ -454,34 +438,6 @@ const CARD_ART = {
       <path d="M6 35 C6 30 16 30 16 35" stroke="white" strokeWidth="1.3" strokeLinecap="round" fill="none" opacity=".8"/>
       <circle cx="11" cy="50" r="6" fill="rgba(191,54,12,.4)" stroke="white" strokeWidth="1.3"/>
       <path d="M6 59 C6 54 16 54 16 59" stroke="white" strokeWidth="1.3" strokeLinecap="round" fill="none" opacity=".7"/>
-    </svg>
-  ),
-  tasks: (
-    <svg width="82" height="82" viewBox="0 0 82 82" fill="none">
-      <defs>
-        <linearGradient id="tk_sheet" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#4db6ac"/><stop offset="100%" stopColor="#00695c"/></linearGradient>
-        <linearGradient id="tk_up"    x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#80ffce"/><stop offset="100%" stopColor="#00c853"/></linearGradient>
-      </defs>
-      {/* sheet 3D side */}
-      <rect x="13" y="20" width="6"  height="52" rx="2" fill="#004d40"/>
-      <rect x="13" y="66" width="46" height="6"  rx="2" fill="#004d40"/>
-      {/* sheet body */}
-      <rect x="17" y="14" width="46" height="58" rx="6" fill="url(#tk_sheet)"/>
-      {/* folded corner */}
-      <path d="M50 14 L63 27 L50 27 Z" fill="#26a69a"/>
-      {/* spreadsheet grid */}
-      <rect x="23" y="34" width="34" height="4"  rx="1.5" fill="rgba(255,255,255,.85)"/>
-      <rect x="23" y="42" width="15" height="4"  rx="1.5" fill="rgba(255,255,255,.6)"/>
-      <rect x="41" y="42" width="16" height="4"  rx="1.5" fill="rgba(255,255,255,.6)"/>
-      <rect x="23" y="50" width="15" height="4"  rx="1.5" fill="rgba(255,255,255,.6)"/>
-      <rect x="41" y="50" width="16" height="4"  rx="1.5" fill="rgba(255,255,255,.6)"/>
-      <rect x="23" y="58" width="15" height="4"  rx="1.5" fill="rgba(255,255,255,.4)"/>
-      <rect x="41" y="58" width="16" height="4"  rx="1.5" fill="rgba(255,255,255,.4)"/>
-      {/* upload badge */}
-      <circle cx="62" cy="59" r="15" fill="url(#tk_up)" stroke="white" strokeWidth="2"/>
-      <path d="M62 65v-12M56 59l6-6 6 6" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-      {/* sparkle */}
-      <path d="M68 12l1.3 2.7 3 .4-2.2 2.1.5 3-2.6-1.4-2.6 1.4.5-3-2.2-2.1 3-.4z" fill="#ffd740" opacity=".85"/>
     </svg>
   ),
   supervisor: (

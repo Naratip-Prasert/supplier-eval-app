@@ -5,6 +5,7 @@ const bcrypt  = require('bcrypt');
 const jwt     = require('jsonwebtoken');
 const crypto  = require('crypto');
 const { Resend } = require('resend');
+const requireAuth = require('../middleware/authMiddleware');
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -209,6 +210,37 @@ router.post('/reset-password', async (req, res) => {
     res.json({ message: 'ตั้งรหัสผ่านใหม่สำเร็จ' });
   } catch (err) {
     console.error('[auth] reset-password error:', err);
+    res.status(500).json({ message: 'เกิดข้อผิดพลาด', error: err.message });
+  }
+});
+
+// ── POST /api/auth/verify-password ───────────────────────────
+// Re-confirms the CURRENTLY logged-in user's own credentials before a
+// sensitive action (e.g. granting another employee the ADMIN role).
+// Requires auth so we can check the entered employeeId against the
+// session's own empId — this verifies "you, again", not just "someone
+// who knows a password".
+router.post('/verify-password', requireAuth, async (req, res) => {
+  const { employeeId, password } = req.body;
+  if (!employeeId?.trim() || !password) {
+    return res.status(400).json({ message: 'กรุณากรอกรหัสพนักงานและรหัสผ่านของคุณ' });
+  }
+  if (employeeId.trim().toUpperCase() !== req.user.empId.toUpperCase()) {
+    return res.status(403).json({ message: 'รหัสพนักงานไม่ตรงกับผู้ใช้ที่เข้าสู่ระบบ' });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT password_hash FROM employees WHERE employee_id = $1 AND is_active = TRUE`,
+      [req.user.empId]
+    );
+    const hash = result.rows[0]?.password_hash;
+    if (!hash || !(await bcrypt.compare(password, hash))) {
+      return res.status(401).json({ message: 'รหัสผ่านไม่ถูกต้อง' });
+    }
+    res.json({ verified: true });
+  } catch (err) {
+    console.error('[auth] verify-password error:', err);
     res.status(500).json({ message: 'เกิดข้อผิดพลาด', error: err.message });
   }
 });

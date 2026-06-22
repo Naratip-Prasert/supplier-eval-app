@@ -4,10 +4,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { Header } from "../components";
 import { authFetch } from "../utils/api";
+import TasksPage from "./TasksPage";
+import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter } from "../utils/dateFilter";
 import {
-  Users, Package, ClipboardList, BarChart2,
+  Users, Package, ClipboardList, Upload,
   ArrowLeft, Search, RefreshCw, Plus, X, Check,
-  ChevronDown, AlertCircle,
+  AlertCircle,
 } from "lucide-react";
 
 // ── Constants ─────────────────────────────────────────────────
@@ -28,15 +30,34 @@ const GRADE_COLORS = {
   A: "#1b5e20", B: "#1565c0", C: "#e65100", D: "#b71c1c", F: "#4a0000",
 };
 const TABS = [
-  { key: "overview",   label: "ภาพรวม",       icon: BarChart2     },
-  { key: "employees",  label: "พนักงาน",       icon: Users         },
-  { key: "suppliers",  label: "ซัพพลายเออร์", icon: Package       },
-  { key: "sessions",   label: "ผลการประเมิน",  icon: ClipboardList },
+  {
+    key: "employees", label: "พนักงาน", labelEn: "Employees", icon: Users,
+    color: "#1b5e20", circleBg: "radial-gradient(circle at 38% 35%, #f1f8e9, #a5d6a7 130%)",
+  },
+  {
+    key: "suppliers", label: "ซัพพลายเออร์", labelEn: "Suppliers", icon: Package,
+    color: "#1565c0", circleBg: "radial-gradient(circle at 38% 35%, #e8f4fd, #90caf9 130%)",
+  },
+  {
+    key: "tasks", label: "งานประเมิน (Upload)", labelEn: "Evaluation Tasks", icon: Upload,
+    color: "#00897b", circleBg: "radial-gradient(circle at 38% 35%, #e0f7f5, #80cbc4 130%)",
+  },
+  {
+    key: "sessions", label: "ผลและประวัติการประเมิน", labelEn: "Results & History", icon: ClipboardList,
+    color: "#6a1b9a", circleBg: "radial-gradient(circle at 38% 35%, #f3e8fd, #b39ddb 130%)",
+  },
 ];
+// Small count badges next to each tab label — only for counts already
+// loaded at this level (tasks' pending count lives inside TasksPage itself).
+const TAB_COUNTS = {
+  employees: (c) => c.employees,
+  suppliers: (c) => c.suppliers,
+  sessions:  (c) => c.pendingSessions,
+};
 
 // ── AdminPage ─────────────────────────────────────────────────
-export default function AdminPage({ authUser, onBack }) {
-  const [tab,             setTab]             = useState("overview");
+export default function AdminPage({ authUser, onBack, onViewEvaluation, initialSessionId }) {
+  const [tab,             setTab]             = useState(initialSessionId ? "sessions" : "employees");
   const [employees,       setEmployees]       = useState([]);
   const [suppliers,       setSuppliers]       = useState([]);
   const [sessions,        setSessions]        = useState([]);
@@ -64,13 +85,10 @@ export default function AdminPage({ authUser, onBack }) {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  const stats = {
-    employees:  employees.length,
-    active:     employees.filter(e => e.isActive).length,
-    suppliers:  suppliers.length,
-    sessions:   sessions.length,
-    completed:  sessions.filter(s => s.status === "completed").length,
-    pending:    sessions.filter(s => s.status === "pending").length,
+  const tabCounts = {
+    employees:      employees.length,
+    suppliers:      suppliers.length,
+    pendingSessions: sessions.filter(s => s.status === "pending" || s.status === "in_progress").length,
   };
 
   return (
@@ -93,7 +111,7 @@ export default function AdminPage({ authUser, onBack }) {
             <ArrowLeft size={16} /> หน้าหลัก
           </button>
           <span style={{ color: "#ccc" }}>/</span>
-          <span style={{ fontSize: 14, fontWeight: 700, color: "#333" }}>จัดการระบบ</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: "#bf360c" }}>ADMIN</span>
 
           <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
             {loading && <span style={{ fontSize: 12, color: "#aaa" }}>กำลังโหลด…</span>}
@@ -123,143 +141,53 @@ export default function AdminPage({ authUser, onBack }) {
           </div>
         )}
 
-        {/* ── Tab nav ── */}
+        {/* ── Tab nav (styled like the Portal module cards) ── */}
         <div style={{
-          display: "flex", gap: 4, background: "#fff",
-          borderRadius: 12, padding: 4, marginBottom: 24,
-          boxShadow: "0 2px 8px rgba(0,0,0,0.06)", width: "fit-content",
+          display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+          gap: 16, marginBottom: 28,
         }}>
-          {TABS.map(t => {
-            const Icon = t.icon;
-            const active = tab === t.key;
-            return (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                style={{
-                  display: "flex", alignItems: "center", gap: 7,
-                  padding: "8px 16px", borderRadius: 9, border: "none",
-                  cursor: "pointer", fontSize: 13, fontWeight: active ? 700 : 500,
-                  fontFamily: "Sarabun, sans-serif",
-                  background: active ? "#1b5e20" : "transparent",
-                  color: active ? "#fff" : "#666",
-                  transition: "all .15s",
-                }}
-              >
-                <Icon size={15} /> {t.label}
-              </button>
-            );
-          })}
+          {TABS.map(t => (
+            <TabCard
+              key={t.key}
+              tab={t}
+              active={tab === t.key}
+              count={TAB_COUNTS[t.key]?.(tabCounts)}
+              onClick={() => setTab(t.key)}
+            />
+          ))}
         </div>
 
         {/* ── Tab content ── */}
-        {tab === "overview"  && <OverviewTab stats={stats} sessions={sessions} employees={employees} />}
-        {tab === "employees" && <EmployeesTab employees={employees} onRefresh={fetchAll} />}
+        {tab === "employees" && <EmployeesTab employees={employees} onRefresh={fetchAll} authUser={authUser} />}
         {tab === "suppliers" && <SuppliersTab suppliers={suppliers} onRefresh={fetchAll} />}
-        {tab === "sessions"  && <SessionsTab sessions={sessions} />}
+        {tab === "tasks"     && <TasksPage authUser={authUser} embedded />}
+        {tab === "sessions"  && <SessionsTab sessions={sessions} onViewEvaluation={onViewEvaluation} initialSessionId={initialSessionId} />}
       </div>
 
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
-    </div>
-  );
-}
-
-// ── Overview Tab ──────────────────────────────────────────────
-function OverviewTab({ stats, sessions, employees }) {
-  const cards = [
-    { label: "พนักงานทั้งหมด", value: stats.employees, sub: `${stats.active} active`, color: "#1b5e20", bg: "#e8f5e9" },
-    { label: "ซัพพลายเออร์",  value: stats.suppliers, sub: "ทั้งหมด",               color: "#1565c0", bg: "#e3f2fd" },
-    { label: "Session ทั้งหมด", value: stats.sessions,  sub: "ทั้งหมด",     color: "#6a1b9a", bg: "#f3e5f5" },
-    { label: "รอประเมิน",      value: stats.pending,   sub: "pending",      color: "#f57f17", bg: "#fff8e1" },
-    { label: "เสร็จสิ้น",      value: stats.completed, sub: "completed",    color: "#1b5e20", bg: "#e8f5e9" },
-  ];
-
-  const recentSessions = sessions.slice(0, 8);
-  const roleDist = ["USER", "GCP", "ADMIN"].map(r => ({
-    role: r,
-    count: employees.filter(e => e.role === r).length,
-  }));
-
-  return (
-    <div>
-      {/* Stat cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginBottom: 28 }}>
-        {cards.map(c => (
-          <div key={c.label} style={{
-            background: "#fff", borderRadius: 12, padding: "14px 16px",
-            boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
-            borderLeft: `4px solid ${c.color}`,
-          }}>
-            <div style={{ fontSize: 12, color: "#888", marginBottom: 4 }}>{c.label}</div>
-            <div style={{ fontSize: 26, fontWeight: 800, color: c.color }}>{c.value}</div>
-            <div style={{ fontSize: 11, color: "#bbb", marginTop: 3 }}>{c.sub}</div>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 20 }}>
-        {/* Recent sessions */}
-        <div style={{ background: "#fff", borderRadius: 14, padding: "20px 22px", boxShadow: "0 2px 10px rgba(0,0,0,0.06)" }}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 16, color: "#333" }}>Session ล่าสุด</div>
-          {recentSessions.length === 0
-            ? <div style={{ color: "#bbb", fontSize: 13, textAlign: "center", padding: "20px 0" }}>ยังไม่มีข้อมูล</div>
-            : recentSessions.map(s => (
-              <div key={s.sessionId} style={{
-                display: "flex", alignItems: "center", gap: 12,
-                padding: "10px 0", borderBottom: "1px solid #f5f5f5",
-              }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#222", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {s.supplierName}
-                  </div>
-                  <div style={{ fontSize: 11, color: "#aaa" }}>{s.vendorCode} · {s.period}</div>
-                </div>
-                <StatusBadge status={s.status} />
-                {s.finalGrade && (
-                  <span style={{
-                    fontWeight: 800, fontSize: 16,
-                    color: GRADE_COLORS[s.finalGrade] ?? "#333",
-                    minWidth: 20, textAlign: "center",
-                  }}>{s.finalGrade}</span>
-                )}
-              </div>
-            ))
-          }
-        </div>
-
-        {/* Role distribution */}
-        <div style={{ background: "#fff", borderRadius: 14, padding: "20px 22px", boxShadow: "0 2px 10px rgba(0,0,0,0.06)" }}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 16, color: "#333" }}>สัดส่วน Role</div>
-          {roleDist.map(({ role, count }) => {
-            const rc = ROLE_COLORS[role];
-            const pct = stats.employees > 0 ? Math.round((count / stats.employees) * 100) : 0;
-            return (
-              <div key={role} style={{ marginBottom: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: rc.color }}>{role}</span>
-                  <span style={{ fontSize: 12, color: "#999" }}>{count} คน ({pct}%)</span>
-                </div>
-                <div style={{ background: "#f0f0f0", borderRadius: 4, height: 6 }}>
-                  <div style={{
-                    width: `${pct}%`, height: 6, borderRadius: 4,
-                    background: rc.color, transition: "width .4s",
-                  }} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .admin-table { width: 100%; border-collapse: collapse; }
+        .admin-table thead tr { background: #eaf0ea; }
+        .admin-table th {
+          padding: 12px 14px; text-align: left; font-weight: 700;
+          color: #3c4a3c; font-size: 11.5px; text-transform: uppercase; letter-spacing: .4px;
+          border: 1px solid #cfdacf;
+        }
+        .admin-table td { padding: 11px 14px; border: 1px solid #e6e6e6; }
+        .admin-table tbody tr:nth-child(even) { background: #fafbfa; }
+        .admin-table tbody tr:hover { background: #f1f7f1; }
+      `}</style>
     </div>
   );
 }
 
 // ── Employees Tab ─────────────────────────────────────────────
-function EmployeesTab({ employees, onRefresh }) {
-  const [search,   setSearch]   = useState("");
+function EmployeesTab({ employees, onRefresh, authUser }) {
+  const [search,     setSearch]     = useState("");
   const [roleFilter, setRoleFilter] = useState("ALL");
-  const [saving,   setSaving]   = useState(null);
-  const [msg,      setMsg]      = useState(null);
+  const [saving,     setSaving]     = useState(null);
+  const [msg,        setMsg]        = useState(null);
+  const [grantTarget, setGrantTarget] = useState(null); // employee row pending ADMIN grant
 
   const filtered = employees.filter(e => {
     const q = search.toLowerCase();
@@ -347,20 +275,20 @@ function EmployeesTab({ employees, onRefresh }) {
       </div>
 
       {/* Table */}
-      <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden", boxShadow: "0 2px 10px rgba(0,0,0,0.06)" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+      <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden", border: "1px solid #dde3dd", boxShadow: "0 2px 10px rgba(0,0,0,0.06)" }}>
+        <table className="admin-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
-            <tr style={{ background: "#f8f8f8", borderBottom: "1px solid #eee" }}>
-              {["รหัสพนักงาน", "ชื่อ-สกุล", "แผนก", "Role", "สถานะ", "จัดการ"].map(h => (
-                <th key={h} style={{ padding: "12px 14px", textAlign: "left", fontWeight: 700, color: "#555", fontSize: 12 }}>{h}</th>
+            <tr>
+              {["รหัสพนักงาน", "ชื่อ-สกุล", "แผนก", "Role", "เพิ่มสิทธิ์"].map(h => (
+                <th key={h}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={6} style={{ padding: 32, textAlign: "center", color: "#bbb" }}>ไม่พบข้อมูล</td></tr>
-            ) : filtered.map((emp, i) => (
-              <tr key={emp.employeeId} style={{ borderBottom: "1px solid #f5f5f5", background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
+              <tr><td colSpan={5} style={{ padding: 32, textAlign: "center", color: "#bbb" }}>ไม่พบข้อมูล</td></tr>
+            ) : filtered.map((emp) => (
+              <tr key={emp.employeeId}>
                 <td style={{ padding: "11px 14px", fontFamily: "monospace", fontSize: 12, color: "#555" }}>{emp.employeeId}</td>
                 <td style={{ padding: "11px 14px" }}>
                   <div style={{ fontWeight: 700, color: "#222" }}>{emp.fullName}</div>
@@ -371,67 +299,132 @@ function EmployeesTab({ employees, onRefresh }) {
                   {emp.jobTitle && <div style={{ fontSize: 11, color: "#bbb" }}>{emp.jobTitle}</div>}
                 </td>
                 <td style={{ padding: "11px 14px" }}>
-                  <RoleSelect
-                    current={emp.role}
-                    disabled={saving === emp.employeeId}
-                    onChange={role => patchEmployee(emp.employeeId, { role })}
-                  />
-                </td>
-                <td style={{ padding: "11px 14px" }}>
                   <span style={{
-                    background: emp.isActive ? "#e8f5e9" : "#f5f5f5",
-                    color: emp.isActive ? "#1b5e20" : "#aaa",
-                    borderRadius: 20, padding: "2px 10px",
-                    fontSize: 11, fontWeight: 700,
+                    background: ROLE_COLORS[emp.role]?.bg ?? "#f5f5f5",
+                    color: ROLE_COLORS[emp.role]?.color ?? "#333",
+                    borderRadius: 6, padding: "4px 10px",
+                    fontSize: 12, fontWeight: 700,
                   }}>
-                    {emp.isActive ? "Active" : "Inactive"}
+                    {emp.role}
                   </span>
                 </td>
                 <td style={{ padding: "11px 14px" }}>
-                  <button
-                    onClick={() => patchEmployee(emp.employeeId, { isActive: !emp.isActive })}
-                    disabled={saving === emp.employeeId}
-                    style={{
-                      fontSize: 11, fontWeight: 700, fontFamily: "Sarabun, sans-serif",
-                      padding: "4px 10px", borderRadius: 6, cursor: "pointer", border: "1px solid",
-                      borderColor: emp.isActive ? "#ef9a9a" : "#a5d6a7",
-                      background: emp.isActive ? "#ffebee" : "#e8f5e9",
-                      color: emp.isActive ? "#b71c1c" : "#1b5e20",
-                    }}
-                  >
-                    {saving === emp.employeeId ? "…" : emp.isActive ? "Deactivate" : "Activate"}
-                  </button>
+                  {emp.role === "ADMIN" ? (
+                    <span style={{ fontSize: 11, color: "#aaa" }}>เป็น ADMIN แล้ว</span>
+                  ) : (
+                    <button
+                      onClick={() => setGrantTarget(emp)}
+                      disabled={saving === emp.employeeId}
+                      style={{
+                        fontSize: 11, fontWeight: 700, fontFamily: "Sarabun, sans-serif",
+                        padding: "5px 12px", borderRadius: 6, cursor: "pointer",
+                        border: "1px solid #ef9a9a", background: "#ffebee", color: "#c62828",
+                      }}
+                    >
+                      เพิ่มสิทธิ์ ADMIN
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {grantTarget && (
+        <VerifyAdminModal
+          authUser={authUser}
+          targetName={grantTarget.fullName}
+          onCancel={() => setGrantTarget(null)}
+          onVerified={async () => {
+            const employeeId = grantTarget.employeeId;
+            setGrantTarget(null);
+            await patchEmployee(employeeId, { role: "ADMIN" });
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function RoleSelect({ current, onChange, disabled }) {
+// ── Verify-self modal — re-enter own employeeId + password before
+// granting another employee ADMIN, so the action can't be done by
+// someone who walked up to an already-logged-in session.
+function VerifyAdminModal({ authUser, targetName, onCancel, onVerified }) {
+  const [employeeId, setEmployeeId] = useState(authUser?.empId ?? "");
+  const [password,   setPassword]   = useState("");
+  const [error,       setError]     = useState(null);
+  const [verifying,   setVerifying] = useState(false);
+
+  const handleConfirm = async () => {
+    if (!employeeId.trim() || !password) {
+      setError("กรุณากรอกรหัสพนักงานและรหัสผ่านของคุณ");
+      return;
+    }
+    setVerifying(true);
+    setError(null);
+    try {
+      const r = await authFetch("/api/auth/verify-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ employeeId, password }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.message);
+      onVerified();
+    } catch (e) {
+      setError(e.message || "ยืนยันตัวตนไม่สำเร็จ");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
   return (
-    <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
-      <select
-        value={current}
-        onChange={e => onChange(e.target.value)}
-        disabled={disabled}
-        style={{
-          appearance: "none", border: "1px solid #e0e0e0", borderRadius: 6,
-          padding: "4px 26px 4px 10px", fontSize: 12, fontWeight: 700,
-          fontFamily: "Sarabun, sans-serif", cursor: "pointer",
-          background: ROLE_COLORS[current]?.bg ?? "#f5f5f5",
-          color: ROLE_COLORS[current]?.color ?? "#333",
-        }}
-      >
-        <option value="USER">USER</option>
-        <option value="GCP">GCP</option>
-        <option value="ADMIN">ADMIN</option>
-      </select>
-      <ChevronDown size={12} style={{ position: "absolute", right: 7, pointerEvents: "none", color: ROLE_COLORS[current]?.color ?? "#333" }} />
-    </div>
+    <>
+      <div onClick={onCancel} style={{ position: "fixed", inset: 0, zIndex: 9998, background: "rgba(0,0,0,0.48)" }} />
+      <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+        <div style={{ background: "#fff", borderRadius: 14, width: "min(420px, 100%)", boxShadow: "0 24px 64px rgba(0,0,0,0.28)", overflow: "hidden" }}>
+          <div style={{ background: "#6a1b9a", padding: "14px 20px", color: "#fff", fontWeight: 700, fontSize: 15, fontFamily: "Sarabun, sans-serif" }}>
+            ยืนยันตัวตนก่อนเพิ่มสิทธิ์ ADMIN
+          </div>
+          <div style={{ padding: "20px 24px 8px", fontFamily: "Sarabun, sans-serif" }}>
+            <p style={{ margin: "0 0 16px", fontSize: 13, color: "#555" }}>
+              กำลังตั้งให้ <strong>{targetName}</strong> เป็น ADMIN — กรุณายืนยันตัวตนของคุณเองก่อน
+            </p>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#666", display: "block", marginBottom: 4 }}>รหัสพนักงานของคุณ</label>
+            <input
+              value={employeeId}
+              onChange={e => setEmployeeId(e.target.value)}
+              style={{ width: "100%", padding: "8px 10px", border: "1px solid #e0e0e0", borderRadius: 7, fontSize: 13, fontFamily: "Sarabun, sans-serif", boxSizing: "border-box", marginBottom: 12 }}
+            />
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#666", display: "block", marginBottom: 4 }}>รหัสผ่านของคุณ</label>
+            <input
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleConfirm()}
+              style={{ width: "100%", padding: "8px 10px", border: "1px solid #e0e0e0", borderRadius: 7, fontSize: 13, fontFamily: "Sarabun, sans-serif", boxSizing: "border-box" }}
+            />
+            {error && <div style={{ color: "#c62828", fontSize: 12, marginTop: 10 }}>{error}</div>}
+          </div>
+          <div style={{ padding: "16px 24px 20px", display: "flex", justifyContent: "flex-end", gap: 10 }}>
+            <button
+              onClick={onCancel}
+              style={{ background: "#f5f5f5", color: "#555", border: "1.5px solid #d0d0d0", borderRadius: 8, padding: "9px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}
+            >
+              ยกเลิก
+            </button>
+            <button
+              onClick={handleConfirm}
+              disabled={verifying}
+              style={{ background: "#6a1b9a", color: "#fff", border: "none", borderRadius: 8, padding: "9px 24px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Sarabun, sans-serif", opacity: verifying ? 0.7 : 1 }}
+            >
+              {verifying ? "กำลังยืนยัน…" : "ยืนยันและเพิ่มสิทธิ์"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -582,20 +575,20 @@ function SuppliersTab({ suppliers, onRefresh }) {
 
       <div style={{ fontSize: 12, color: "#aaa", marginBottom: 10 }}>แสดง {filtered.length} รายการ</div>
 
-      <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden", boxShadow: "0 2px 10px rgba(0,0,0,0.06)" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+      <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden", border: "1px solid #dde3dd", boxShadow: "0 2px 10px rgba(0,0,0,0.06)" }}>
+        <table className="admin-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
-            <tr style={{ background: "#f8f8f8", borderBottom: "1px solid #eee" }}>
+            <tr>
               {["Vendor Code", "ชื่อซัพพลายเออร์", "ประเภท", "สถานะ", "จัดการ"].map(h => (
-                <th key={h} style={{ padding: "12px 14px", textAlign: "left", fontWeight: 700, color: "#555", fontSize: 12 }}>{h}</th>
+                <th key={h}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
               <tr><td colSpan={5} style={{ padding: 32, textAlign: "center", color: "#bbb" }}>ไม่พบข้อมูล</td></tr>
-            ) : filtered.map((s, i) => (
-              <tr key={s.vendorCode} style={{ borderBottom: "1px solid #f5f5f5", background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
+            ) : filtered.map((s) => (
+              <tr key={s.vendorCode}>
                 <td style={{ padding: "11px 14px", fontFamily: "monospace", fontSize: 12, fontWeight: 700, color: "#1565c0" }}>{s.vendorCode}</td>
                 <td style={{ padding: "11px 14px", fontWeight: 600, color: "#222" }}>{s.supplierName}</td>
                 <td style={{ padding: "11px 14px", color: "#666", fontSize: 12 }}>{PRODUCT_LABELS[s.productType] ?? s.productType}</td>
@@ -633,9 +626,21 @@ function SuppliersTab({ suppliers, onRefresh }) {
 }
 
 // ── Sessions Tab ──────────────────────────────────────────────
-function SessionsTab({ sessions }) {
-  const [search,        setSearch]        = useState("");
-  const [statusFilter,  setStatusFilter]  = useState("ALL");
+function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
+  const [search,            setSearch]            = useState("");
+  const [statusFilter,      setStatusFilter]      = useState("ALL");
+  const [dateFilter,        setDateFilter]        = useState(DEFAULT_DATE_FILTER);
+  const [selectedSessionId, setSelectedSessionId] = useState(initialSessionId ?? null);
+
+  if (selectedSessionId) {
+    return (
+      <SessionDetail
+        sessionId={selectedSessionId}
+        onBack={() => setSelectedSessionId(null)}
+        onViewEvaluation={(evalId) => onViewEvaluation?.(evalId, selectedSessionId)}
+      />
+    );
+  }
 
   const filtered = sessions.filter(s => {
     const q = search.toLowerCase();
@@ -644,7 +649,8 @@ function SessionsTab({ sessions }) {
       s.vendorCode?.toLowerCase().includes(q) ||
       s.period?.toLowerCase().includes(q);
     const matchStatus = statusFilter === "ALL" || s.status === statusFilter;
-    return matchSearch && matchStatus;
+    const matchDate   = matchesDateFilter(s.completedAt, dateFilter);
+    return matchSearch && matchStatus && matchDate;
   });
 
   return (
@@ -686,22 +692,35 @@ function SessionsTab({ sessions }) {
         </div>
       </div>
 
+      <div style={{ marginBottom: 14 }}>
+        <DateFilterBar filter={dateFilter} onChange={setDateFilter} label="วันที่เสร็จสิ้น" />
+      </div>
+
       <div style={{ fontSize: 12, color: "#aaa", marginBottom: 10 }}>แสดง {filtered.length} จาก {sessions.length} รายการ</div>
 
-      <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden", boxShadow: "0 2px 10px rgba(0,0,0,0.06)" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+      <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden", border: "1px solid #dde3dd", boxShadow: "0 2px 10px rgba(0,0,0,0.06)" }}>
+        <table className="admin-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
-            <tr style={{ background: "#f8f8f8", borderBottom: "1px solid #eee" }}>
-              {["ซัพพลายเออร์", "ประเภทการประเมิน", "Period", "สถานะ", "คะแนนรวม", "เกรด", "ผู้ประเมิน"].map(h => (
-                <th key={h} style={{ padding: "12px 14px", textAlign: "left", fontWeight: 700, color: "#555", fontSize: 12 }}>{h}</th>
+            <tr>
+              {["ซัพพลายเออร์", "ประเภทการประเมิน", "Period", "สถานะ", "เสร็จสิ้นเมื่อ", "คะแนนรวม", "เกรด", "ผู้ประเมิน"].map(h => (
+                <th key={h}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={7} style={{ padding: 32, textAlign: "center", color: "#bbb" }}>ไม่พบข้อมูล</td></tr>
+              <tr><td colSpan={8} style={{ padding: 32, textAlign: "center", color: "#bbb" }}>ไม่พบข้อมูล</td></tr>
             ) : filtered.map((s, i) => (
-              <tr key={s.sessionId} style={{ borderBottom: "1px solid #f5f5f5", background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
+              <tr
+                key={s.sessionId}
+                onClick={() => setSelectedSessionId(s.sessionId)}
+                style={{
+                  borderBottom: "1px solid #f5f5f5", background: i % 2 === 0 ? "#fff" : "#fafafa",
+                  cursor: "pointer",
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = "#f0f7f0"}
+                onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#fff" : "#fafafa"}
+              >
                 <td style={{ padding: "11px 14px" }}>
                   <div style={{ fontWeight: 700, color: "#222" }}>{s.supplierName}</div>
                   <div style={{ fontSize: 11, color: "#aaa", fontFamily: "monospace" }}>{s.vendorCode}</div>
@@ -711,6 +730,9 @@ function SessionsTab({ sessions }) {
                 </td>
                 <td style={{ padding: "11px 14px", fontSize: 12, color: "#666" }}>{s.period}</td>
                 <td style={{ padding: "11px 14px" }}><StatusBadge status={s.status} /></td>
+                <td style={{ padding: "11px 14px", fontSize: 12, color: "#888", whiteSpace: "nowrap" }}>
+                  {s.completedAt ? new Date(s.completedAt).toLocaleDateString("th-TH") : "—"}
+                </td>
                 <td style={{ padding: "11px 14px", fontWeight: 700, color: "#333" }}>
                   {s.finalScore != null ? parseFloat(s.finalScore).toFixed(2) : (
                     <span style={{ color: "#bbb" }}>—</span>
@@ -746,6 +768,193 @@ function SessionsTab({ sessions }) {
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Session Detail (drill-down from a SessionsTab row) ────────
+// Shows just the evaluators who worked on this one session, each with
+// their full per-criteria score breakdown — e.g. clicking a Half-Year
+// session with a GCP + a USER evaluation opens this to show only
+// those two people's results.
+function SessionDetail({ sessionId, onBack, onViewEvaluation }) {
+  const [data,    setData]    = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    authFetch(`/api/sessions/${sessionId}`)
+      .then(r => r.ok ? r.json() : Promise.reject(new Error("โหลดข้อมูลไม่สำเร็จ")))
+      .then(setData)
+      .catch(() => setError("โหลดข้อมูลไม่สำเร็จ"))
+      .finally(() => setLoading(false));
+  }, [sessionId]);
+
+  return (
+    <div>
+      <button
+        onClick={onBack}
+        style={{
+          display: "flex", alignItems: "center", gap: 6,
+          background: "none", border: "none", cursor: "pointer",
+          color: "#1b5e20", fontSize: 13, fontWeight: 700,
+          fontFamily: "Sarabun, sans-serif", padding: 0, marginBottom: 16,
+        }}
+      >
+        <ArrowLeft size={15} /> กลับไปยังผลและประวัติการประเมิน
+      </button>
+
+      {loading && <div style={{ textAlign: "center", padding: 40, color: "#aaa" }}>กำลังโหลด…</div>}
+
+      {error && (
+        <div style={{
+          background: "#ffebee", border: "1px solid #ef9a9a", borderRadius: 10,
+          padding: "12px 16px", display: "flex", gap: 8, alignItems: "center",
+          color: "#b71c1c", fontSize: 13,
+        }}>
+          <AlertCircle size={16} /> {error}
+        </div>
+      )}
+
+      {data && (
+        <>
+          {/* Session summary header */}
+          <div style={{
+            background: "#fff", borderRadius: 14, padding: "18px 22px", marginBottom: 20,
+            boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
+            display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap",
+          }}>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontWeight: 800, fontSize: 17, color: "#1a1a1a" }}>{data.supplierName}</div>
+              <div style={{ fontSize: 12, color: "#aaa", fontFamily: "monospace", marginTop: 2 }}>{data.vendorCode}</div>
+            </div>
+            <div style={{ fontSize: 12, color: "#666" }}>
+              {{ pre_eval: "Pre-Evaluation", post_eval: "Post-Evaluation", half_year: "Half-Year", yearly: "Yearly" }[data.evalType] ?? data.evalType}
+              {" · "}{data.period}
+            </div>
+            <StatusBadge status={data.status} />
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontWeight: 800, fontSize: 22, color: "#333" }}>
+                {data.finalScore != null ? parseFloat(data.finalScore).toFixed(2) : "—"}
+              </div>
+              <div style={{ fontSize: 10, color: "#bbb" }}>คะแนนรวม</div>
+            </div>
+            {data.finalGrade && (
+              <span style={{
+                fontWeight: 800, fontSize: 22, color: GRADE_COLORS[data.finalGrade] ?? "#333",
+              }}>{data.finalGrade}</span>
+            )}
+          </div>
+
+          {/* Evaluators — click one to open its full ResultPage (same as History) */}
+          {(data.evaluations ?? []).length === 0 ? (
+            <div style={{ textAlign: "center", padding: 40, color: "#bbb" }}>ยังไม่มีผู้ประเมินส่งผล</div>
+          ) : (
+            <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden", border: "1px solid #dde3dd", boxShadow: "0 2px 10px rgba(0,0,0,0.06)" }}>
+              {data.evaluations.map((ev, i) => {
+                const rc = ROLE_COLORS[ev.role] ?? ROLE_COLORS.USER;
+                const clickable = !!onViewEvaluation;
+                return (
+                  <div
+                    key={ev.id}
+                    onClick={() => onViewEvaluation?.(ev.id)}
+                    style={{
+                      padding: "16px 22px",
+                      borderTop: i === 0 ? "none" : "1px solid #e0e0e0",
+                      display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap",
+                      cursor: clickable ? "pointer" : "default",
+                    }}
+                    onMouseEnter={e => clickable && (e.currentTarget.style.background = "#f8faf8")}
+                    onMouseLeave={e => clickable && (e.currentTarget.style.background = "transparent")}
+                  >
+                    <span style={{
+                      background: rc.bg, color: rc.color,
+                      borderRadius: 10, padding: "3px 10px", fontSize: 11, fontWeight: 700,
+                    }}>{ev.role}</span>
+                    <div style={{ flex: 1, minWidth: 160 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: "#222" }}>{ev.fullName}</div>
+                      <div style={{ fontSize: 11, color: "#aaa" }}>
+                        {ev.employeeId}{ev.department ? ` · ${ev.department}` : ""}{ev.jobTitle ? ` · ${ev.jobTitle}` : ""}
+                      </div>
+                    </div>
+                    <div style={{ fontWeight: 800, fontSize: 18, color: "#333" }}>
+                      {ev.totalScore != null ? parseFloat(ev.totalScore).toFixed(2) : "—"}
+                    </div>
+                    {ev.grade && (
+                      <span style={{ fontWeight: 800, fontSize: 18, color: GRADE_COLORS[ev.grade] ?? "#333" }}>{ev.grade}</span>
+                    )}
+                    <div style={{ fontSize: 11, color: "#aaa", minWidth: 110 }}>
+                      {ev.submittedAt ? new Date(ev.submittedAt).toLocaleString("th-TH") : "—"}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Tab Card (same visual language as PortalPage's ModuleCard) ─
+function TabCard({ tab, active, count, onClick }) {
+  const [hovered, setHovered] = useState(false);
+  const Icon = tab.icon;
+
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        background: "#fff",
+        borderRadius: 18,
+        padding: "18px 14px 16px",
+        textAlign: "center",
+        cursor: "pointer",
+        border: active ? `2px solid ${tab.color}` : "2px solid transparent",
+        boxShadow: active
+          ? `0 10px 28px ${tab.color}30`
+          : hovered ? "0 10px 28px rgba(0,0,0,0.12)" : "0 2px 10px rgba(0,0,0,0.06)",
+        transform: hovered || active ? "translateY(-4px)" : "none",
+        transition: "transform .2s, box-shadow .2s, border-color .2s",
+        position: "relative",
+      }}
+    >
+      {count != null && (
+        <div style={{
+          position: "absolute", top: 10, right: 10,
+          background: tab.color, color: "#fff", borderRadius: 20,
+          minWidth: 20, height: 20, padding: "0 6px",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 10.5, fontWeight: 800, boxShadow: `0 2px 6px ${tab.color}55`,
+        }}>
+          {count}
+        </div>
+      )}
+
+      {/* Circle illustration */}
+      <div style={{
+        width: 78, height: 78, borderRadius: "50%",
+        background: tab.circleBg,
+        margin: "0 auto 12px",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        transform: hovered ? "scale(1.06)" : "scale(1)",
+        transition: "transform .22s",
+      }}>
+        <Icon size={30} style={{ color: tab.color }} />
+      </div>
+
+      {/* Title */}
+      <div style={{ fontSize: 13, fontWeight: 800, color: active ? tab.color : "#1a1a1a", marginBottom: 2, lineHeight: 1.3 }}>
+        {tab.label}
+      </div>
+      <div style={{ fontSize: 10, color: "#bbb", fontWeight: 500, letterSpacing: 0.3 }}>
+        {tab.labelEn}
       </div>
     </div>
   );
