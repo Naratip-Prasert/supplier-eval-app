@@ -5,6 +5,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useModal } from "../components";
 import { TimelineStepper } from "../components/TimelineStepper";
+import { FilterChips, toggleInSet } from "../components/FilterChips";
 import { PaginationBar } from "./TasksPage";
 import { authFetch } from "../utils/api";
 import { isOverdue } from "../utils/date";
@@ -229,7 +230,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
   const [timelineLoading,   setTimelineLoading]   = useState(true);
   const [taskTab,           setTaskTab]           = useState("active"); // 'active' | 'returned'
   const [taskSearch,        setTaskSearch]        = useState("");
-  const [taskTypeFilter,    setTaskTypeFilter]    = useState("all");
+  const [taskTypeFilter,    setTaskTypeFilter]    = useState(new Set()); // empty = all
   const [taskDateFrom,      setTaskDateFrom]      = useState("");
   const [taskDateTo,        setTaskDateTo]        = useState("");
   const [taskSortDir,       setTaskSortDir]       = useState("asc");
@@ -290,7 +291,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
     const to   = taskDateTo ? new Date(taskDateTo + "T23:59:59") : null;
     const q = taskSearch.trim().toLowerCase();
     const list = taskBaseList.filter(t => {
-      const matchType = taskTypeFilter === "all" || t.evalType === taskTypeFilter;
+      const matchType = taskTypeFilter.size === 0 || taskTypeFilter.has(t.evalType);
       const due = t.dueDate ? new Date(t.dueDate) : null;
       const matchDate = (!from || (due && due >= from)) && (!to || (due && due <= to));
       const matchSearch = !q
@@ -310,12 +311,12 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
   const taskPageItems  = filteredTimeline.slice((taskPage - 1) * TASK_PAGE_SIZE, taskPage * TASK_PAGE_SIZE);
 
   const taskActiveFilterCount = [
-    taskTypeFilter !== "all",
+    taskTypeFilter.size > 0,
     !!taskDateFrom || !!taskDateTo,
   ].filter(Boolean).length;
 
   function resetTaskFilters() {
-    setTaskTypeFilter("all");
+    setTaskTypeFilter(new Set());
     setTaskDateFrom("");
     setTaskDateTo("");
   }
@@ -514,24 +515,13 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                 >
                   <div>
                     <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>ประเภทการประเมิน</div>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      {[["all", "ทั้งหมด"], ...Object.entries(TASK_TYPE_FILTER_LABEL)].map(([v, l]) => (
-                        <button
-                          key={v}
-                          onClick={() => setTaskTypeFilter(v)}
-                          style={{
-                            padding: "6px 14px", borderRadius: 20,
-                            border: taskTypeFilter === v ? `2px solid ${themeColor}` : "1px solid #ddd",
-                            background: taskTypeFilter === v ? `${themeColor}14` : "#fff",
-                            color: taskTypeFilter === v ? themeColor : "#555",
-                            fontFamily: "Sarabun, sans-serif", fontSize: 12, cursor: "pointer",
-                            fontWeight: taskTypeFilter === v ? 700 : 400,
-                          }}
-                        >
-                          {l}
-                        </button>
-                      ))}
-                    </div>
+                    <FilterChips
+                      options={Object.entries(TASK_TYPE_FILTER_LABEL).map(([v, l]) => ({ v, l }))}
+                      selected={taskTypeFilter}
+                      onToggle={v => setTaskTypeFilter(s => toggleInSet(s, v))}
+                      onClear={() => setTaskTypeFilter(new Set())}
+                      activeColor={themeColor}
+                    />
                   </div>
 
                   <div>

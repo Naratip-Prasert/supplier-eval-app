@@ -8,6 +8,7 @@ import TasksPage from "./TasksPage";
 import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter } from "../utils/dateFilter";
 import { SESSION_STATUS_LABELS, SESSION_STATUS_COLORS, getDisplayStatus } from "../utils/statusLabels";
 import { TimelineStepper } from "../components/TimelineStepper";
+import { FilterChips, toggleInSet } from "../components/FilterChips";
 import {
   Users, Package, ClipboardList, Upload,
   ArrowLeft, Search, RefreshCw, Plus, X, Check,
@@ -623,9 +624,9 @@ function SuppliersTab({ suppliers, onRefresh }) {
 // ── Sessions Tab ──────────────────────────────────────────────
 function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
   const [search,            setSearch]            = useState("");
-  const [statusFilter,      setStatusFilter]      = useState("ALL");
-  const [evalTypeFilter,    setEvalTypeFilter]    = useState("all");
-  const [periodFilter,      setPeriodFilter]      = useState("all");
+  const [statusFilter,      setStatusFilter]      = useState(new Set()); // empty = all
+  const [evalTypeFilter,    setEvalTypeFilter]    = useState(new Set());
+  const [periodFilter,      setPeriodFilter]      = useState(new Set());
   const [dateFilter,        setDateFilter]        = useState(DEFAULT_DATE_FILTER);
   const [selectedSessionId, setSelectedSessionId] = useState(initialSessionId ?? null);
   const [filterOpen,        setFilterOpen]        = useState(false);
@@ -656,25 +657,27 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
       s.supplierName?.toLowerCase().includes(q) ||
       s.vendorCode?.toLowerCase().includes(q) ||
       s.period?.toLowerCase().includes(q);
-    const matchStatus   = statusFilter === "ALL"
-      || (statusFilter === "overdue" ? getDisplayStatus(s.status, s.dueDate) === "overdue" : s.status === statusFilter);
-    const matchEvalType = evalTypeFilter === "all" || s.evalType === evalTypeFilter;
-    const matchPeriod   = evalTypeFilter !== "post_eval" || periodFilter === "all" || s.period === periodFilter;
+    const displayStatus = statusFilter.has("overdue") ? getDisplayStatus(s.status, s.dueDate) : null;
+    const matchStatus   = statusFilter.size === 0
+      || statusFilter.has(s.status)
+      || displayStatus === "overdue";
+    const matchEvalType = evalTypeFilter.size === 0 || evalTypeFilter.has(s.evalType);
+    const matchPeriod   = periodFilter.size === 0 || s.evalType !== "post_eval" || periodFilter.has(s.period);
     const matchDate     = matchesDateFilter(s.completedAt, dateFilter);
     return matchSearch && matchStatus && matchEvalType && matchPeriod && matchDate;
   });
 
   const activeFilterCount = [
-    statusFilter !== "ALL",
-    evalTypeFilter !== "all",
-    periodFilter !== "all",
+    statusFilter.size > 0,
+    evalTypeFilter.size > 0,
+    periodFilter.size > 0,
     !!dateFilter.from || !!dateFilter.to || (dateFilter.preset && dateFilter.preset !== "all"),
   ].filter(Boolean).length;
 
   function resetAllFilters() {
-    setStatusFilter("ALL");
-    setEvalTypeFilter("all");
-    setPeriodFilter("all");
+    setStatusFilter(new Set());
+    setEvalTypeFilter(new Set());
+    setPeriodFilter(new Set());
     setDateFilter(DEFAULT_DATE_FILTER);
   }
 
@@ -729,78 +732,45 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
           >
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>สถานะ</div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {[
-                  { v: "ALL",             l: "All"                              },
-                  { v: "pending",         l: SESSION_STATUS_LABELS.pending        },
-                  { v: "in_progress",     l: SESSION_STATUS_LABELS.in_progress    },
-                  { v: "pending_review",  l: SESSION_STATUS_LABELS.pending_review },
-                  { v: "completed",       l: SESSION_STATUS_LABELS.completed      },
-                  { v: "returned",        l: SESSION_STATUS_LABELS.returned       },
-                  { v: "overdue",         l: SESSION_STATUS_LABELS.overdue        },
-                ].map(({ v, l }) => (
-                  <button
-                    key={v}
-                    onClick={() => setStatusFilter(v)}
-                    style={{
-                      padding: "6px 14px", borderRadius: 20, border: statusFilter === v ? "2px solid #1b5e20" : "1px solid #ddd",
-                      cursor: "pointer", fontSize: 12, fontWeight: statusFilter === v ? 700 : 400, fontFamily: "Sarabun, sans-serif",
-                      background: statusFilter === v ? "#e8f5e9" : "#fff",
-                      color: statusFilter === v ? "#1b5e20" : "#555",
-                    }}
-                  >
-                    {l}
-                  </button>
-                ))}
-              </div>
+              <FilterChips
+                options={[
+                  { v: "pending",        l: SESSION_STATUS_LABELS.pending },
+                  { v: "in_progress",    l: SESSION_STATUS_LABELS.in_progress },
+                  { v: "pending_review", l: SESSION_STATUS_LABELS.pending_review },
+                  { v: "completed",      l: SESSION_STATUS_LABELS.completed },
+                  { v: "returned",       l: SESSION_STATUS_LABELS.returned },
+                  { v: "overdue",        l: SESSION_STATUS_LABELS.overdue },
+                ]}
+                selected={statusFilter}
+                onToggle={v => setStatusFilter(s => toggleInSet(s, v))}
+                onClear={() => setStatusFilter(new Set())}
+              />
             </div>
 
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>ประเภทการประเมิน</div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {[["all","ทั้งหมด"],["pre_eval","Pre"],["post_eval","Post"],["half_year","Half-Year"],["yearly","Yearly"]].map(([v, l]) => (
-                  <button
-                    key={v}
-                    onClick={() => { setEvalTypeFilter(v); setPeriodFilter("all"); }}
-                    style={{
-                      padding: "6px 14px", borderRadius: 20,
-                      border: evalTypeFilter === v ? "2px solid #1b5e20" : "1px solid #ddd",
-                      background: evalTypeFilter === v ? "#e8f5e9" : "#fff",
-                      color: evalTypeFilter === v ? "#1b5e20" : "#555",
-                      fontFamily: "Sarabun, sans-serif", fontSize: 12, cursor: "pointer",
-                      fontWeight: evalTypeFilter === v ? 700 : 400,
-                    }}
-                  >
-                    {l}
-                  </button>
-                ))}
-              </div>
+              <FilterChips
+                options={[{ v: "pre_eval", l: "Pre" }, { v: "post_eval", l: "Post" }, { v: "half_year", l: "Half-Year" }, { v: "yearly", l: "Yearly" }]}
+                selected={evalTypeFilter}
+                onToggle={v => setEvalTypeFilter(s => toggleInSet(s, v))}
+                onClear={() => { setEvalTypeFilter(new Set()); setPeriodFilter(new Set()); }}
+              />
 
-              {/* Period sub-filter — only when "Post" is selected, same options as HistoryPage */}
-              {evalTypeFilter === "post_eval" && (
-                <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-                  {[
-                    ["all",                       "ทั้งหมด"],
-                    ["Monthly / รายเดือน",        "รายเดือน"],
-                    ["Quarterly / รายไตรมาส",     "รายไตรมาส"],
-                    ["Semi-Annual / 6 เดือน",     "6 เดือน"],
-                    ["Annual / รายปี",            "รายปี"],
-                  ].map(([v, l]) => (
-                    <button
-                      key={v}
-                      onClick={() => setPeriodFilter(v)}
-                      style={{
-                        padding: "5px 12px", borderRadius: 20,
-                        border: periodFilter === v ? "2px solid #1565c0" : "1px solid #ddd",
-                        background: periodFilter === v ? "#e3f2fd" : "#fff",
-                        color: periodFilter === v ? "#1565c0" : "#555",
-                        fontFamily: "Sarabun, sans-serif", fontSize: 11.5, cursor: "pointer",
-                        fontWeight: periodFilter === v ? 700 : 400,
-                      }}
-                    >
-                      {l}
-                    </button>
-                  ))}
+              {/* Period sub-filter — relevant when "Post" is included, same options as HistoryPage */}
+              {(evalTypeFilter.size === 0 || evalTypeFilter.has("post_eval")) && (
+                <div style={{ marginTop: 8 }}>
+                  <FilterChips
+                    options={[
+                      { v: "Monthly / รายเดือน",    l: "รายเดือน" },
+                      { v: "Quarterly / รายไตรมาส", l: "รายไตรมาส" },
+                      { v: "Semi-Annual / 6 เดือน",  l: "6 เดือน" },
+                      { v: "Annual / รายปี",         l: "รายปี" },
+                    ]}
+                    selected={periodFilter}
+                    onToggle={v => setPeriodFilter(s => toggleInSet(s, v))}
+                    onClear={() => setPeriodFilter(new Set())}
+                    activeColor="#1565c0"
+                  />
                 </div>
               )}
             </div>

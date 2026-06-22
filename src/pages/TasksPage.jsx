@@ -17,6 +17,7 @@ import {
 import AdminUploadModal from "./AdminUploadModal";
 import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter } from "../utils/dateFilter";
 import { SESSION_STATUS_LABELS, SESSION_STATUS_COLORS, getDisplayStatus } from "../utils/statusLabels";
+import { FilterChips, toggleInSet } from "../components/FilterChips";
 
 const TASK_STATUS_COLORS = {
   pending:   { bg: "#fff8e1", color: "#f57f17", label: "รอประเมิน" },
@@ -41,8 +42,8 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
   const [sendingSelected, setSendingSelected] = useState(false);
   const [remindMsg,       setRemindMsg]       = useState(null);
   const [mainTab,         setMainTab]         = useState("active"); // 'active' | 'completed'
-  const [statusFilter,    setStatusFilter]    = useState("all");    // sub-filter within "active": all/pending/overdue
-  const [typeFilter,      setTypeFilter]      = useState("all");
+  const [statusFilter,    setStatusFilter]    = useState(new Set()); // sub-filter within "active": pending/overdue — empty = all
+  const [typeFilter,      setTypeFilter]      = useState(new Set());
   const [dateFilter,      setDateFilter]      = useState(DEFAULT_DATE_FILTER);
   const [search,          setSearch]          = useState("");
   const [dateFrom,        setDateFrom]        = useState("");
@@ -270,8 +271,8 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
     const from = dateFrom ? new Date(dateFrom) : null;
     const to   = dateTo ? new Date(dateTo + "T23:59:59") : null;
     const list = baseList.filter(t => {
-      const matchStatus = mainTab === "completed" || statusFilter === "all" || t.status === statusFilter;
-      const matchType   = typeFilter === "all" || t.evalType === typeFilter;
+      const matchStatus = mainTab === "completed" || statusFilter.size === 0 || statusFilter.has(t.status);
+      const matchType   = typeFilter.size === 0 || typeFilter.has(t.evalType);
       const due = new Date(t.dueDate);
       const matchDate = (!from || due >= from) && (!to || due <= to);
       const matchUploadDate = matchesDateFilter(t.createdAt, dateFilter);
@@ -321,15 +322,15 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
   function clearDateFilter() { setDateFrom(""); setDateTo(""); }
 
   const activeFilterCount = [
-    statusFilter !== "all",
-    typeFilter !== "all",
+    statusFilter.size > 0,
+    typeFilter.size > 0,
     !!dateFrom || !!dateTo,
     !!dateFilter.from || !!dateFilter.to || (dateFilter.preset && dateFilter.preset !== "all"),
   ].filter(Boolean).length;
 
   function resetAllFilters() {
-    setStatusFilter("all");
-    setTypeFilter("all");
+    setStatusFilter(new Set());
+    setTypeFilter(new Set());
     setDateFrom("");
     setDateTo("");
     setDateFilter(DEFAULT_DATE_FILTER);
@@ -507,25 +508,24 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
               {mainTab === "active" && (
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>สถานะงาน</div>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {[["all","ทั้งหมด"],["pending","รอประเมิน"],["overdue","เกินกำหนด"]].map(([v, l]) => (
-                      <button key={v} onClick={() => setStatusFilter(v)} style={{ padding: "6px 14px", borderRadius: 20, border: statusFilter === v ? "2px solid #1b5e20" : "1px solid #ddd", background: statusFilter === v ? "#e8f5e9" : "#fff", color: statusFilter === v ? "#1b5e20" : "#555", fontFamily: "Sarabun, sans-serif", fontSize: 12, cursor: "pointer", fontWeight: statusFilter === v ? 700 : 400 }}>
-                        {l}
-                      </button>
-                    ))}
-                  </div>
+                  <FilterChips
+                    options={[{ v: "pending", l: "รอประเมิน" }, { v: "overdue", l: "เกินกำหนด" }]}
+                    selected={statusFilter}
+                    onToggle={v => setStatusFilter(s => toggleInSet(s, v))}
+                    onClear={() => setStatusFilter(new Set())}
+                  />
                 </div>
               )}
 
               <div>
                 <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>ประเภทการประเมิน</div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {[["all","ทั้งหมด"],["pre_eval","Pre-Eval"],["post_eval","Post-Eval"],["half_year","Half-Year"],["yearly","Yearly"]].map(([v, l]) => (
-                    <button key={v} onClick={() => setTypeFilter(v)} style={{ padding: "6px 14px", borderRadius: 20, border: typeFilter === v ? "2px solid #00695c" : "1px solid #ddd", background: typeFilter === v ? "#e0f2f1" : "#fff", color: typeFilter === v ? "#00695c" : "#555", fontFamily: "Sarabun, sans-serif", fontSize: 12, cursor: "pointer", fontWeight: typeFilter === v ? 700 : 400 }}>
-                      {l}
-                    </button>
-                  ))}
-                </div>
+                <FilterChips
+                  options={[{ v: "pre_eval", l: "Pre-Eval" }, { v: "post_eval", l: "Post-Eval" }, { v: "half_year", l: "Half-Year" }, { v: "yearly", l: "Yearly" }]}
+                  selected={typeFilter}
+                  onToggle={v => setTypeFilter(s => toggleInSet(s, v))}
+                  onClear={() => setTypeFilter(new Set())}
+                  activeColor="#00695c"
+                />
               </div>
 
               <div>

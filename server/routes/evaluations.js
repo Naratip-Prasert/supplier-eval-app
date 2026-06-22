@@ -100,7 +100,7 @@ router.post('/', async (req, res) => {
     // 3. BU permission check — disabled for now (all users can evaluate any supplier)
 
     // USER, GCP, ADMIN are all valid roles for evaluation submissions
-    const evalRole = ['USER', 'GCP', 'ADMIN'].includes(employee.role) ? employee.role : 'USER';
+    let evalRole = ['USER', 'GCP', 'ADMIN'].includes(employee.role) ? employee.role : 'USER';
 
     let sessionId;
     let sessionEvalType;
@@ -121,6 +121,25 @@ router.post('/', async (req, res) => {
       }
       sessionId = taskSessionResult.rows[0].id;
       sessionEvalType = taskSessionResult.rows[0].eval_type;
+
+      // Record the role the TASK was assigned for, not the submitter's own
+      // employees.role. An ADMIN account is often the real-world GCP/buyer
+      // for a given supplier (assigned by email) — if their submission were
+      // stored as role='ADMIN', recalculate_session_final_score (which only
+      // ever looks for one 'USER' row + one 'GCP' row) would never see both
+      // halves, leaving the session stuck at "in_progress" forever even
+      // after both people have submitted.
+      const taskRoleResult = await client.query(
+        `SELECT role FROM evaluation_tasks
+          WHERE session_id = $1
+            AND (assigned_employee_id = $2
+                 OR assigned_email = (SELECT email FROM employees WHERE id = $2 LIMIT 1))
+          LIMIT 1`,
+        [sessionId, employee.id]
+      );
+      if (taskRoleResult.rows.length > 0 && ['USER', 'GCP'].includes(taskRoleResult.rows[0].role)) {
+        evalRole = taskRoleResult.rows[0].role;
+      }
 
       const dupResult = await client.query(
         `SELECT id FROM evaluations WHERE session_id = $1 AND role = $2`,
