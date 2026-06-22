@@ -218,21 +218,13 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
   const [period,       setPeriod]       = useState("");
   const [vendorLookup, setVendorLookup] = useState({ status: "idle", data: null });
 
-  const [myTasks,      setMyTasks]      = useState([]);
-  const [tasksLoading, setTasksLoading] = useState(true);
   const [myTimeline,        setMyTimeline]        = useState([]);
   const [timelineLoading,   setTimelineLoading]   = useState(true);
 
   useEffect(() => {
-    authFetch("/api/evaluations/my-tasks")
-      .then(r => r.ok ? r.json() : [])
-      .then(data => setMyTasks(Array.isArray(data) ? data : []))
-      .catch(() => setMyTasks([]))
-      .finally(() => setTasksLoading(false));
-
-    // Unlike my-tasks (to-do list only), this keeps tracking a task after
-    // the user has submitted their part, so they can see it progress
-    // through Submitted → Approved/Returned.
+    // Unlike /my-tasks (to-do list only, drops a task once submitted), this
+    // keeps tracking a task after the user has submitted their part, so they
+    // can see it progress through Submitted → Approved/Returned.
     authFetch("/api/evaluations/my-timeline")
       .then(r => r.ok ? r.json() : [])
       .then(data => setMyTimeline(Array.isArray(data) ? data : []))
@@ -371,100 +363,88 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
       {/* ── Form card ── */}
       <div style={{ maxWidth: 680, margin: "-20px auto 40px", padding: "0 20px", position: "relative", zIndex: 2 }}>
 
-        {/* Assigned tasks */}
-        {!tasksLoading && myTasks.length > 0 && (
-          <div style={{
-            background: "#fff", borderRadius: 16,
-            boxShadow: "0 4px 32px rgba(0,0,0,0.10)",
-            padding: "20px 24px", marginBottom: 16, animation: "fadeUp 0.3s ease",
-          }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 10, paddingLeft: 2 }}>
-              งานที่มอบหมายให้คุณ ({myTasks.length})
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {myTasks.map(t => {
-                const due       = new Date(t.dueDate);
-                const overdue   = t.status === "overdue" || isOverdue(t.dueDate);
-                const isReturned = t.sessionStatus === "returned";
-                return (
-                  <div key={t.taskId} style={{
-                    border: `1.5px solid ${isReturned ? "#ffb74d" : overdue ? "#ef9a9a" : "#a5d6a7"}`,
-                    background: isReturned ? "#fff8e1" : overdue ? "#fff5f5" : "#f8fdf8",
-                    borderRadius: 12, overflow: "hidden",
-                    boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
-                  }}>
-                    {isReturned && (
-                      <div style={{
-                        background: "#fb8c00", color: "#fff", fontSize: 12, fontWeight: 700,
-                        padding: "6px 16px", display: "flex", alignItems: "center", gap: 6,
-                      }}>
-                        ⚠ ส่งคืนจาก Supervisor — กรุณาประเมินใหม่
-                        {t.supervisorNotes && (
-                          <span style={{ fontWeight: 400, opacity: 0.95 }}>· {t.supervisorNotes}</span>
-                        )}
-                      </div>
-                    )}
-                    <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: 14, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {t.supplierName}
-                        </div>
-                        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
-                          {t.vendorCode} · {TASK_EVAL_TYPE_LABEL[t.evalType] || t.evalType}
-                        </div>
-                      </div>
-                      <div style={{ fontSize: 12, color: overdue ? "#c62828" : "#6b7280", fontWeight: overdue ? 700 : 400, whiteSpace: "nowrap" }}>
-                        {overdue ? "เกินกำหนด " : "ครบกำหนด "}{due.toLocaleDateString("th-TH")}
-                      </div>
-                      <button
-                        onClick={() => startTask(t)}
-                        style={{
-                          background: isReturned ? "#fb8c00" : themeColor, color: "#fff", border: "none",
-                          borderRadius: 8, padding: "7px 16px", cursor: "pointer",
-                          fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 13,
-                          whiteSpace: "nowrap", flexShrink: 0,
-                        }}
-                      >
-                        {isReturned ? "ประเมินใหม่" : "เริ่มประเมิน"}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Timeline — tracks every task assigned to this person, including
-            ones they've already submitted, until it reaches Approved/Returned */}
+        {/* Evaluation tasks — table of everything ever assigned to this
+            person. Shows live progress (timeline) even after they've
+            submitted their own part, and stays clickable while actionable. */}
         {!timelineLoading && myTimeline.length > 0 && (
           <div style={{
             background: "#fff", borderRadius: 16,
             boxShadow: "0 4px 32px rgba(0,0,0,0.10)",
             padding: "20px 24px", marginBottom: 16, animation: "fadeUp 0.3s ease",
+            overflowX: "auto",
           }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 14, paddingLeft: 2 }}>
-              ความคืบหน้างานของคุณ ({myTimeline.length})
+              งานประเมินของคุณ ({myTimeline.length})
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {myTimeline.map(t => (
-                <div key={t.taskId} style={{ borderBottom: "1px solid #f1f5f9", paddingBottom: 14 }}>
-                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
-                    <div style={{ fontWeight: 700, fontSize: 13, color: "#111827" }}>
-                      {t.supplierName}
-                      <span style={{ fontWeight: 400, color: "#9ca3af", marginLeft: 6 }}>
-                        {t.vendorCode} · {TASK_EVAL_TYPE_LABEL[t.evalType] || t.evalType} · {t.role}
-                      </span>
-                    </div>
-                  </div>
-                  <TimelineStepper status={t.sessionStatus} dueDate={t.dueDate} compact />
-                </div>
-              ))}
-            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: "2px solid #f1f5f9" }}>
+                  {["Supplier", "ประเภท", "Role", "สถานะ", "ครบกำหนด", "จัดการ"].map(h => (
+                    <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "#6b7280", fontSize: 11.5, textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" }}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {myTimeline.map(t => {
+                  const isReturned  = t.sessionStatus === "returned";
+                  const overdue     = isOverdue(t.dueDate) && !["completed", "returned"].includes(t.sessionStatus);
+                  const actionable  = t.taskStatus !== "completed"
+                    && ["pending", "in_progress", "returned"].includes(t.sessionStatus);
+                  return (
+                    <tr key={t.taskId} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                      <td style={{ padding: "10px 10px" }}>
+                        <div style={{ fontWeight: 700, color: "#111827" }}>{t.supplierName}</div>
+                        <div style={{ fontSize: 11, color: "#9ca3af" }}>{t.vendorCode}</div>
+                        {isReturned && t.supervisorNotes && (
+                          <div style={{ fontSize: 11, color: "#fb8c00", marginTop: 2 }}>⚠ {t.supervisorNotes}</div>
+                        )}
+                      </td>
+                      <td style={{ padding: "10px 10px", color: "#555", fontSize: 12, whiteSpace: "nowrap" }}>
+                        {TASK_EVAL_TYPE_LABEL[t.evalType] || t.evalType}
+                      </td>
+                      <td style={{ padding: "10px 10px" }}>
+                        <span style={{
+                          background: t.role === "GCP" ? "#e3f2fd" : "#e8f5e9",
+                          color: t.role === "GCP" ? "#1565c0" : "#2e7d32",
+                          borderRadius: 10, padding: "2px 8px", fontSize: 11, fontWeight: 700,
+                        }}>{t.role}</span>
+                      </td>
+                      <td style={{ padding: "10px 10px" }}>
+                        <TimelineStepper status={t.sessionStatus} dueDate={t.dueDate} compact />
+                      </td>
+                      <td style={{ padding: "10px 10px", color: overdue ? "#c62828" : "#6b7280", fontWeight: overdue ? 700 : 400, whiteSpace: "nowrap", fontSize: 12 }}>
+                        {t.dueDate ? new Date(t.dueDate).toLocaleDateString("th-TH") : "—"}
+                      </td>
+                      <td style={{ padding: "10px 10px" }}>
+                        {actionable ? (
+                          <button
+                            onClick={() => startTask(t)}
+                            style={{
+                              background: isReturned ? "#fb8c00" : themeColor, color: "#fff", border: "none",
+                              borderRadius: 8, padding: "6px 14px", cursor: "pointer",
+                              fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 12,
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {isReturned ? "ประเมินใหม่" : "เริ่มประเมิน"}
+                          </button>
+                        ) : (
+                          <span style={{ fontSize: 11.5, color: "#9ca3af" }}>
+                            {t.taskStatus === "completed" ? "ส่งแล้ว" : "—"}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
 
-        {!tasksLoading && !canManualEntry && myTasks.length === 0 && (
+        {!timelineLoading && !canManualEntry && myTimeline.length === 0 && (
           <div style={{
             background: "#fff", border: "1.5px dashed #d1d5db", borderRadius: 16,
             boxShadow: "0 4px 32px rgba(0,0,0,0.10)",

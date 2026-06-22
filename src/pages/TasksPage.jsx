@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import AdminUploadModal from "./AdminUploadModal";
 import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter } from "../utils/dateFilter";
+import { SESSION_STATUS_LABELS, SESSION_STATUS_COLORS, getDisplayStatus } from "../utils/statusLabels";
 
 const TASK_STATUS_COLORS = {
   pending:   { bg: "#fff8e1", color: "#f57f17", label: "รอประเมิน" },
@@ -674,7 +675,7 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
                       </button>
                     </th>
                   )}
-                  {["Supplier","ประเภท","อัพโหลดเมื่อ","Role","ผู้รับผิดชอบ","ครบกำหนด","สถานะ","Email ล่าสุด","จัดการ"].map(h => (
+                  {["Supplier","ประเภท","อัพโหลดเมื่อ","Role","ผู้รับผิดชอบ","ครบกำหนด","สถานะ","สถานะรวม","Email ล่าสุด","จัดการ"].map(h => (
                     <th key={h} style={{ whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
@@ -746,6 +747,14 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
                       </td>
                       <td style={{ padding: "10px 12px" }}>
                         <span style={{ background: sc.bg, color: sc.color, borderRadius: 10, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{sc.label}</span>
+                      </td>
+                      <td style={{ padding: "10px 12px" }}>
+                        {(() => {
+                          const overallDisplay = getDisplayStatus(t.sessionStatus, t.dueDate);
+                          const oc = SESSION_STATUS_COLORS[overallDisplay] ?? { bg: "#f5f5f5", color: "#aaa" };
+                          const ol = SESSION_STATUS_LABELS[overallDisplay] ?? overallDisplay;
+                          return <span style={{ background: oc.bg, color: oc.color, borderRadius: 10, padding: "2px 10px", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>{ol}</span>;
+                        })()}
                       </td>
                       <td style={{ padding: "10px 12px", fontSize: 11, color: "#888" }}>
                         {t.thankyouSentAt ? `Thank you: ${new Date(t.thankyouSentAt).toLocaleDateString("th-TH")}` :
