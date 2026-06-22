@@ -1,9 +1,8 @@
 'use strict';
 const express = require('express'); // express เป็น framework ที่ทำให้ node.js รับ http request ได้ง่าย
 const cors    = require('cors'); // เช็คว่าโดเมนที่เรียกเข้ามา ได้รับอนุญาตให้ดึงข้อมูลจาก API ของเราไหม
-require('dotenv').config(); // ใช้ค่าจาก .env จะได้ไม่ต้องทำ Hardcode
 
-const pool = require('./db');
+const pool = require('./db'); // ./db already calls dotenv.config() — no need to call it again here
 
 const app  = express(); //สร้าง Express Application — app คือ object หลักที่เราจะ config ทุกอย่างลงไป
 const PORT = process.env.PORT || 5000;
@@ -77,17 +76,16 @@ pool.connect()
       ALTER TABLE employees ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMPTZ;
     `).catch(err => console.warn('employees auth columns migration warning:', err.message));
 
-    // Rename role BU → USER, add ADMIN to evaluations constraint
-    // UPDATE data FIRST, then ADD CONSTRAINT (constraint validates existing rows immediately)
+    // 'BU' (employees/evaluations/evaluation_tasks roles) and 'new_supplier'
+    // (evaluation_sessions.eval_type) were fully retired — confirmed 0 rows
+    // left anywhere, and every CHECK constraint below already rejects those
+    // values, so nothing can ever reintroduce them. The one-time rename
+    // UPDATEs that used to live here are gone; only the constraints (needed
+    // so a fresh install ends up with the right shape) remain.
+    //
+    // evaluations_role_check: this block is its sole source of truth.
     await client.query(`
-      ALTER TABLE employees DROP CONSTRAINT IF EXISTS employees_role_check;
-      UPDATE employees SET role = 'USER' WHERE role = 'BU';
-      ALTER TABLE employees
-        ADD CONSTRAINT employees_role_check
-        CHECK (role IN ('USER', 'GCP', 'ADMIN'));
-
       ALTER TABLE evaluations DROP CONSTRAINT IF EXISTS evaluations_role_check;
-      UPDATE evaluations SET role = 'USER' WHERE role = 'BU';
       ALTER TABLE evaluations
         ADD CONSTRAINT evaluations_role_check
         CHECK (role IN ('USER', 'GCP', 'ADMIN'));
@@ -186,7 +184,8 @@ pool.connect()
         ADD COLUMN IF NOT EXISTS evaluator_email  VARCHAR(200)
     `).catch(err => console.warn('suppliers migration warning:', err.message));
 
-    // employees: add SUPERVISOR role
+    // employees_role_check: single source of truth for this constraint's
+    // value list (the rename migration above only drops it + updates data).
     await client.query(`
       ALTER TABLE employees DROP CONSTRAINT IF EXISTS employees_role_check;
       ALTER TABLE employees
@@ -194,13 +193,10 @@ pool.connect()
         CHECK (role IN ('USER', 'GCP', 'ADMIN', 'SUPERVISOR'))
     `).catch(err => console.warn('employees role migration warning:', err.message));
 
-    // evaluation_sessions: 'new_supplier' was really just the manual-entry
-    // name for what the task system calls 'pre_eval' — same meaning, two
-    // strings. Rename so there's one canonical value, then add new
-    // eval_type + status values.
+    // evaluation_sessions_eval_type_check: sole source of truth for the
+    // value list ('new_supplier' was retired — see the note above).
     await client.query(`
       ALTER TABLE evaluation_sessions DROP CONSTRAINT IF EXISTS evaluation_sessions_eval_type_check;
-      UPDATE evaluation_sessions SET eval_type = 'pre_eval' WHERE eval_type = 'new_supplier';
       ALTER TABLE evaluation_sessions
         ADD CONSTRAINT evaluation_sessions_eval_type_check
         CHECK (eval_type IN ('post_eval','pre_eval','half_year','yearly'));
@@ -363,10 +359,9 @@ pool.connect()
       CREATE INDEX IF NOT EXISTS idx_supervisor_reviews_status  ON supervisor_reviews(status);
     `).catch(err => console.warn('new tables migration warning:', err.message));
 
-    // evaluation_tasks: role 'BU' is legacy — employees.role was already
-    // renamed BU → USER, so evaluation_tasks must follow the same domain.
+    // evaluation_tasks_role_check: sole source of truth for the value list
+    // ('BU' was retired — see the note near the top of this function).
     await client.query(`
-      UPDATE evaluation_tasks SET role = 'USER' WHERE role = 'BU';
       ALTER TABLE evaluation_tasks DROP CONSTRAINT IF EXISTS evaluation_tasks_role_check;
       ALTER TABLE evaluation_tasks
         ADD CONSTRAINT evaluation_tasks_role_check

@@ -1,6 +1,6 @@
 'use strict';
 const { Pool } = require('pg'); //โหลด class pool มาใช้จาก module pg
-require('dotenv').config(); // ดึงค่าจาก .env  มาใช้ จะได้ไม่ต้อง hardcode
+require('dotenv').config({ quiet: true }); // ดึงค่าจาก .env  มาใช้ จะได้ไม่ต้อง hardcode
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
