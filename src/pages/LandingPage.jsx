@@ -2,15 +2,17 @@
 //  pages/LandingPage.jsx
 // ============================================================
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useModal } from "../components";
 import { TimelineStepper } from "../components/TimelineStepper";
+import { PaginationBar } from "./TasksPage";
 import { authFetch } from "../utils/api";
 import { isOverdue } from "../utils/date";
 import {
   Info, Loader2, AlertCircle, User, LogOut,
   ChevronDown, ClipboardList, Search, CheckCircle2,
   FileText, BarChart3, ArrowRight, Building2,
+  SlidersHorizontal, CalendarRange, ArrowDownUp, X,
 } from "lucide-react";
 
 import { PRODUCT_TYPE_OPTIONS, EVAL_PERIOD_OPTIONS, PRE_PERIOD_OPTIONS } from "../constants";
@@ -22,6 +24,11 @@ const TASK_EVAL_TYPE_LABEL = {
   pre_eval: "Pre-Evaluation (Supplier ใหม่)",
   post_eval: "Post-Evaluation (90 วัน)", half_year: "Half-Year Evaluation", yearly: "Yearly Evaluation",
 };
+const TASK_TYPE_FILTER_LABEL = {
+  pre_eval: "Pre-Eval", post_eval: "Post-Eval", half_year: "Half-Year", yearly: "Yearly",
+};
+const SORT_LABEL = { asc: "ครบกำหนดเร็วสุดก่อน", desc: "ครบกำหนดช้าสุดก่อน" };
+const TASK_PAGE_SIZE = 8;
 
 // ── Profile dropdown ─────────────────────────────────────────
 function ProfileDropdown({ user, profilePic, themeColor, onProfile, onHistory, onLogout }) {
@@ -220,6 +227,26 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
 
   const [myTimeline,        setMyTimeline]        = useState([]);
   const [timelineLoading,   setTimelineLoading]   = useState(true);
+  const [taskTab,           setTaskTab]           = useState("active"); // 'active' | 'returned'
+  const [taskSearch,        setTaskSearch]        = useState("");
+  const [taskTypeFilter,    setTaskTypeFilter]    = useState("all");
+  const [taskDateFrom,      setTaskDateFrom]      = useState("");
+  const [taskDateTo,        setTaskDateTo]        = useState("");
+  const [taskSortDir,       setTaskSortDir]       = useState("asc");
+  const [taskFilterOpen,    setTaskFilterOpen]    = useState(false);
+  const [taskPage,          setTaskPage]          = useState(1);
+  const taskFilterPanelRef = useRef(null);
+
+  useEffect(() => { setTaskPage(1); }, [taskTab, taskTypeFilter, taskDateFrom, taskDateTo, taskSearch, taskSortDir]);
+
+  useEffect(() => {
+    if (!taskFilterOpen) return;
+    function onClickOutside(e) {
+      if (taskFilterPanelRef.current && !taskFilterPanelRef.current.contains(e.target)) setTaskFilterOpen(false);
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [taskFilterOpen]);
 
   useEffect(() => {
     // Unlike /my-tasks (to-do list only, drops a task once submitted), this
@@ -250,6 +277,48 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
       sessionId:    task.sessionId,
     });
   };
+
+  // Approved sessions are done — drop them entirely so the table doesn't
+  // accumulate stale clutter the user can no longer act on.
+  const visibleTimeline = useMemo(() => myTimeline.filter(t => t.sessionStatus !== "completed"), [myTimeline]);
+  const returnedTimeline = useMemo(() => visibleTimeline.filter(t => t.sessionStatus === "returned"), [visibleTimeline]);
+  const activeTimeline   = useMemo(() => visibleTimeline.filter(t => t.sessionStatus !== "returned"), [visibleTimeline]);
+  const taskBaseList = taskTab === "returned" ? returnedTimeline : activeTimeline;
+
+  const filteredTimeline = useMemo(() => {
+    const from = taskDateFrom ? new Date(taskDateFrom) : null;
+    const to   = taskDateTo ? new Date(taskDateTo + "T23:59:59") : null;
+    const q = taskSearch.trim().toLowerCase();
+    const list = taskBaseList.filter(t => {
+      const matchType = taskTypeFilter === "all" || t.evalType === taskTypeFilter;
+      const due = t.dueDate ? new Date(t.dueDate) : null;
+      const matchDate = (!from || (due && due >= from)) && (!to || (due && due <= to));
+      const matchSearch = !q
+        || t.supplierName?.toLowerCase().includes(q)
+        || t.vendorCode?.toLowerCase().includes(q);
+      return matchType && matchDate && matchSearch;
+    });
+    return [...list].sort((a, b) => {
+      const da = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
+      const db = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
+      if (da !== db) return taskSortDir === "asc" ? da - db : db - da;
+      return (a.supplierName || "").localeCompare(b.supplierName || "", "th");
+    });
+  }, [taskBaseList, taskTypeFilter, taskDateFrom, taskDateTo, taskSearch, taskSortDir]);
+
+  const taskTotalPages = Math.max(1, Math.ceil(filteredTimeline.length / TASK_PAGE_SIZE));
+  const taskPageItems  = filteredTimeline.slice((taskPage - 1) * TASK_PAGE_SIZE, taskPage * TASK_PAGE_SIZE);
+
+  const taskActiveFilterCount = [
+    taskTypeFilter !== "all",
+    !!taskDateFrom || !!taskDateTo,
+  ].filter(Boolean).length;
+
+  function resetTaskFilters() {
+    setTaskTypeFilter("all");
+    setTaskDateFrom("");
+    setTaskDateTo("");
+  }
 
   const lookupVendor = async (code) => {
     if (!code.trim()) return "idle";
@@ -360,91 +429,241 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
         </div>
       </div>
 
-      {/* ── Form card ── */}
-      <div style={{ maxWidth: 680, margin: "-20px auto 40px", padding: "0 20px", position: "relative", zIndex: 2 }}>
+      {/* ── Tasks table (wide) ── */}
+      <div style={{ maxWidth: 1100, margin: "-20px auto 0", padding: "0 20px", position: "relative", zIndex: 2 }}>
 
         {/* Evaluation tasks — table of everything ever assigned to this
-            person. Shows live progress (timeline) even after they've
-            submitted their own part, and stays clickable while actionable. */}
-        {!timelineLoading && myTimeline.length > 0 && (
+            person (minus approved ones — those are done). Shows live
+            progress (timeline) even after they've submitted their own
+            part, and stays clickable while actionable. */}
+        {!timelineLoading && visibleTimeline.length > 0 && (
           <div style={{
             background: "#fff", borderRadius: 16,
             boxShadow: "0 4px 32px rgba(0,0,0,0.10)",
             padding: "20px 24px", marginBottom: 16, animation: "fadeUp 0.3s ease",
-            overflowX: "auto",
           }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 14, paddingLeft: 2 }}>
-              งานประเมินของคุณ ({myTimeline.length})
+              งานประเมินของคุณ
             </div>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: "2px solid #f1f5f9" }}>
-                  {["Supplier", "ประเภท", "Role", "สถานะ", "ครบกำหนด", "จัดการ"].map(h => (
-                    <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "#6b7280", fontSize: 11.5, textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" }}>
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {myTimeline.map(t => {
-                  const isReturned  = t.sessionStatus === "returned";
-                  const overdue     = isOverdue(t.dueDate) && !["completed", "returned"].includes(t.sessionStatus);
-                  const actionable  = t.taskStatus !== "completed"
-                    && ["pending", "in_progress", "returned"].includes(t.sessionStatus);
-                  return (
-                    <tr key={t.taskId} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                      <td style={{ padding: "10px 10px" }}>
-                        <div style={{ fontWeight: 700, color: "#111827" }}>{t.supplierName}</div>
-                        <div style={{ fontSize: 11, color: "#9ca3af" }}>{t.vendorCode}</div>
-                        {isReturned && t.supervisorNotes && (
-                          <div style={{ fontSize: 11, color: "#fb8c00", marginTop: 2 }}>⚠ {t.supervisorNotes}</div>
-                        )}
-                      </td>
-                      <td style={{ padding: "10px 10px", color: "#555", fontSize: 12, whiteSpace: "nowrap" }}>
-                        {TASK_EVAL_TYPE_LABEL[t.evalType] || t.evalType}
-                      </td>
-                      <td style={{ padding: "10px 10px" }}>
-                        <span style={{
-                          background: t.role === "GCP" ? "#e3f2fd" : "#e8f5e9",
-                          color: t.role === "GCP" ? "#1565c0" : "#2e7d32",
-                          borderRadius: 10, padding: "2px 8px", fontSize: 11, fontWeight: 700,
-                        }}>{t.role}</span>
-                      </td>
-                      <td style={{ padding: "10px 10px" }}>
-                        <TimelineStepper status={t.sessionStatus} dueDate={t.dueDate} compact />
-                      </td>
-                      <td style={{ padding: "10px 10px", color: overdue ? "#c62828" : "#6b7280", fontWeight: overdue ? 700 : 400, whiteSpace: "nowrap", fontSize: 12 }}>
-                        {t.dueDate ? new Date(t.dueDate).toLocaleDateString("th-TH") : "—"}
-                      </td>
-                      <td style={{ padding: "10px 10px" }}>
-                        {actionable ? (
-                          <button
-                            onClick={() => startTask(t)}
-                            style={{
-                              background: isReturned ? "#fb8c00" : themeColor, color: "#fff", border: "none",
-                              borderRadius: 8, padding: "6px 14px", cursor: "pointer",
-                              fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 12,
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {isReturned ? "ประเมินใหม่" : "เริ่มประเมิน"}
-                          </button>
-                        ) : (
-                          <span style={{ fontSize: 11.5, color: "#9ca3af" }}>
-                            {t.taskStatus === "completed" ? "ส่งแล้ว" : "—"}
-                          </span>
-                        )}
-                      </td>
+
+            {/* Tabs */}
+            <div style={{ display: "flex", gap: 4, background: "#f3f4f6", borderRadius: 10, padding: 4, marginBottom: 14, width: "fit-content" }}>
+              {[
+                { key: "active",   label: `ยังไม่เริ่มประเมิน (${activeTimeline.length})` },
+                { key: "returned", label: `ถูกตีกลับ (${returnedTimeline.length})` },
+              ].map(tb => (
+                <button
+                  key={tb.key}
+                  onClick={() => setTaskTab(tb.key)}
+                  style={{
+                    padding: "7px 14px", borderRadius: 7, border: "none", cursor: "pointer",
+                    fontSize: 12.5, fontWeight: taskTab === tb.key ? 700 : 500, fontFamily: "Sarabun, sans-serif",
+                    background: taskTab === tb.key ? "#fff" : "transparent",
+                    color: taskTab === tb.key ? themeColor : "#6b7280",
+                    boxShadow: taskTab === tb.key ? "0 1px 4px rgba(0,0,0,0.1)" : "none",
+                  }}
+                >
+                  {tb.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Search + filter trigger */}
+            <div style={{ display: "flex", gap: 10, marginBottom: 14, position: "relative" }}>
+              <div style={{ position: "relative", flex: 1, minWidth: 180 }}>
+                <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#aaa" }} />
+                <input
+                  value={taskSearch} onChange={e => setTaskSearch(e.target.value)}
+                  placeholder="ค้นหา supplier / vendor code…"
+                  style={{ width: "100%", padding: "8px 10px 8px 32px", border: "1px solid #e5e7eb", borderRadius: 7, fontFamily: "Sarabun, sans-serif", fontSize: 13, boxSizing: "border-box" }}
+                />
+              </div>
+
+              <button
+                onClick={() => setTaskFilterOpen(o => !o)}
+                style={{
+                  position: "relative", display: "flex", alignItems: "center", gap: 6,
+                  padding: "8px 14px", borderRadius: 7,
+                  border: taskFilterOpen ? `1px solid ${themeColor}` : "1px solid #e5e7eb",
+                  background: taskFilterOpen ? `${themeColor}14` : "#fff",
+                  color: taskFilterOpen ? themeColor : "#555",
+                  fontFamily: "Sarabun, sans-serif", fontSize: 13, fontWeight: 600, cursor: "pointer",
+                }}
+              >
+                <SlidersHorizontal size={14} /> ตัวกรอง
+                {taskActiveFilterCount > 0 && (
+                  <span style={{
+                    position: "absolute", top: -6, right: -6, background: "#c62828", color: "#fff",
+                    borderRadius: "50%", width: 18, height: 18, fontSize: 10, fontWeight: 700,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    {taskActiveFilterCount}
+                  </span>
+                )}
+              </button>
+
+              {taskFilterOpen && (
+                <div
+                  ref={taskFilterPanelRef}
+                  style={{
+                    position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 30,
+                    background: "#fff", borderRadius: 12, border: "1px solid #e5e7eb",
+                    boxShadow: "0 10px 32px rgba(0,0,0,0.14)", padding: 18,
+                    width: 360, maxWidth: "92vw", display: "flex", flexDirection: "column", gap: 16,
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>ประเภทการประเมิน</div>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {[["all", "ทั้งหมด"], ...Object.entries(TASK_TYPE_FILTER_LABEL)].map(([v, l]) => (
+                        <button
+                          key={v}
+                          onClick={() => setTaskTypeFilter(v)}
+                          style={{
+                            padding: "6px 14px", borderRadius: 20,
+                            border: taskTypeFilter === v ? `2px solid ${themeColor}` : "1px solid #ddd",
+                            background: taskTypeFilter === v ? `${themeColor}14` : "#fff",
+                            color: taskTypeFilter === v ? themeColor : "#555",
+                            fontFamily: "Sarabun, sans-serif", fontSize: 12, cursor: "pointer",
+                            fontWeight: taskTypeFilter === v ? 700 : 400,
+                          }}
+                        >
+                          {l}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}>
+                      <CalendarRange size={13} /> ช่วงวันครบกำหนด
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <input
+                        type="date" value={taskDateFrom} onChange={e => setTaskDateFrom(e.target.value)}
+                        style={{ fontSize: 12, padding: "5px 8px", border: "1px solid #e5e7eb", borderRadius: 6, fontFamily: "Sarabun, sans-serif" }}
+                      />
+                      <span style={{ fontSize: 12, color: "#aaa" }}>ถึง</span>
+                      <input
+                        type="date" value={taskDateTo} onChange={e => setTaskDateTo(e.target.value)}
+                        style={{ fontSize: 12, padding: "5px 8px", border: "1px solid #e5e7eb", borderRadius: 6, fontFamily: "Sarabun, sans-serif" }}
+                      />
+                      {(taskDateFrom || taskDateTo) && (
+                        <button
+                          onClick={() => { setTaskDateFrom(""); setTaskDateTo(""); }}
+                          style={{ display: "flex", alignItems: "center", gap: 4, background: "#f5f5f5", border: "1px solid #ddd", borderRadius: 6, padding: "5px 10px", cursor: "pointer", fontSize: 11, color: "#666", fontFamily: "Sarabun, sans-serif" }}
+                        >
+                          <X size={11} /> ล้าง
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>เรียงลำดับ</div>
+                    <button
+                      onClick={() => setTaskSortDir(d => d === "asc" ? "desc" : "asc")}
+                      style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 20, border: "1px solid #ddd", background: "#fff", color: "#555", fontFamily: "Sarabun, sans-serif", fontSize: 12, cursor: "pointer" }}
+                    >
+                      <ArrowDownUp size={13} /> {SORT_LABEL[taskSortDir]}
+                    </button>
+                  </div>
+
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #eee", paddingTop: 12 }}>
+                    <button
+                      onClick={resetTaskFilters}
+                      disabled={taskActiveFilterCount === 0}
+                      style={{ fontSize: 12, color: taskActiveFilterCount === 0 ? "#bbb" : "#c62828", background: "none", border: "none", cursor: taskActiveFilterCount === 0 ? "default" : "pointer", fontFamily: "Sarabun, sans-serif", fontWeight: 600 }}
+                    >
+                      ล้างตัวกรองทั้งหมด
+                    </button>
+                    <button
+                      onClick={() => setTaskFilterOpen(false)}
+                      style={{ padding: "6px 16px", borderRadius: 7, border: "none", background: themeColor, color: "#fff", fontFamily: "Sarabun, sans-serif", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+                    >
+                      เสร็จสิ้น
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {filteredTimeline.length === 0 ? (
+              <div style={{ textAlign: "center", padding: 30, color: "#9ca3af", fontSize: 13 }}>ไม่มีรายการ</div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ borderBottom: "2px solid #f1f5f9" }}>
+                      {["Supplier", "ประเภท", "สถานะ", "ครบกำหนด", "จัดการ"].map(h => (
+                        <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "#6b7280", fontSize: 11.5, textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" }}>
+                          {h}
+                        </th>
+                      ))}
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody>
+                    {taskPageItems.map(t => {
+                      const isReturned  = t.sessionStatus === "returned";
+                      const overdue     = isOverdue(t.dueDate) && !["completed", "returned"].includes(t.sessionStatus);
+                      const actionable  = t.taskStatus !== "completed"
+                        && ["pending", "in_progress", "returned"].includes(t.sessionStatus);
+                      return (
+                        <tr key={t.taskId} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "10px 10px" }}>
+                            <div style={{ fontWeight: 700, color: "#111827" }}>{t.supplierName}</div>
+                            <div style={{ fontSize: 11, color: "#9ca3af" }}>{t.vendorCode}</div>
+                            {isReturned && t.supervisorNotes && (
+                              <div style={{ fontSize: 11, color: "#fb8c00", marginTop: 2 }}>⚠ {t.supervisorNotes}</div>
+                            )}
+                          </td>
+                          <td style={{ padding: "10px 10px", color: "#555", fontSize: 12, whiteSpace: "nowrap" }}>
+                            {TASK_EVAL_TYPE_LABEL[t.evalType] || t.evalType}
+                          </td>
+                          <td style={{ padding: "10px 10px" }}>
+                            <TimelineStepper status={t.sessionStatus} dueDate={t.dueDate} compact />
+                          </td>
+                          <td style={{ padding: "10px 10px", color: overdue ? "#c62828" : "#6b7280", fontWeight: overdue ? 700 : 400, whiteSpace: "nowrap", fontSize: 12 }}>
+                            {t.dueDate ? new Date(t.dueDate).toLocaleDateString("th-TH") : "—"}
+                          </td>
+                          <td style={{ padding: "10px 10px" }}>
+                            {actionable ? (
+                              <button
+                                onClick={() => startTask(t)}
+                                style={{
+                                  background: isReturned ? "#fb8c00" : themeColor, color: "#fff", border: "none",
+                                  borderRadius: 8, padding: "6px 14px", cursor: "pointer",
+                                  fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 12,
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {isReturned ? "ประเมินใหม่" : "เริ่มประเมิน"}
+                              </button>
+                            ) : (
+                              <span style={{ fontSize: 11.5, color: "#9ca3af" }}>
+                                {t.taskStatus === "completed" ? "ส่งแล้ว" : "—"}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {filteredTimeline.length > 0 && (
+              <PaginationBar
+                page={taskPage} totalPages={taskTotalPages} total={filteredTimeline.length} pageSize={TASK_PAGE_SIZE}
+                onPrev={() => setTaskPage(p => Math.max(1, p - 1))}
+                onNext={() => setTaskPage(p => Math.min(taskTotalPages, p + 1))}
+              />
+            )}
           </div>
         )}
 
-        {!timelineLoading && !canManualEntry && myTimeline.length === 0 && (
+        {!timelineLoading && !canManualEntry && visibleTimeline.length === 0 && (
           <div style={{
             background: "#fff", border: "1.5px dashed #d1d5db", borderRadius: 16,
             boxShadow: "0 4px 32px rgba(0,0,0,0.10)",
@@ -454,7 +673,10 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
             ไม่มีงานที่ต้องประเมินในขณะนี้
           </div>
         )}
+      </div>
 
+      {/* ── Form card (ADMIN manual entry only) ── */}
+      <div style={{ maxWidth: 680, margin: "20px auto 40px", padding: "0 20px", position: "relative", zIndex: 2 }}>
         {canManualEntry && (
         <>
         <div style={{
