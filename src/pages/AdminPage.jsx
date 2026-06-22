@@ -629,6 +629,8 @@ function SuppliersTab({ suppliers, onRefresh }) {
 function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
   const [search,            setSearch]            = useState("");
   const [statusFilter,      setStatusFilter]      = useState("ALL");
+  const [evalTypeFilter,    setEvalTypeFilter]    = useState("all");
+  const [periodFilter,      setPeriodFilter]      = useState("all");
   const [dateFilter,        setDateFilter]        = useState(DEFAULT_DATE_FILTER);
   const [selectedSessionId, setSelectedSessionId] = useState(initialSessionId ?? null);
 
@@ -648,9 +650,11 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
       s.supplierName?.toLowerCase().includes(q) ||
       s.vendorCode?.toLowerCase().includes(q) ||
       s.period?.toLowerCase().includes(q);
-    const matchStatus = statusFilter === "ALL" || s.status === statusFilter;
-    const matchDate   = matchesDateFilter(s.completedAt, dateFilter);
-    return matchSearch && matchStatus && matchDate;
+    const matchStatus   = statusFilter === "ALL" || s.status === statusFilter;
+    const matchEvalType = evalTypeFilter === "all" || s.evalType === evalTypeFilter;
+    const matchPeriod   = evalTypeFilter !== "post_eval" || periodFilter === "all" || s.period === periodFilter;
+    const matchDate     = matchesDateFilter(s.completedAt, dateFilter);
+    return matchSearch && matchStatus && matchEvalType && matchPeriod && matchDate;
   });
 
   return (
@@ -675,6 +679,7 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
             { v: "pending",     l: "รอประเมิน"  },
             { v: "in_progress", l: "กำลังประเมิน" },
             { v: "completed",   l: "เสร็จสิ้น"  },
+            { v: "returned",    l: "ส่งคืน"     },
           ].map(({ v, l }) => (
             <button
               key={v}
@@ -691,6 +696,54 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
           ))}
         </div>
       </div>
+
+      {/* Eval type filter — same Pre/Post/Half-Year/Yearly pills as HistoryPage */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+        {[["all","ทั้งหมด"],["pre_eval","Pre"],["post_eval","Post"],["half_year","Half-Year"],["yearly","Yearly"]].map(([v, l]) => (
+          <button
+            key={v}
+            onClick={() => { setEvalTypeFilter(v); setPeriodFilter("all"); }}
+            style={{
+              padding: "6px 14px", borderRadius: 20,
+              border: evalTypeFilter === v ? "2px solid #1b5e20" : "1px solid #ddd",
+              background: evalTypeFilter === v ? "#e8f5e9" : "#fff",
+              color: evalTypeFilter === v ? "#1b5e20" : "#555",
+              fontFamily: "Sarabun, sans-serif", fontSize: 12, cursor: "pointer",
+              fontWeight: evalTypeFilter === v ? 700 : 400,
+            }}
+          >
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {/* Period sub-filter — only when "Post" is selected, same options as HistoryPage */}
+      {evalTypeFilter === "post_eval" && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+          {[
+            ["all",                       "ทั้งหมด"],
+            ["Monthly / รายเดือน",        "รายเดือน"],
+            ["Quarterly / รายไตรมาส",     "รายไตรมาส"],
+            ["Semi-Annual / 6 เดือน",     "6 เดือน"],
+            ["Annual / รายปี",            "รายปี"],
+          ].map(([v, l]) => (
+            <button
+              key={v}
+              onClick={() => setPeriodFilter(v)}
+              style={{
+                padding: "5px 12px", borderRadius: 20,
+                border: periodFilter === v ? "2px solid #1565c0" : "1px solid #ddd",
+                background: periodFilter === v ? "#e3f2fd" : "#fff",
+                color: periodFilter === v ? "#1565c0" : "#555",
+                fontFamily: "Sarabun, sans-serif", fontSize: 11.5, cursor: "pointer",
+                fontWeight: periodFilter === v ? 700 : 400,
+              }}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div style={{ marginBottom: 14 }}>
         <DateFilterBar filter={dateFilter} onChange={setDateFilter} label="วันที่เสร็จสิ้น" />
