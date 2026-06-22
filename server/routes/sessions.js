@@ -44,7 +44,11 @@ router.get('/', async (req, res) => {
          es.final_grade     AS "finalGrade",
          es.created_at      AS "createdAt",
          es.completed_at    AS "completedAt",
-         initiator.employee_id AS "initiatedBy"
+         initiator.employee_id AS "initiatedBy",
+         COALESCE(
+           (SELECT sr.review_due FROM supervisor_reviews sr WHERE sr.session_id = es.id ORDER BY sr.created_at DESC LIMIT 1),
+           (SELECT MAX(et.due_date) FROM evaluation_tasks et WHERE et.session_id = es.id)
+         ) AS "dueDate"
        FROM evaluation_sessions es
        JOIN suppliers s ON s.id = es.supplier_id
        LEFT JOIN employees initiator ON initiator.id = es.initiated_by
@@ -111,7 +115,11 @@ router.get('/:id', async (req, res) => {
          es.final_score     AS "finalScore",
          es.final_grade     AS "finalGrade",
          es.created_at      AS "createdAt",
-         es.completed_at    AS "completedAt"
+         es.completed_at    AS "completedAt",
+         COALESCE(
+           (SELECT sr.review_due FROM supervisor_reviews sr WHERE sr.session_id = es.id ORDER BY sr.created_at DESC LIMIT 1),
+           (SELECT MAX(et.due_date) FROM evaluation_tasks et WHERE et.session_id = es.id)
+         ) AS "dueDate"
        FROM evaluation_sessions es
        JOIN suppliers s ON s.id = es.supplier_id
        WHERE es.id = $1`,

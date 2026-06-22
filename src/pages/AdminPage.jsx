@@ -6,6 +6,8 @@ import { Header } from "../components";
 import { authFetch } from "../utils/api";
 import TasksPage from "./TasksPage";
 import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter } from "../utils/dateFilter";
+import { SESSION_STATUS_LABELS, SESSION_STATUS_COLORS, getDisplayStatus } from "../utils/statusLabels";
+import { TimelineStepper } from "../components/TimelineStepper";
 import {
   Users, Package, ClipboardList, Upload,
   ArrowLeft, Search, RefreshCw, Plus, X, Check,
@@ -18,13 +20,6 @@ const ROLE_COLORS = {
   GCP:        { bg: "#e3f2fd", color: "#1565c0", label: "GCP"        },
   ADMIN:      { bg: "#fce4ec", color: "#880e4f", label: "ADMIN"      },
   SUPERVISOR: { bg: "#f3e5f5", color: "#6a1b9a", label: "SUPERVISOR" },
-};
-const STATUS_COLORS = {
-  pending:        { bg: "#fff8e1", color: "#f57f17", label: "รอการประเมิน"  },
-  in_progress:    { bg: "#e3f2fd", color: "#1565c0", label: "กำลังประเมิน"  },
-  pending_review: { bg: "#f3e5f5", color: "#6a1b9a", label: "รออนุมัติ"     },
-  completed:      { bg: "#e8f5e9", color: "#1b5e20", label: "เสร็จสิ้น"     },
-  returned:       { bg: "#ffebee", color: "#c62828", label: "ส่งคืน"        },
 };
 const GRADE_COLORS = {
   A: "#1b5e20", B: "#1565c0", C: "#e65100", D: "#b71c1c", F: "#4a0000",
@@ -661,7 +656,8 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
       s.supplierName?.toLowerCase().includes(q) ||
       s.vendorCode?.toLowerCase().includes(q) ||
       s.period?.toLowerCase().includes(q);
-    const matchStatus   = statusFilter === "ALL" || s.status === statusFilter;
+    const matchStatus   = statusFilter === "ALL"
+      || (statusFilter === "overdue" ? getDisplayStatus(s.status, s.dueDate) === "overdue" : s.status === statusFilter);
     const matchEvalType = evalTypeFilter === "all" || s.evalType === evalTypeFilter;
     const matchPeriod   = evalTypeFilter !== "post_eval" || periodFilter === "all" || s.period === periodFilter;
     const matchDate     = matchesDateFilter(s.completedAt, dateFilter);
@@ -735,11 +731,13 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
               <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>สถานะ</div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {[
-                  { v: "ALL",         l: "ทั้งหมด"    },
-                  { v: "pending",     l: "รอประเมิน"  },
-                  { v: "in_progress", l: "กำลังประเมิน" },
-                  { v: "completed",   l: "เสร็จสิ้น"  },
-                  { v: "returned",    l: "ส่งคืน"     },
+                  { v: "ALL",             l: "All"                              },
+                  { v: "pending",         l: SESSION_STATUS_LABELS.pending        },
+                  { v: "in_progress",     l: SESSION_STATUS_LABELS.in_progress    },
+                  { v: "pending_review",  l: SESSION_STATUS_LABELS.pending_review },
+                  { v: "completed",       l: SESSION_STATUS_LABELS.completed      },
+                  { v: "returned",        l: SESSION_STATUS_LABELS.returned       },
+                  { v: "overdue",         l: SESSION_STATUS_LABELS.overdue        },
                 ].map(({ v, l }) => (
                   <button
                     key={v}
@@ -864,7 +862,7 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
                   {{ pre_eval: "Pre-Evaluation", post_eval: "Post-Evaluation", half_year: "Half-Year", yearly: "Yearly" }[s.evalType] ?? s.evalType}
                 </td>
                 <td style={{ padding: "11px 14px", fontSize: 12, color: "#666" }}>{s.period}</td>
-                <td style={{ padding: "11px 14px" }}><StatusBadge status={s.status} /></td>
+                <td style={{ padding: "11px 14px" }}><StatusBadge status={s.status} dueDate={s.dueDate} /></td>
                 <td style={{ padding: "11px 14px", fontSize: 12, color: "#888", whiteSpace: "nowrap" }}>
                   {s.completedAt ? new Date(s.completedAt).toLocaleDateString("th-TH") : "—"}
                 </td>
@@ -960,8 +958,8 @@ function SessionDetail({ sessionId, onBack, onViewEvaluation }) {
           <div style={{
             background: "#fff", borderRadius: 14, padding: "18px 22px", marginBottom: 20,
             boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
-            display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap",
           }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap", marginBottom: 16 }}>
             <div style={{ flex: 1, minWidth: 200 }}>
               <div style={{ fontWeight: 800, fontSize: 17, color: "#1a1a1a" }}>{data.supplierName}</div>
               <div style={{ fontSize: 12, color: "#aaa", fontFamily: "monospace", marginTop: 2 }}>{data.vendorCode}</div>
@@ -970,7 +968,7 @@ function SessionDetail({ sessionId, onBack, onViewEvaluation }) {
               {{ pre_eval: "Pre-Evaluation", post_eval: "Post-Evaluation", half_year: "Half-Year", yearly: "Yearly" }[data.evalType] ?? data.evalType}
               {" · "}{data.period}
             </div>
-            <StatusBadge status={data.status} />
+            <StatusBadge status={data.status} dueDate={data.dueDate} />
             <div style={{ textAlign: "center" }}>
               <div style={{ fontWeight: 800, fontSize: 22, color: "#333" }}>
                 {data.finalScore != null ? parseFloat(data.finalScore).toFixed(2) : "—"}
@@ -982,6 +980,10 @@ function SessionDetail({ sessionId, onBack, onViewEvaluation }) {
                 fontWeight: 800, fontSize: 22, color: GRADE_COLORS[data.finalGrade] ?? "#333",
               }}>{data.finalGrade}</span>
             )}
+          </div>
+          <div style={{ borderTop: "1px solid #f0f0f0", paddingTop: 14 }}>
+            <TimelineStepper status={data.status} dueDate={data.dueDate} />
+          </div>
           </div>
 
           {/* Evaluators — click one to open its full ResultPage (same as History) */}
@@ -1096,14 +1098,16 @@ function TabCard({ tab, active, count, onClick }) {
 }
 
 // ── Shared components ─────────────────────────────────────────
-function StatusBadge({ status }) {
-  const sc = STATUS_COLORS[status] ?? { bg: "#f5f5f5", color: "#aaa", label: status };
+function StatusBadge({ status, dueDate }) {
+  const display = getDisplayStatus(status, dueDate);
+  const sc = SESSION_STATUS_COLORS[display] ?? { bg: "#f5f5f5", color: "#aaa" };
+  const label = SESSION_STATUS_LABELS[display] ?? display;
   return (
     <span style={{
       background: sc.bg, color: sc.color,
       borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700,
     }}>
-      {sc.label}
+      {label}
     </span>
   );
 }

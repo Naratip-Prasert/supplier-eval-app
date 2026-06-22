@@ -448,6 +448,45 @@ router.get('/my-tasks', async (req, res) => {
   }
 });
 
+// ── GET /api/evaluations/my-timeline ──────────────────────────
+// Unlike /my-tasks (which only lists actionable to-dos and drops a
+// task the moment the user submits it), this returns every task ever
+// assigned to the current user so the frontend can render a stage
+// tracker (Not Started → In Process → Submitted → Approved/Returned)
+// that keeps following the session after their own part is done.
+router.get('/my-timeline', async (req, res) => {
+  if (!req.user.email) return res.json([]);
+  try {
+    const result = await pool.query(`
+      SELECT
+        et.id              AS "taskId",
+        et.role,
+        es.id               AS "sessionId",
+        es.eval_type        AS "evalType",
+        es.period,
+        es.status           AS "sessionStatus",
+        es.created_at       AS "createdAt",
+        s.vendor_code       AS "vendorCode",
+        s.supplier_name     AS "supplierName",
+        s.product_type      AS "productType",
+        COALESCE(
+          (SELECT sr.review_due FROM supervisor_reviews sr WHERE sr.session_id = es.id ORDER BY sr.created_at DESC LIMIT 1),
+          et.due_date
+        ) AS "dueDate"
+      FROM evaluation_tasks et
+      JOIN evaluation_sessions es ON es.id = et.session_id
+      JOIN suppliers s             ON s.id = et.supplier_id
+      WHERE et.assigned_email = $1
+      ORDER BY es.created_at DESC
+      LIMIT 50
+    `, [req.user.email]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('GET /api/evaluations/my-timeline error:', err);
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+  }
+});
+
 // ── GET /api/evaluations/:id ─────────────────────────────────
 // Returns a single evaluation with all its scores
 router.get('/:id', async (req, res) => {
