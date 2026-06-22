@@ -461,6 +461,7 @@ router.get('/my-timeline', async (req, res) => {
       SELECT
         et.id              AS "taskId",
         et.role,
+        et.status           AS "taskStatus",
         es.id               AS "sessionId",
         es.eval_type        AS "evalType",
         es.period,
@@ -469,13 +470,15 @@ router.get('/my-timeline', async (req, res) => {
         s.vendor_code       AS "vendorCode",
         s.supplier_name     AS "supplierName",
         s.product_type      AS "productType",
+        sr.notes            AS "supervisorNotes",
         COALESCE(
-          (SELECT sr.review_due FROM supervisor_reviews sr WHERE sr.session_id = es.id ORDER BY sr.created_at DESC LIMIT 1),
+          (SELECT r.review_due FROM supervisor_reviews r WHERE r.session_id = es.id ORDER BY r.created_at DESC LIMIT 1),
           et.due_date
         ) AS "dueDate"
       FROM evaluation_tasks et
       JOIN evaluation_sessions es ON es.id = et.session_id
       JOIN suppliers s             ON s.id = et.supplier_id
+      LEFT JOIN supervisor_reviews sr ON sr.session_id = es.id AND sr.status = 'returned'
       WHERE et.assigned_email = $1
       ORDER BY es.created_at DESC
       LIMIT 50
