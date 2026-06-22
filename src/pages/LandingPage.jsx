@@ -4,6 +4,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useModal } from "../components";
+import { TimelineStepper } from "../components/TimelineStepper";
 import { authFetch } from "../utils/api";
 import { isOverdue } from "../utils/date";
 import {
@@ -219,6 +220,8 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
 
   const [myTasks,      setMyTasks]      = useState([]);
   const [tasksLoading, setTasksLoading] = useState(true);
+  const [myTimeline,        setMyTimeline]        = useState([]);
+  const [timelineLoading,   setTimelineLoading]   = useState(true);
 
   useEffect(() => {
     authFetch("/api/evaluations/my-tasks")
@@ -226,6 +229,15 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
       .then(data => setMyTasks(Array.isArray(data) ? data : []))
       .catch(() => setMyTasks([]))
       .finally(() => setTasksLoading(false));
+
+    // Unlike my-tasks (to-do list only), this keeps tracking a task after
+    // the user has submitted their part, so they can see it progress
+    // through Submitted → Approved/Returned.
+    authFetch("/api/evaluations/my-timeline")
+      .then(r => r.ok ? r.json() : [])
+      .then(data => setMyTimeline(Array.isArray(data) ? data : []))
+      .catch(() => setMyTimeline([]))
+      .finally(() => setTimelineLoading(false));
   }, []);
 
   const startTask = (task) => {
@@ -419,6 +431,35 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                   </div>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {/* Timeline — tracks every task assigned to this person, including
+            ones they've already submitted, until it reaches Approved/Returned */}
+        {!timelineLoading && myTimeline.length > 0 && (
+          <div style={{
+            background: "#fff", borderRadius: 16,
+            boxShadow: "0 4px 32px rgba(0,0,0,0.10)",
+            padding: "20px 24px", marginBottom: 16, animation: "fadeUp 0.3s ease",
+          }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 14, paddingLeft: 2 }}>
+              ความคืบหน้างานของคุณ ({myTimeline.length})
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {myTimeline.map(t => (
+                <div key={t.taskId} style={{ borderBottom: "1px solid #f1f5f9", paddingBottom: 14 }}>
+                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: "#111827" }}>
+                      {t.supplierName}
+                      <span style={{ fontWeight: 400, color: "#9ca3af", marginLeft: 6 }}>
+                        {t.vendorCode} · {TASK_EVAL_TYPE_LABEL[t.evalType] || t.evalType} · {t.role}
+                      </span>
+                    </div>
+                  </div>
+                  <TimelineStepper status={t.sessionStatus} dueDate={t.dueDate} compact />
+                </div>
+              ))}
             </div>
           </div>
         )}
