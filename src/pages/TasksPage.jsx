@@ -2,12 +2,17 @@
 //  pages/TasksPage.jsx  —  Evaluation task management (Excel
 //  upload + reminders), separated out from admin management
 //  because they're different concerns (system admin vs. running
-//  evaluation cycles).
+//  evaluation cycles). Upload history lives on its own page
+//  (UploadHistoryPage) — it's a log, not part of running tasks.
 // ============================================================
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Header, useModal } from "../components";
 import { authFetch } from "../utils/api";
-import { ArrowLeft, RefreshCw, AlertCircle, Search, Upload, Send, Pencil, Trash2, X, Check } from "lucide-react";
+import { isOverdue } from "../utils/date";
+import {
+  ArrowLeft, RefreshCw, AlertCircle, Search, Upload, Send, Pencil, Trash2, X, Check,
+  ChevronLeft, ChevronRight, ArrowDownUp, MailCheck, Square, CheckSquare, Lock, History, CalendarRange,
+} from "lucide-react";
 import AdminUploadModal from "./AdminUploadModal";
 import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter } from "../utils/dateFilter";
 
@@ -20,39 +25,47 @@ const EVAL_TYPE_LABEL = {
   pre_eval: "Pre-Eval",
   post_eval: "Post 90d", half_year: "Half-Year", yearly: "Yearly",
 };
+const PAGE_SIZE = 10;
+const SORT_LABEL = { asc: "ครบกำหนดเร็วสุดก่อน", desc: "ครบกำหนดช้าสุดก่อน" };
 
-export default function TasksPage({ authUser, onBack, embedded = false }) {
+export default function TasksPage({ onBack, onUploadHistory, embedded = false }) {
   const { showAlert, showConfirm, ModalEl } = useModal();
   const [tasks,           setTasks]           = useState([]);
-  const [batches,         setBatches]         = useState([]);
   const [loading,         setLoading]         = useState(false);
   const [error,           setError]           = useState(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [remindingId,     setRemindingId]     = useState(null);
+  const [sendingAll,      setSendingAll]      = useState(false);
+  const [sendingSelected, setSendingSelected] = useState(false);
   const [remindMsg,       setRemindMsg]       = useState(null);
-  const [statusFilter,    setStatusFilter]    = useState("all");
+  const [mainTab,         setMainTab]         = useState("active"); // 'active' | 'completed'
+  const [statusFilter,    setStatusFilter]    = useState("all");    // sub-filter within "active": all/pending/overdue
   const [typeFilter,      setTypeFilter]      = useState("all");
   const [dateFilter,      setDateFilter]      = useState(DEFAULT_DATE_FILTER);
   const [search,          setSearch]          = useState("");
+  const [dateFrom,        setDateFrom]        = useState("");
+  const [dateTo,          setDateTo]          = useState("");
+  const [sortDir,         setSortDir]         = useState("asc");
+  const [page,            setPage]            = useState(1);
   const [editingId,       setEditingId]       = useState(null);
   const [editDraft,       setEditDraft]       = useState({ assignedEmail: "", dueDate: "" });
   const [savingEdit,      setSavingEdit]      = useState(false);
   const [deletingId,      setDeletingId]      = useState(null);
+  const [bulkDeleting,    setBulkDeleting]    = useState(false);
+  const [selected,        setSelected]        = useState(new Set());
   const [employees,       setEmployees]       = useState([]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [taskRes, batchRes, empRes] = await Promise.all([
+      const [taskRes, empRes] = await Promise.all([
         authFetch("/api/admin/tasks").then(r => r.json()).catch(() => []),
-        authFetch("/api/admin/batches").then(r => r.json()).catch(() => []),
         authFetch("/api/employees").then(r => r.json()).catch(() => []),
       ]);
       setTasks(Array.isArray(taskRes) ? taskRes : []);
-      setBatches(Array.isArray(batchRes) ? batchRes : []);
       setEmployees(Array.isArray(empRes) ? empRes.filter(e => e.isActive) : []);
-    } catch (e) {
+    } catch {
       setError("โหลดข้อมูลไม่สำเร็จ");
     } finally {
       setLoading(false);
@@ -68,6 +81,9 @@ export default function TasksPage({ authUser, onBack, embedded = false }) {
   };
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // Filters/tab changes invalidate the current page + selection
+  useEffect(() => { setPage(1); setSelected(new Set()); }, [mainTab, statusFilter, typeFilter, search, dateFrom, dateTo, dateFilter, sortDir]);
 
   async function handleRemind(taskId, supplierName) {
     const ok = await showConfirm(`ส่งอีเมล Reminder ไปยังผู้รับผิดชอบของ "${supplierName}" ใช่ไหม?`, "ยืนยันส่ง Reminder");
@@ -85,6 +101,51 @@ export default function TasksPage({ authUser, onBack, embedded = false }) {
       setRemindingId(null);
       setTimeout(() => setRemindMsg(null), 4000);
     }
+  }
+
+  async function remindByTaskIds(taskIds, confirmLabel, confirmTitle) {
+    if (taskIds.length === 0) return;
+    const ok = await showConfirm(confirmLabel, confirmTitle);
+    if (!ok) return false;
+    try {
+      const res  = await authFetch("/api/admin/tasks/remind-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      setRemindMsg({ ok: true, msg: `ส่ง reminder แล้ว ${data.sent} รายการ${data.failed ? ` (ล้มเหลว ${data.failed})` : ""}` });
+      await fetchAll();
+      return true;
+    } catch (e) {
+      setRemindMsg({ ok: false, msg: e.message });
+      return false;
+    } finally {
+      setTimeout(() => setRemindMsg(null), 4000);
+    }
+  }
+
+  async function handleRemindAll() {
+    setSendingAll(true);
+    await remindByTaskIds(
+      filteredTaskIds,
+      `ส่งอีเมล Reminder ไปยังผู้รับผิดชอบของงานที่ยังไม่ประเมินทั้งหมดที่ตรงกับตัวกรองปัจจุบัน (${filteredTaskIds.length} รายการ) ใช่ไหม?`,
+      "ยืนยันส่ง Reminder ทั้งหมด"
+    );
+    setSendingAll(false);
+  }
+
+  async function handleRemindSelected() {
+    const taskIds = filtered.filter(t => selected.has(t.sessionId)).map(t => t.id);
+    setSendingSelected(true);
+    const ok = await remindByTaskIds(
+      taskIds,
+      `ส่งอีเมล Reminder ไปยังผู้รับผิดชอบของรายการที่เลือกไว้ (${selected.size} รายการ, ${taskIds.length} อีเมล) ใช่ไหม?`,
+      "ยืนยันส่ง Reminder ที่เลือก"
+    );
+    if (ok) setSelected(new Set());
+    setSendingSelected(false);
   }
 
   function startEdit(t) {
@@ -157,22 +218,93 @@ export default function TasksPage({ authUser, onBack, embedded = false }) {
     }
   }
 
-  const filtered = tasks.filter(t => {
-    const matchStatus = statusFilter === "all" || t.status === statusFilter;
-    const matchType   = typeFilter === "all" || t.evalType === typeFilter;
-    const q = search.trim().toLowerCase();
-    const matchSearch = !q
-      || t.supplierName?.toLowerCase().includes(q)
-      || t.taxId?.toLowerCase().includes(q)
-      || t.vendorCode?.toLowerCase().includes(q)
-      || t.assignedEmail?.toLowerCase().includes(q)
-      || t.assignedName?.toLowerCase().includes(q);
-    const matchDate = matchesDateFilter(t.createdAt, dateFilter);
-    return matchStatus && matchType && matchSearch && matchDate;
-  });
+  async function handleBulkDelete(sessionIds, label) {
+    if (sessionIds.length === 0) return;
+    const ok = await showConfirm(
+      `ลบรายการประเมิน ${sessionIds.length} รายการ${label ? ` (${label})` : ""} ใช่ไหม?\n\nใช้สำหรับแก้ไขกรณีอัพโหลดผิดเท่านั้น งานที่ประเมินเสร็จแล้วจะถูกข้ามไปโดยอัตโนมัติ`,
+      "ยืนยันการลบหลายรายการ"
+    );
+    if (!ok) return;
+    setBulkDeleting(true);
+    try {
+      const res  = await authFetch("/api/admin/sessions/bulk-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      setRemindMsg({
+        ok: true,
+        msg: `ลบสำเร็จ ${data.deleted.length} รายการ${data.skipped?.length ? ` (ข้าม ${data.skipped.length} รายการที่ประเมินเสร็จแล้ว/อยู่ระหว่างอนุมัติ)` : ""}`,
+      });
+      setSelected(new Set());
+      await fetchAll();
+    } catch (e) {
+      setRemindMsg({ ok: false, msg: e.message });
+    } finally {
+      setBulkDeleting(false);
+      setTimeout(() => setRemindMsg(null), 4000);
+    }
+  }
 
-  const pendingCount = tasks.filter(t => t.status === "pending").length;
-  const overdueCount = tasks.filter(t => t.status === "overdue").length;
+  const activeTasks    = useMemo(() => tasks.filter(t => t.status !== "completed"), [tasks]);
+  const completedTasks = useMemo(() => tasks.filter(t => t.status === "completed"), [tasks]);
+  const baseList = mainTab === "completed" ? completedTasks : activeTasks;
+
+  const filtered = useMemo(() => {
+    const from = dateFrom ? new Date(dateFrom) : null;
+    const to   = dateTo ? new Date(dateTo + "T23:59:59") : null;
+    const list = baseList.filter(t => {
+      const matchStatus = mainTab === "completed" || statusFilter === "all" || t.status === statusFilter;
+      const matchType   = typeFilter === "all" || t.evalType === typeFilter;
+      const due = new Date(t.dueDate);
+      const matchDate = (!from || due >= from) && (!to || due <= to);
+      const matchUploadDate = matchesDateFilter(t.createdAt, dateFilter);
+      const q = search.trim().toLowerCase();
+      const matchSearch = !q
+        || t.supplierName?.toLowerCase().includes(q)
+        || t.taxId?.toLowerCase().includes(q)
+        || t.vendorCode?.toLowerCase().includes(q)
+        || t.assignedEmail?.toLowerCase().includes(q)
+        || t.assignedName?.toLowerCase().includes(q);
+      return matchStatus && matchType && matchDate && matchUploadDate && matchSearch;
+    });
+    return [...list].sort((a, b) => {
+      const da = new Date(a.dueDate).getTime();
+      const db = new Date(b.dueDate).getTime();
+      if (da !== db) return sortDir === "asc" ? da - db : db - da;
+      return (a.supplierName || "").localeCompare(b.supplierName || "", "th");
+    });
+  }, [baseList, mainTab, statusFilter, typeFilter, search, dateFrom, dateTo, dateFilter, sortDir]);
+
+  const filteredTaskIds = useMemo(() => filtered.map(t => t.id), [filtered]);
+  const filteredSessionIds = useMemo(() => Array.from(new Set(filtered.map(t => t.sessionId))), [filtered]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const pageItems  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const pageSessionIds = useMemo(() => Array.from(new Set(pageItems.map(t => t.sessionId))), [pageItems]);
+
+  const pendingCount = activeTasks.filter(t => t.status === "pending").length;
+  const overdueCount = activeTasks.filter(t => t.status === "overdue").length;
+
+  function toggleSelect(sessionId) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(sessionId) ? next.delete(sessionId) : next.add(sessionId);
+      return next;
+    });
+  }
+  function toggleSelectAllOnPage() {
+    const allSelected = pageSessionIds.length > 0 && pageSessionIds.every(id => selected.has(id));
+    setSelected(prev => {
+      const next = new Set(prev);
+      pageSessionIds.forEach(id => (allSelected ? next.delete(id) : next.add(id)));
+      return next;
+    });
+  }
+
+  function clearDateFilter() { setDateFrom(""); setDateTo(""); }
 
   const content = (
     <>
@@ -195,6 +327,17 @@ export default function TasksPage({ authUser, onBack, embedded = false }) {
             <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
               {loading && <span style={{ fontSize: 12, color: "#aaa" }}>กำลังโหลด…</span>}
               <button
+                onClick={onUploadHistory}
+                style={{
+                  display: "flex", alignItems: "center", gap: 5,
+                  background: "#fff", border: "1px solid #ddd", borderRadius: 8,
+                  padding: "6px 12px", cursor: "pointer", fontSize: 12,
+                  color: "#555", fontFamily: "Sarabun, sans-serif",
+                }}
+              >
+                <History size={13} /> ประวัติการอัพโหลด
+              </button>
+              <button
                 onClick={fetchAll}
                 disabled={loading}
                 style={{
@@ -208,6 +351,21 @@ export default function TasksPage({ authUser, onBack, embedded = false }) {
                 รีเฟรช
               </button>
             </div>
+          </div>
+        )}
+        {embedded && (
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+            <button
+              onClick={onUploadHistory}
+              style={{
+                display: "flex", alignItems: "center", gap: 5,
+                background: "#fff", border: "1px solid #ddd", borderRadius: 8,
+                padding: "6px 12px", cursor: "pointer", fontSize: 12,
+                color: "#555", fontFamily: "Sarabun, sans-serif",
+              }}
+            >
+              <History size={13} /> ประวัติการอัพโหลด
+            </button>
           </div>
         )}
         {embedded && loading && (
@@ -228,9 +386,9 @@ export default function TasksPage({ authUser, onBack, embedded = false }) {
         <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
           <div style={{ display: "flex", gap: 10 }}>
             {[
-              { label: "รอประเมิน",   value: pendingCount, color: "#f57f17", bg: "#fff8e1" },
-              { label: "เกินกำหนด",   value: overdueCount, color: "#c62828", bg: "#ffebee" },
-              { label: "ทั้งหมด",     value: tasks.length, color: "#555",    bg: "#f5f5f5" },
+              { label: "รอประเมิน",   value: pendingCount,        color: "#f57f17", bg: "#fff8e1" },
+              { label: "เกินกำหนด",   value: overdueCount,        color: "#c62828", bg: "#ffebee" },
+              { label: "เสร็จสิ้น",   value: completedTasks.length, color: "#2e7d32", bg: "#e8f5e9" },
             ].map(s => (
               <div key={s.label} style={{ background: s.bg, border: `1px solid ${s.color}22`, borderRadius: 8, padding: "8px 16px", textAlign: "center", minWidth: 80 }}>
                 <div style={{ fontWeight: 800, fontSize: 20, color: s.color }}>{s.value}</div>
@@ -252,6 +410,27 @@ export default function TasksPage({ authUser, onBack, embedded = false }) {
           </div>
         )}
 
+        {/* ── Main tabs: active vs. completed ── */}
+        <div style={{ display: "flex", gap: 4, background: "#fff", borderRadius: 12, padding: 4, marginBottom: 16, boxShadow: "0 2px 8px rgba(0,0,0,0.06)", width: "fit-content" }}>
+          {[
+            { key: "active",    label: `งานที่รอดำเนินการ (${activeTasks.length})` },
+            { key: "completed", label: `เสร็จสิ้น (${completedTasks.length})` },
+          ].map(t => (
+            <button
+              key={t.key}
+              onClick={() => setMainTab(t.key)}
+              style={{
+                padding: "8px 16px", borderRadius: 9, border: "none", cursor: "pointer",
+                fontSize: 13, fontWeight: mainTab === t.key ? 700 : 500, fontFamily: "Sarabun, sans-serif",
+                background: mainTab === t.key ? "#1b5e20" : "transparent",
+                color: mainTab === t.key ? "#fff" : "#666", transition: "all .15s",
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
         {/* Filters */}
         <div style={{ display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
           <div style={{ position: "relative", flex: 1, minWidth: 200 }}>
@@ -262,13 +441,43 @@ export default function TasksPage({ authUser, onBack, embedded = false }) {
               style={{ width: "100%", paddingLeft: 32, padding: "8px 10px 8px 32px", border: "1px solid #e0e0e0", borderRadius: 7, fontFamily: "Sarabun, sans-serif", fontSize: 13, boxSizing: "border-box" }}
             />
           </div>
-          <div style={{ display: "flex", gap: 6 }}>
-            {[["all","ทั้งหมด"],["pending","รอประเมิน"],["overdue","เกินกำหนด"],["completed","เสร็จแล้ว"]].map(([v, l]) => (
-              <button key={v} onClick={() => setStatusFilter(v)} style={{ padding: "6px 14px", borderRadius: 20, border: statusFilter === v ? "2px solid #1b5e20" : "1px solid #ddd", background: statusFilter === v ? "#e8f5e9" : "#fff", color: statusFilter === v ? "#1b5e20" : "#555", fontFamily: "Sarabun, sans-serif", fontSize: 12, cursor: "pointer", fontWeight: statusFilter === v ? 700 : 400 }}>
-                {l}
-              </button>
-            ))}
-          </div>
+          {mainTab === "active" && (
+            <div style={{ display: "flex", gap: 6 }}>
+              {[["all","ทั้งหมด"],["pending","รอประเมิน"],["overdue","เกินกำหนด"]].map(([v, l]) => (
+                <button key={v} onClick={() => setStatusFilter(v)} style={{ padding: "6px 14px", borderRadius: 20, border: statusFilter === v ? "2px solid #1b5e20" : "1px solid #ddd", background: statusFilter === v ? "#e8f5e9" : "#fff", color: statusFilter === v ? "#1b5e20" : "#555", fontFamily: "Sarabun, sans-serif", fontSize: 12, cursor: "pointer", fontWeight: statusFilter === v ? 700 : 400 }}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          )}
+          <button
+            onClick={() => setSortDir(d => d === "asc" ? "desc" : "asc")}
+            title="สลับการเรียงลำดับ"
+            style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 20, border: "1px solid #ddd", background: "#fff", color: "#555", fontFamily: "Sarabun, sans-serif", fontSize: 12, cursor: "pointer" }}
+          >
+            <ArrowDownUp size={13} /> {SORT_LABEL[sortDir]}
+          </button>
+        </div>
+
+        {/* Date range filter (by due date) */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#666", fontWeight: 600 }}>
+            <CalendarRange size={14} /> ช่วงวันครบกำหนด:
+          </span>
+          <input
+            type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+            style={{ fontSize: 12, padding: "5px 8px", border: "1px solid #e0e0e0", borderRadius: 6, fontFamily: "Sarabun, sans-serif" }}
+          />
+          <span style={{ fontSize: 12, color: "#aaa" }}>ถึง</span>
+          <input
+            type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+            style={{ fontSize: 12, padding: "5px 8px", border: "1px solid #e0e0e0", borderRadius: 6, fontFamily: "Sarabun, sans-serif" }}
+          />
+          {(dateFrom || dateTo) && (
+            <button onClick={clearDateFilter} style={{ display: "flex", alignItems: "center", gap: 4, background: "#f5f5f5", border: "1px solid #ddd", borderRadius: 6, padding: "5px 10px", cursor: "pointer", fontSize: 11, color: "#666", fontFamily: "Sarabun, sans-serif" }}>
+              <X size={11} /> ล้างวันที่
+            </button>
+          )}
         </div>
 
         {/* Eval type filter */}
@@ -285,6 +494,76 @@ export default function TasksPage({ authUser, onBack, embedded = false }) {
           <DateFilterBar filter={dateFilter} onChange={setDateFilter} label="วันที่อัพโหลด" />
         </div>
 
+        {/* Bulk action bar — only meaningful for not-yet-completed tasks */}
+        {mainTab === "active" && (
+          <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+            <button
+              disabled={sendingAll || filteredTaskIds.length === 0}
+              onClick={handleRemindAll}
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                background: "#fff3e0", color: "#e65100", border: "1px solid #ffe0b2", borderRadius: 8,
+                padding: "8px 14px", cursor: "pointer", fontFamily: "Sarabun, sans-serif", fontSize: 12, fontWeight: 700,
+                opacity: (sendingAll || filteredTaskIds.length === 0) ? 0.6 : 1,
+              }}
+            >
+              <MailCheck size={14} /> {sendingAll ? "กำลังส่ง…" : `ส่ง Email ทั้งหมด (${filteredTaskIds.length})`}
+            </button>
+
+            <button
+              disabled={bulkDeleting || filteredSessionIds.length === 0}
+              onClick={() => handleBulkDelete(filteredSessionIds, "ตามตัวกรองปัจจุบัน")}
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                background: "#ffebee", color: "#c62828", border: "1px solid #ef9a9a", borderRadius: 8,
+                padding: "8px 14px", cursor: "pointer", fontFamily: "Sarabun, sans-serif", fontSize: 12, fontWeight: 700,
+                opacity: (bulkDeleting || filteredSessionIds.length === 0) ? 0.6 : 1,
+              }}
+            >
+              <Trash2 size={14} /> ลบทั้งหมด ({filteredSessionIds.length})
+            </button>
+
+            {selected.size > 0 && (
+              <>
+                <button
+                  disabled={sendingSelected}
+                  onClick={handleRemindSelected}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    background: "#e65100", color: "#fff", border: "1px solid #e65100", borderRadius: 8,
+                    padding: "8px 14px", cursor: "pointer", fontFamily: "Sarabun, sans-serif", fontSize: 12, fontWeight: 700,
+                    opacity: sendingSelected ? 0.6 : 1,
+                  }}
+                >
+                  <MailCheck size={14} /> {sendingSelected ? "กำลังส่ง…" : `ส่ง Email ที่เลือก (${selected.size})`}
+                </button>
+                <button
+                  disabled={bulkDeleting}
+                  onClick={() => handleBulkDelete(Array.from(selected), "ที่เลือกไว้")}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    background: "#c62828", color: "#fff", border: "1px solid #b71c1c", borderRadius: 8,
+                    padding: "8px 14px", cursor: "pointer", fontFamily: "Sarabun, sans-serif", fontSize: 12, fontWeight: 700,
+                    opacity: bulkDeleting ? 0.6 : 1,
+                  }}
+                >
+                  <Trash2 size={14} /> ลบที่เลือก ({selected.size})
+                </button>
+                <button
+                  onClick={() => setSelected(new Set())}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    background: "#f5f5f5", color: "#666", border: "1px solid #ddd", borderRadius: 8,
+                    padding: "8px 14px", cursor: "pointer", fontFamily: "Sarabun, sans-serif", fontSize: 12, fontWeight: 700,
+                  }}
+                >
+                  <X size={14} /> ยกเลิกการเลือกทั้งหมด
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
         <datalist id="emp-email-list">
           {employees.filter(e => e.email).map(e => <option key={e.employeeId} value={e.email} label={`${e.fullName} (${e.role})`} />)}
         </datalist>
@@ -297,19 +576,36 @@ export default function TasksPage({ authUser, onBack, embedded = false }) {
             <table className="admin-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr>
+                  {mainTab === "active" && (
+                    <th style={{ width: 30 }}>
+                      <button onClick={toggleSelectAllOnPage} style={{ background: "none", border: "none", cursor: "pointer", display: "flex" }} title="เลือกทั้งหมดในหน้านี้">
+                        {pageSessionIds.length > 0 && pageSessionIds.every(id => selected.has(id))
+                          ? <CheckSquare size={15} color="#1b5e20" />
+                          : <Square size={15} color="#aaa" />}
+                      </button>
+                    </th>
+                  )}
                   {["Supplier","ประเภท","อัพโหลดเมื่อ","Role","ผู้รับผิดชอบ","ครบกำหนด","สถานะ","Email ล่าสุด","จัดการ"].map(h => (
                     <th key={h} style={{ whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(t => {
+                {pageItems.map(t => {
                   const sc = TASK_STATUS_COLORS[t.status] ?? TASK_STATUS_COLORS.pending;
                   const dueDate = new Date(t.dueDate);
-                  const isPast = dueDate < new Date();
+                  const isPast = isOverdue(t.dueDate);
                   const isEditing = editingId === t.id;
+                  const isCompleted = t.status === "completed";
                   return (
                     <tr key={t.id} style={isEditing ? { background: "#f8fdf8" } : undefined}>
+                      {mainTab === "active" && (
+                        <td style={{ padding: "10px 12px" }}>
+                          <button onClick={() => toggleSelect(t.sessionId)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex" }}>
+                            {selected.has(t.sessionId) ? <CheckSquare size={15} color="#1b5e20" /> : <Square size={15} color="#aaa" />}
+                          </button>
+                        </td>
+                      )}
                       <td style={{ padding: "10px 12px", fontWeight: 600 }}>{t.supplierName}</td>
                       <td style={{ padding: "10px 12px", fontSize: 11 }}>{EVAL_TYPE_LABEL[t.evalType] || t.evalType}</td>
                       <td style={{ padding: "10px 12px", fontSize: 11, color: "#888", whiteSpace: "nowrap" }}>
@@ -349,7 +645,7 @@ export default function TasksPage({ authUser, onBack, embedded = false }) {
                           </>
                         )}
                       </td>
-                      <td style={{ padding: "10px 12px", color: isPast && t.status !== "completed" ? "#c62828" : "#555", fontWeight: isPast && t.status !== "completed" ? 700 : 400 }}>
+                      <td style={{ padding: "10px 12px", color: isPast && !isCompleted ? "#c62828" : "#555", fontWeight: isPast && !isCompleted ? 700 : 400 }}>
                         {isEditing ? (
                           <input
                             type="date"
@@ -363,33 +659,38 @@ export default function TasksPage({ authUser, onBack, embedded = false }) {
                         <span style={{ background: sc.bg, color: sc.color, borderRadius: 10, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{sc.label}</span>
                       </td>
                       <td style={{ padding: "10px 12px", fontSize: 11, color: "#888" }}>
-                        {t.reminderSentAt ? `Reminder: ${new Date(t.reminderSentAt).toLocaleDateString("th-TH")}` :
+                        {t.thankyouSentAt ? `Thank you: ${new Date(t.thankyouSentAt).toLocaleDateString("th-TH")}` :
+                         t.reminderSentAt ? `Reminder: ${new Date(t.reminderSentAt).toLocaleDateString("th-TH")}` :
                          t.invitationSentAt ? `Invite: ${new Date(t.invitationSentAt).toLocaleDateString("th-TH")}` : "-"}
                       </td>
                       <td style={{ padding: "10px 12px" }}>
-                        <div style={{ display: "flex", gap: 6 }}>
-                          {isEditing ? (
-                            <>
-                              <button
-                                disabled={savingEdit}
-                                onClick={() => saveEdit(t.id, t.sessionId, t.role)}
-                                title="บันทึก"
-                                style={{ display: "flex", alignItems: "center", gap: 4, background: "#e8f5e9", color: "#2e7d32", border: "1px solid #a5d6a7", borderRadius: 6, padding: "5px 8px", cursor: "pointer", fontSize: 12 }}
-                              >
-                                <Check size={12} />
-                              </button>
-                              <button
-                                disabled={savingEdit}
-                                onClick={() => setEditingId(null)}
-                                title="ยกเลิก"
-                                style={{ display: "flex", alignItems: "center", gap: 4, background: "#f5f5f5", color: "#666", border: "1px solid #ddd", borderRadius: 6, padding: "5px 8px", cursor: "pointer", fontSize: 12 }}
-                              >
-                                <X size={12} />
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              {t.status !== "completed" && (
+                        {isCompleted ? (
+                          <span title="ข้อมูลถูกบันทึกแล้ว — ไม่สามารถลบได้" style={{ display: "flex", alignItems: "center", gap: 5, color: "#aaa", fontSize: 11 }}>
+                            <Lock size={12} /> บันทึกแล้ว
+                          </span>
+                        ) : (
+                          <div style={{ display: "flex", gap: 6 }}>
+                            {isEditing ? (
+                              <>
+                                <button
+                                  disabled={savingEdit}
+                                  onClick={() => saveEdit(t.id, t.sessionId, t.role)}
+                                  title="บันทึก"
+                                  style={{ display: "flex", alignItems: "center", gap: 4, background: "#e8f5e9", color: "#2e7d32", border: "1px solid #a5d6a7", borderRadius: 6, padding: "5px 8px", cursor: "pointer", fontSize: 12 }}
+                                >
+                                  <Check size={12} />
+                                </button>
+                                <button
+                                  disabled={savingEdit}
+                                  onClick={() => setEditingId(null)}
+                                  title="ยกเลิก"
+                                  style={{ display: "flex", alignItems: "center", gap: 4, background: "#f5f5f5", color: "#666", border: "1px solid #ddd", borderRadius: 6, padding: "5px 8px", cursor: "pointer", fontSize: 12 }}
+                                >
+                                  <X size={12} />
+                                </button>
+                              </>
+                            ) : (
+                              <>
                                 <button
                                   disabled={remindingId === t.id}
                                   onClick={() => handleRemind(t.id, t.supplierName)}
@@ -398,8 +699,6 @@ export default function TasksPage({ authUser, onBack, embedded = false }) {
                                 >
                                   <Send size={12} />
                                 </button>
-                              )}
-                              {t.status !== "completed" && (
                                 <button
                                   onClick={() => startEdit(t)}
                                   title="แก้ไขผู้รับผิดชอบ/ครบกำหนด"
@@ -407,18 +706,18 @@ export default function TasksPage({ authUser, onBack, embedded = false }) {
                                 >
                                   <Pencil size={12} />
                                 </button>
-                              )}
-                              <button
-                                disabled={deletingId === t.sessionId}
-                                onClick={() => handleDelete(t.sessionId, t.supplierName)}
-                                title="ลบรายการประเมินนี้"
-                                style={{ display: "flex", alignItems: "center", gap: 5, background: "#ffebee", color: "#c62828", border: "1px solid #ef9a9a", borderRadius: 6, padding: "5px 8px", cursor: "pointer", fontSize: 12, opacity: deletingId === t.sessionId ? 0.6 : 1 }}
-                              >
-                                <Trash2 size={12} />
-                              </button>
-                            </>
-                          )}
-                        </div>
+                                <button
+                                  disabled={deletingId === t.sessionId}
+                                  onClick={() => handleDelete(t.sessionId, t.supplierName)}
+                                  title="ลบรายการประเมินนี้"
+                                  style={{ display: "flex", alignItems: "center", gap: 5, background: "#ffebee", color: "#c62828", border: "1px solid #ef9a9a", borderRadius: 6, padding: "5px 8px", cursor: "pointer", fontSize: 12, opacity: deletingId === t.sessionId ? 0.6 : 1 }}
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );
@@ -428,36 +727,13 @@ export default function TasksPage({ authUser, onBack, embedded = false }) {
           </div>
         )}
 
-        {/* Upload batch history */}
-        {batches.length > 0 && (
-          <div style={{ marginTop: 28 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10, color: "#555" }}>ประวัติการอัพโหลด</div>
-            <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #dde3dd", overflow: "auto" }}>
-              <table className="admin-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                <thead>
-                  <tr>
-                    {["ไฟล์","ประเภท","จำนวน","สถานะ","ผู้อัพโหลด","วันที่"].map(h => (
-                      <th key={h}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {batches.map(b => (
-                    <tr key={b.id}>
-                      <td style={{ padding: "8px 12px", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.filename}</td>
-                      <td style={{ padding: "8px 12px" }}>{b.batchType}</td>
-                      <td style={{ padding: "8px 12px" }}>{b.rowCount}</td>
-                      <td style={{ padding: "8px 12px" }}>
-                        <span style={{ background: b.status === "done" ? "#e8f5e9" : b.status === "error" ? "#ffebee" : "#fff8e1", color: b.status === "done" ? "#2e7d32" : b.status === "error" ? "#c62828" : "#f57f17", borderRadius: 10, padding: "2px 8px", fontSize: 11, fontWeight: 700 }}>{b.status}</span>
-                      </td>
-                      <td style={{ padding: "8px 12px" }}>{b.uploadedBy || "-"}</td>
-                      <td style={{ padding: "8px 12px", color: "#888" }}>{new Date(b.createdAt).toLocaleDateString("th-TH")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+        {/* Tasks pagination */}
+        {filtered.length > 0 && (
+          <PaginationBar
+            page={page} totalPages={totalPages} total={filtered.length} pageSize={PAGE_SIZE}
+            onPrev={() => setPage(p => Math.max(1, p - 1))}
+            onNext={() => setPage(p => Math.min(totalPages, p + 1))}
+          />
         )}
 
       <style>{`
@@ -499,5 +775,33 @@ export default function TasksPage({ authUser, onBack, embedded = false }) {
         </div>
       </div>
     </>
+  );
+}
+
+// ── Shared pagination control (also used by UploadHistoryPage) ──
+export function PaginationBar({ page, totalPages, total, pageSize, onPrev, onNext }) {
+  const from = (page - 1) * pageSize + 1;
+  const to   = Math.min(page * pageSize, total);
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10, fontSize: 12, color: "#888" }}>
+      <span>แสดง {from}-{to} จาก {total} รายการ</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <button
+          onClick={onPrev}
+          disabled={page <= 1}
+          style={{ display: "flex", alignItems: "center", background: "#fff", border: "1px solid #ddd", borderRadius: 6, padding: "4px 8px", cursor: "pointer", opacity: page <= 1 ? 0.5 : 1 }}
+        >
+          <ChevronLeft size={14} />
+        </button>
+        <span>หน้า {page} / {totalPages}</span>
+        <button
+          onClick={onNext}
+          disabled={page >= totalPages}
+          style={{ display: "flex", alignItems: "center", background: "#fff", border: "1px solid #ddd", borderRadius: 6, padding: "4px 8px", cursor: "pointer", opacity: page >= totalPages ? 0.5 : 1 }}
+        >
+          <ChevronRight size={14} />
+        </button>
+      </div>
+    </div>
   );
 }

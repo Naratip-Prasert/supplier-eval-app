@@ -56,8 +56,8 @@ const TAB_COUNTS = {
 };
 
 // ── AdminPage ─────────────────────────────────────────────────
-export default function AdminPage({ authUser, onBack, onViewEvaluation, initialSessionId }) {
-  const [tab,             setTab]             = useState(initialSessionId ? "sessions" : "employees");
+export default function AdminPage({ authUser, onBack, onViewEvaluation, onViewUploadHistory, initialSessionId, initialTab }) {
+  const [tab,             setTab]             = useState(initialTab ?? (initialSessionId ? "sessions" : "employees"));
   const [employees,       setEmployees]       = useState([]);
   const [suppliers,       setSuppliers]       = useState([]);
   const [sessions,        setSessions]        = useState([]);
@@ -160,7 +160,7 @@ export default function AdminPage({ authUser, onBack, onViewEvaluation, initialS
         {/* ── Tab content ── */}
         {tab === "employees" && <EmployeesTab employees={employees} onRefresh={fetchAll} authUser={authUser} />}
         {tab === "suppliers" && <SuppliersTab suppliers={suppliers} onRefresh={fetchAll} />}
-        {tab === "tasks"     && <TasksPage authUser={authUser} embedded />}
+        {tab === "tasks"     && <TasksPage embedded onUploadHistory={onViewUploadHistory} />}
         {tab === "sessions"  && <SessionsTab sessions={sessions} onViewEvaluation={onViewEvaluation} initialSessionId={initialSessionId} />}
       </div>
 

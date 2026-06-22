@@ -8,9 +8,17 @@ const pool = require('./db');
 const app  = express(); //สร้าง Express Application — app คือ object หลักที่เราจะ config ทุกอย่างลงไป
 const PORT = process.env.PORT || 5000;
 
+// Production origins come from FRONTEND_URL (comma-separated if there's more
+// than one, e.g. a Vercel preview + the production domain) — local dev
+// origins (any localhost port) are always allowed alongside them.
+const allowedOrigins = (process.env.FRONTEND_URL || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+
 app.use(cors({ // app.use(...) คือการเพิ่ม middleware - บอก express ว่าใช้ cor middleware กับทุก req
   origin: (origin, cb) => {  //กำหนด function ตรวจสอบ origin
-    if (!origin || /^http:\/\/localhost:\d+$/.test(origin)) cb(null, true); // ถ้าไม่มี origin หรือ เป็น localhost ตามด้วยเลขอะไรก็ได้ - ถือว่าอนุญาต = cb(null , true)
+    if (!origin || /^http:\/\/localhost:\d+$/.test(origin) || allowedOrigins.includes(origin)) cb(null, true);
     else cb(new Error('Not allowed by CORS'));
   },
   credentials: true,
