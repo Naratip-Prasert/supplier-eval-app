@@ -9,6 +9,7 @@ import ProfilePage        from "./pages/ProfilePage";
 import HistoryPage        from "./pages/HistoryPage";
 import AdminPage          from "./pages/AdminPage";
 import TasksPage          from "./pages/TasksPage";
+import UploadHistoryPage  from "./pages/UploadHistoryPage";
 import SupervisorPage     from "./pages/SupervisorPage";
 import LoginPage          from "./pages/LoginPage";
 import RegisterPage       from "./pages/RegisterPage";
@@ -235,6 +236,16 @@ export default function App() {
       <TasksPage
         authUser={user}
         onBack={() => setPage("portal")}
+        onUploadHistory={() => setPage("uploadHistory")}
+      />
+    );
+  }
+
+  if (page === "uploadHistory") {
+    return (
+      <UploadHistoryPage
+        authUser={user}
+        onBack={() => setPage("tasks")}
       />
     );
   }

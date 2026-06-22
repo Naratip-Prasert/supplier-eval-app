@@ -5,6 +5,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useModal } from "../components";
 import { authFetch } from "../utils/api";
+import { isOverdue } from "../utils/date";
 import {
   Info, Loader2, AlertCircle, User, LogOut,
   ChevronDown, ClipboardList, Search, CheckCircle2,
@@ -371,7 +372,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {myTasks.map(t => {
                 const due       = new Date(t.dueDate);
-                const overdue   = t.status === "overdue" || (due < new Date());
+                const overdue   = t.status === "overdue" || isOverdue(t.dueDate);
                 const isReturned = t.sessionStatus === "returned";
                 return (
                   <div key={t.taskId} style={{

@@ -606,6 +606,92 @@ router.delete('/sessions/:sessionId', async (req, res) => {
   }
 });
 
+// ── POST /api/admin/tasks/remind-all ─────────────────────────
+// Bulk-send reminder emails. With no body, targets every active
+// (non-completed) task with an assigned email. Pass `taskIds` to
+// scope it to a specific filtered/visible set instead.
+router.post('/tasks/remind-all', async (req, res) => {
+  const { taskIds } = req.body || {};
+  try {
+    const params = [];
+    let where = `et.status != 'completed' AND et.assigned_email IS NOT NULL`;
+    if (Array.isArray(taskIds) && taskIds.length > 0) {
+      params.push(taskIds);
+      where += ` AND et.id = ANY($${params.length}::uuid[])`;
+    }
+
+    const taskResult = await pool.query(`
+      SELECT et.*, s.supplier_name, s.vendor_code
+        FROM evaluation_tasks et
+        JOIN suppliers s ON s.id = et.supplier_id
+       WHERE ${where}
+    `, params);
+
+    const { sendReminderEmail } = require('../utils/emailService');
+    let sent = 0, failed = 0;
+    for (const task of taskResult.rows) {
+      try {
+        await sendReminderEmail(task, { supplier_name: task.supplier_name, vendor_code: task.vendor_code });
+        await pool.query(`UPDATE evaluation_tasks SET reminder_sent_at = NOW() WHERE id = $1`, [task.id]);
+        sent++;
+      } catch (e) {
+        failed++;
+        console.warn('[admin remind-all] failed for task', task.id, e.message);
+      }
+    }
+
+    console.log(`[admin] remind-all: ${sent} ส่งสำเร็จ, ${failed} ล้มเหลว โดย ${req.user.empId}`);
+    res.json({ message: 'ส่ง reminder ทั้งหมดสำเร็จ', sent, failed, total: taskResult.rows.length });
+  } catch (err) {
+    console.error('POST /api/admin/tasks/remind-all error:', err);
+    res.status(500).json({ message: 'ส่ง reminder ทั้งหมดไม่สำเร็จ', error: err.message });
+  }
+});
+
+// ── POST /api/admin/sessions/bulk-delete ──────────────────────
+// Same guard as DELETE /sessions/:id, applied to many sessions at
+// once. Sessions already past pending/in_progress (i.e. completed
+// or in review) are skipped rather than erroring the whole batch,
+// so a mixed selection still deletes what it safely can.
+router.post('/sessions/bulk-delete', async (req, res) => {
+  const { sessionIds } = req.body || {};
+  if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
+    return res.status(400).json({ message: 'กรุณาระบุ sessionIds' });
+  }
+
+  const deleted = [];
+  const skipped = [];
+  for (const sessionId of sessionIds) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const sessionResult = await client.query(
+        `SELECT status FROM evaluation_sessions WHERE id = $1`, [sessionId]
+      );
+      if (sessionResult.rows.length === 0 || !['pending', 'in_progress'].includes(sessionResult.rows[0].status)) {
+        await client.query('ROLLBACK');
+        skipped.push(sessionId);
+        continue;
+      }
+      await client.query(`DELETE FROM evaluation_tasks WHERE session_id = $1`, [sessionId]);
+      await client.query(`DELETE FROM supervisor_reviews WHERE session_id = $1`, [sessionId]);
+      await client.query(`DELETE FROM evaluations WHERE session_id = $1`, [sessionId]);
+      await client.query(`DELETE FROM evaluation_sessions WHERE id = $1`, [sessionId]);
+      await client.query('COMMIT');
+      deleted.push(sessionId);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('bulk-delete session error:', sessionId, err.message);
+      skipped.push(sessionId);
+    } finally {
+      client.release();
+    }
+  }
+
+  console.log(`[admin] bulk delete: ${deleted.length} ลบ, ${skipped.length} ข้าม โดย ${req.user.empId}`);
+  res.json({ message: 'ดำเนินการลบหลายรายการสำเร็จ', deleted, skipped });
+});
+
 // ── GET /api/admin/batches ────────────────────────────────────
 router.get('/batches', async (req, res) => {
   try {
