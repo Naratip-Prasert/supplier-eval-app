@@ -5,13 +5,14 @@
 //  evaluation cycles). Upload history lives on its own page
 //  (UploadHistoryPage) — it's a log, not part of running tasks.
 // ============================================================
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Header, useModal } from "../components";
 import { authFetch } from "../utils/api";
 import { isOverdue } from "../utils/date";
 import {
   ArrowLeft, RefreshCw, AlertCircle, Search, Upload, Send, Pencil, Trash2, X, Check,
   ChevronLeft, ChevronRight, ArrowDownUp, MailCheck, Square, CheckSquare, Lock, History, CalendarRange,
+  SlidersHorizontal,
 } from "lucide-react";
 import AdminUploadModal from "./AdminUploadModal";
 import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter } from "../utils/dateFilter";
@@ -54,6 +55,8 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
   const [bulkDeleting,    setBulkDeleting]    = useState(false);
   const [selected,        setSelected]        = useState(new Set());
   const [employees,       setEmployees]       = useState([]);
+  const [filterOpen,      setFilterOpen]      = useState(false);
+  const filterPanelRef = useRef(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -84,6 +87,16 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
 
   // Filters/tab changes invalidate the current page + selection
   useEffect(() => { setPage(1); setSelected(new Set()); }, [mainTab, statusFilter, typeFilter, search, dateFrom, dateTo, dateFilter, sortDir]);
+
+  // Close the filter popover when clicking outside of it
+  useEffect(() => {
+    if (!filterOpen) return;
+    function onClickOutside(e) {
+      if (filterPanelRef.current && !filterPanelRef.current.contains(e.target)) setFilterOpen(false);
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [filterOpen]);
 
   async function handleRemind(taskId, supplierName) {
     const ok = await showConfirm(`ส่งอีเมล Reminder ไปยังผู้รับผิดชอบของ "${supplierName}" ใช่ไหม?`, "ยืนยันส่ง Reminder");
@@ -306,6 +319,21 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
 
   function clearDateFilter() { setDateFrom(""); setDateTo(""); }
 
+  const activeFilterCount = [
+    statusFilter !== "all",
+    typeFilter !== "all",
+    !!dateFrom || !!dateTo,
+    !!dateFilter.from || !!dateFilter.to || (dateFilter.preset && dateFilter.preset !== "all"),
+  ].filter(Boolean).length;
+
+  function resetAllFilters() {
+    setStatusFilter("all");
+    setTypeFilter("all");
+    setDateFrom("");
+    setDateTo("");
+    setDateFilter(DEFAULT_DATE_FILTER);
+  }
+
   const content = (
     <>
         {!embedded && (
@@ -431,8 +459,8 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
           ))}
         </div>
 
-        {/* Filters */}
-        <div style={{ display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+        {/* Search + filter trigger */}
+        <div style={{ display: "flex", gap: 10, marginBottom: 14, position: "relative" }}>
           <div style={{ position: "relative", flex: 1, minWidth: 200 }}>
             <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#aaa" }} />
             <input
@@ -441,57 +469,118 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
               style={{ width: "100%", paddingLeft: 32, padding: "8px 10px 8px 32px", border: "1px solid #e0e0e0", borderRadius: 7, fontFamily: "Sarabun, sans-serif", fontSize: 13, boxSizing: "border-box" }}
             />
           </div>
-          {mainTab === "active" && (
-            <div style={{ display: "flex", gap: 6 }}>
-              {[["all","ทั้งหมด"],["pending","รอประเมิน"],["overdue","เกินกำหนด"]].map(([v, l]) => (
-                <button key={v} onClick={() => setStatusFilter(v)} style={{ padding: "6px 14px", borderRadius: 20, border: statusFilter === v ? "2px solid #1b5e20" : "1px solid #ddd", background: statusFilter === v ? "#e8f5e9" : "#fff", color: statusFilter === v ? "#1b5e20" : "#555", fontFamily: "Sarabun, sans-serif", fontSize: 12, cursor: "pointer", fontWeight: statusFilter === v ? 700 : 400 }}>
-                  {l}
+
+          <button
+            onClick={() => setFilterOpen(o => !o)}
+            style={{
+              position: "relative", display: "flex", alignItems: "center", gap: 6,
+              padding: "8px 14px", borderRadius: 7,
+              border: filterOpen ? "1px solid #1b5e20" : "1px solid #e0e0e0",
+              background: filterOpen ? "#e8f5e9" : "#fff",
+              color: filterOpen ? "#1b5e20" : "#555",
+              fontFamily: "Sarabun, sans-serif", fontSize: 13, fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            <SlidersHorizontal size={14} /> ตัวกรอง
+            {activeFilterCount > 0 && (
+              <span style={{
+                position: "absolute", top: -6, right: -6, background: "#c62828", color: "#fff",
+                borderRadius: "50%", width: 18, height: 18, fontSize: 10, fontWeight: 700,
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
+
+          {filterOpen && (
+            <div
+              ref={filterPanelRef}
+              style={{
+                position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 30,
+                background: "#fff", borderRadius: 12, border: "1px solid #e0e0e0",
+                boxShadow: "0 10px 32px rgba(0,0,0,0.14)", padding: 18,
+                width: 380, maxWidth: "92vw", display: "flex", flexDirection: "column", gap: 16,
+              }}
+            >
+              {mainTab === "active" && (
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>สถานะงาน</div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {[["all","ทั้งหมด"],["pending","รอประเมิน"],["overdue","เกินกำหนด"]].map(([v, l]) => (
+                      <button key={v} onClick={() => setStatusFilter(v)} style={{ padding: "6px 14px", borderRadius: 20, border: statusFilter === v ? "2px solid #1b5e20" : "1px solid #ddd", background: statusFilter === v ? "#e8f5e9" : "#fff", color: statusFilter === v ? "#1b5e20" : "#555", fontFamily: "Sarabun, sans-serif", fontSize: 12, cursor: "pointer", fontWeight: statusFilter === v ? 700 : 400 }}>
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>ประเภทการประเมิน</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {[["all","ทั้งหมด"],["pre_eval","Pre-Eval"],["post_eval","Post-Eval"],["half_year","Half-Year"],["yearly","Yearly"]].map(([v, l]) => (
+                    <button key={v} onClick={() => setTypeFilter(v)} style={{ padding: "6px 14px", borderRadius: 20, border: typeFilter === v ? "2px solid #00695c" : "1px solid #ddd", background: typeFilter === v ? "#e0f2f1" : "#fff", color: typeFilter === v ? "#00695c" : "#555", fontFamily: "Sarabun, sans-serif", fontSize: 12, cursor: "pointer", fontWeight: typeFilter === v ? 700 : 400 }}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}>
+                  <CalendarRange size={13} /> ช่วงวันครบกำหนด
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <input
+                    type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                    style={{ fontSize: 12, padding: "5px 8px", border: "1px solid #e0e0e0", borderRadius: 6, fontFamily: "Sarabun, sans-serif" }}
+                  />
+                  <span style={{ fontSize: 12, color: "#aaa" }}>ถึง</span>
+                  <input
+                    type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                    style={{ fontSize: 12, padding: "5px 8px", border: "1px solid #e0e0e0", borderRadius: 6, fontFamily: "Sarabun, sans-serif" }}
+                  />
+                  {(dateFrom || dateTo) && (
+                    <button onClick={clearDateFilter} style={{ display: "flex", alignItems: "center", gap: 4, background: "#f5f5f5", border: "1px solid #ddd", borderRadius: 6, padding: "5px 10px", cursor: "pointer", fontSize: 11, color: "#666", fontFamily: "Sarabun, sans-serif" }}>
+                      <X size={11} /> ล้าง
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>วันที่อัพโหลด</div>
+                <DateFilterBar filter={dateFilter} onChange={setDateFilter} label="วันที่อัพโหลด" />
+              </div>
+
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>เรียงลำดับ</div>
+                <button
+                  onClick={() => setSortDir(d => d === "asc" ? "desc" : "asc")}
+                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 20, border: "1px solid #ddd", background: "#fff", color: "#555", fontFamily: "Sarabun, sans-serif", fontSize: 12, cursor: "pointer" }}
+                >
+                  <ArrowDownUp size={13} /> {SORT_LABEL[sortDir]}
                 </button>
-              ))}
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #eee", paddingTop: 12 }}>
+                <button
+                  onClick={resetAllFilters}
+                  disabled={activeFilterCount === 0}
+                  style={{ fontSize: 12, color: activeFilterCount === 0 ? "#bbb" : "#c62828", background: "none", border: "none", cursor: activeFilterCount === 0 ? "default" : "pointer", fontFamily: "Sarabun, sans-serif", fontWeight: 600 }}
+                >
+                  ล้างตัวกรองทั้งหมด
+                </button>
+                <button
+                  onClick={() => setFilterOpen(false)}
+                  style={{ padding: "6px 16px", borderRadius: 7, border: "none", background: "#1b5e20", color: "#fff", fontFamily: "Sarabun, sans-serif", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+                >
+                  เสร็จสิ้น
+                </button>
+              </div>
             </div>
           )}
-          <button
-            onClick={() => setSortDir(d => d === "asc" ? "desc" : "asc")}
-            title="สลับการเรียงลำดับ"
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 20, border: "1px solid #ddd", background: "#fff", color: "#555", fontFamily: "Sarabun, sans-serif", fontSize: 12, cursor: "pointer" }}
-          >
-            <ArrowDownUp size={13} /> {SORT_LABEL[sortDir]}
-          </button>
-        </div>
-
-        {/* Date range filter (by due date) */}
-        <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
-          <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#666", fontWeight: 600 }}>
-            <CalendarRange size={14} /> ช่วงวันครบกำหนด:
-          </span>
-          <input
-            type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-            style={{ fontSize: 12, padding: "5px 8px", border: "1px solid #e0e0e0", borderRadius: 6, fontFamily: "Sarabun, sans-serif" }}
-          />
-          <span style={{ fontSize: 12, color: "#aaa" }}>ถึง</span>
-          <input
-            type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-            style={{ fontSize: 12, padding: "5px 8px", border: "1px solid #e0e0e0", borderRadius: 6, fontFamily: "Sarabun, sans-serif" }}
-          />
-          {(dateFrom || dateTo) && (
-            <button onClick={clearDateFilter} style={{ display: "flex", alignItems: "center", gap: 4, background: "#f5f5f5", border: "1px solid #ddd", borderRadius: 6, padding: "5px 10px", cursor: "pointer", fontSize: 11, color: "#666", fontFamily: "Sarabun, sans-serif" }}>
-              <X size={11} /> ล้างวันที่
-            </button>
-          )}
-        </div>
-
-        {/* Eval type filter */}
-        <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-          {[["all","ทั้งหมด"],["pre_eval","Pre-Eval"],["post_eval","Post-Eval"],["half_year","Half-Year"],["yearly","Yearly"]].map(([v, l]) => (
-            <button key={v} onClick={() => setTypeFilter(v)} style={{ padding: "6px 14px", borderRadius: 20, border: typeFilter === v ? "2px solid #00695c" : "1px solid #ddd", background: typeFilter === v ? "#e0f2f1" : "#fff", color: typeFilter === v ? "#00695c" : "#555", fontFamily: "Sarabun, sans-serif", fontSize: 12, cursor: "pointer", fontWeight: typeFilter === v ? 700 : 400 }}>
-              {l}
-            </button>
-          ))}
-        </div>
-
-        {/* Upload date filter */}
-        <div style={{ marginBottom: 14 }}>
-          <DateFilterBar filter={dateFilter} onChange={setDateFilter} label="วันที่อัพโหลด" />
         </div>
 
         {/* Bulk action bar — only meaningful for not-yet-completed tasks */}

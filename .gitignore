@@ -42,3 +42,4 @@ server/node_modules
 
 # Python script for ppt generation (เฉพาะไฟล์ make_ppt.py)
 make_ppt.py
+.vercel

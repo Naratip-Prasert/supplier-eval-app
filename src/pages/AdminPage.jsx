@@ -1,7 +1,7 @@
 // ============================================================
 //  pages/AdminPage.jsx  —  Admin management portal
 // ============================================================
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Header } from "../components";
 import { authFetch } from "../utils/api";
 import TasksPage from "./TasksPage";
@@ -9,7 +9,7 @@ import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter } from "../utils/
 import {
   Users, Package, ClipboardList, Upload,
   ArrowLeft, Search, RefreshCw, Plus, X, Check,
-  AlertCircle,
+  AlertCircle, SlidersHorizontal,
 } from "lucide-react";
 
 // ── Constants ─────────────────────────────────────────────────
@@ -631,6 +631,17 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
   const [statusFilter,      setStatusFilter]      = useState("ALL");
   const [dateFilter,        setDateFilter]        = useState(DEFAULT_DATE_FILTER);
   const [selectedSessionId, setSelectedSessionId] = useState(initialSessionId ?? null);
+  const [filterOpen,        setFilterOpen]        = useState(false);
+  const filterPanelRef = useRef(null);
+
+  useEffect(() => {
+    if (!filterOpen) return;
+    function onClickOutside(e) {
+      if (filterPanelRef.current && !filterPanelRef.current.contains(e.target)) setFilterOpen(false);
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [filterOpen]);
 
   if (selectedSessionId) {
     return (
@@ -653,9 +664,19 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
     return matchSearch && matchStatus && matchDate;
   });
 
+  const activeFilterCount = [
+    statusFilter !== "ALL",
+    !!dateFilter.from || !!dateFilter.to || (dateFilter.preset && dateFilter.preset !== "all"),
+  ].filter(Boolean).length;
+
+  function resetAllFilters() {
+    setStatusFilter("ALL");
+    setDateFilter(DEFAULT_DATE_FILTER);
+  }
+
   return (
     <div>
-      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 10, marginBottom: 16, position: "relative" }}>
         <div style={{
           display: "flex", alignItems: "center", gap: 8,
           background: "#fff", border: "1px solid #e0e0e0", borderRadius: 8,
@@ -669,31 +690,87 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
             style={{ border: "none", outline: "none", fontSize: 13, flex: 1, fontFamily: "Sarabun, sans-serif" }}
           />
         </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          {[
-            { v: "ALL",         l: "ทั้งหมด"    },
-            { v: "pending",     l: "รอประเมิน"  },
-            { v: "in_progress", l: "กำลังประเมิน" },
-            { v: "completed",   l: "เสร็จสิ้น"  },
-          ].map(({ v, l }) => (
-            <button
-              key={v}
-              onClick={() => setStatusFilter(v)}
-              style={{
-                padding: "8px 12px", borderRadius: 8, border: "1px solid #e0e0e0",
-                cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "Sarabun, sans-serif",
-                background: statusFilter === v ? "#1b5e20" : "#fff",
-                color: statusFilter === v ? "#fff" : "#666",
-              }}
-            >
-              {l}
-            </button>
-          ))}
-        </div>
-      </div>
 
-      <div style={{ marginBottom: 14 }}>
-        <DateFilterBar filter={dateFilter} onChange={setDateFilter} label="วันที่เสร็จสิ้น" />
+        <button
+          onClick={() => setFilterOpen(o => !o)}
+          style={{
+            position: "relative", display: "flex", alignItems: "center", gap: 6,
+            padding: "8px 14px", borderRadius: 8,
+            border: filterOpen ? "1px solid #6a1b9a" : "1px solid #e0e0e0",
+            background: filterOpen ? "#f3e8fd" : "#fff",
+            color: filterOpen ? "#6a1b9a" : "#555",
+            fontFamily: "Sarabun, sans-serif", fontSize: 13, fontWeight: 600, cursor: "pointer",
+          }}
+        >
+          <SlidersHorizontal size={14} /> ตัวกรอง
+          {activeFilterCount > 0 && (
+            <span style={{
+              position: "absolute", top: -6, right: -6, background: "#c62828", color: "#fff",
+              borderRadius: "50%", width: 18, height: 18, fontSize: 10, fontWeight: 700,
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              {activeFilterCount}
+            </span>
+          )}
+        </button>
+
+        {filterOpen && (
+          <div
+            ref={filterPanelRef}
+            style={{
+              position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 30,
+              background: "#fff", borderRadius: 12, border: "1px solid #e0e0e0",
+              boxShadow: "0 10px 32px rgba(0,0,0,0.14)", padding: 18,
+              width: 360, maxWidth: "92vw", display: "flex", flexDirection: "column", gap: 16,
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>สถานะ</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {[
+                  { v: "ALL",         l: "ทั้งหมด"    },
+                  { v: "pending",     l: "รอประเมิน"  },
+                  { v: "in_progress", l: "กำลังประเมิน" },
+                  { v: "completed",   l: "เสร็จสิ้น"  },
+                ].map(({ v, l }) => (
+                  <button
+                    key={v}
+                    onClick={() => setStatusFilter(v)}
+                    style={{
+                      padding: "6px 14px", borderRadius: 20, border: statusFilter === v ? "2px solid #1b5e20" : "1px solid #ddd",
+                      cursor: "pointer", fontSize: 12, fontWeight: statusFilter === v ? 700 : 400, fontFamily: "Sarabun, sans-serif",
+                      background: statusFilter === v ? "#e8f5e9" : "#fff",
+                      color: statusFilter === v ? "#1b5e20" : "#555",
+                    }}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>วันที่เสร็จสิ้น</div>
+              <DateFilterBar filter={dateFilter} onChange={setDateFilter} label="วันที่เสร็จสิ้น" />
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #eee", paddingTop: 12 }}>
+              <button
+                onClick={resetAllFilters}
+                disabled={activeFilterCount === 0}
+                style={{ fontSize: 12, color: activeFilterCount === 0 ? "#bbb" : "#c62828", background: "none", border: "none", cursor: activeFilterCount === 0 ? "default" : "pointer", fontFamily: "Sarabun, sans-serif", fontWeight: 600 }}
+              >
+                ล้างตัวกรองทั้งหมด
+              </button>
+              <button
+                onClick={() => setFilterOpen(false)}
+                style={{ padding: "6px 16px", borderRadius: 7, border: "none", background: "#6a1b9a", color: "#fff", fontFamily: "Sarabun, sans-serif", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+              >
+                เสร็จสิ้น
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div style={{ fontSize: 12, color: "#aaa", marginBottom: 10 }}>แสดง {filtered.length} จาก {sessions.length} รายการ</div>
