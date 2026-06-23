@@ -1,9 +1,9 @@
 // ============================================================
-//  components/index.js
-//  Shared UI components ใช้ร่วมกันทุกหน้า
+//  components/index.jsx — Shared UI components
 // ============================================================
 
 import { useState, useEffect, useRef } from "react";
+import { Eye, EyeOff, AlertTriangle, HelpCircle } from "lucide-react";
 
 // ------ Clock -----------------------------------------------
 export function Clock() {
@@ -22,10 +22,7 @@ export function Clock() {
 }
 
 // ------ Header ----------------------------------------------
-// subtitle = "BJC-10101|ฝ่ายวิศวกรรม|JB-022" (optional)
-// backLabel / onBack = ปุ่มกลับ (optional)
-// title = override ชื่อ title ขวา (optional)
-export function Header({ subtitle, backLabel, onBack, titleOverride }) {
+export function Header({ subtitle, backLabel, onBack, titleOverride, user, onLogout, profilePic }) {
   return (
     <div style={{
       background: "#1a6b1a", color: "#fff", padding: "10px 20px",
@@ -57,17 +54,93 @@ export function Header({ subtitle, backLabel, onBack, titleOverride }) {
           )}
         </div>
       </div>
-      <Clock />
+      <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
+        {user && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{
+              width: 34, height: 34, borderRadius: "50%",
+              border: "2px solid rgba(255,255,255,0.6)",
+              overflow: "hidden", flexShrink: 0,
+              background: "rgba(255,255,255,0.2)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 12, fontWeight: 700, color: "#fff",
+            }}>
+              {profilePic
+                ? <img src={profilePic} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                : (user.fullName || "?").split(" ").map((w) => w[0] ?? "").join("").slice(0, 2).toUpperCase()
+              }
+            </div>
+            <div style={{ textAlign: "right", lineHeight: 1.3 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{user.fullName}</div>
+              <div style={{ fontSize: 11, color: "#a5d6a7" }}>{user.role} · {user.department}</div>
+            </div>
+          </div>
+        )}
+        <Clock />
+        {onLogout && (
+          <button
+            onClick={onLogout}
+            style={{
+              background: "rgba(255,255,255,0.15)", color: "#fff",
+              border: "1px solid rgba(255,255,255,0.35)", borderRadius: 6,
+              padding: "5px 14px", fontSize: 12, cursor: "pointer",
+              fontFamily: "monospace", whiteSpace: "nowrap",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.28)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.15)")}
+          >
+            ออกจากระบบ
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ------ PasswordInput ---------------------------------------
+export function PasswordInput({ label, required, value, onChange, placeholder, error }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div style={{ flex: 1, minWidth: 0 }}>
+      {label && (
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#222" }}>
+          {label}{required && <span style={{ color: "#e53935" }}>*</span>}
+        </div>
+      )}
+      <div style={{ position: "relative" }}>
+        <input
+          type={show ? "text" : "password"}
+          value={value}
+          onChange={(e) => onChange && onChange(e.target.value)}
+          placeholder={placeholder || ""}
+          style={{
+            width: "100%", boxSizing: "border-box",
+            background: "#d4f5c8", border: `1.5px solid ${error ? "#e53935" : "#888"}`,
+            borderRadius: 8, padding: "8px 44px 8px 14px", fontSize: 14, outline: "none",
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => setShow((s) => !s)}
+          style={{
+            position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
+            background: "none", border: "none", cursor: "pointer",
+            fontSize: 16, color: "#666", lineHeight: 1,
+          }}
+          tabIndex={-1}
+        >
+          {show ? <EyeOff size={16} /> : <Eye size={16} />}
+        </button>
+      </div>
+      {error && <div style={{ color: "#e53935", fontSize: 11, marginTop: 3 }}>{error}</div>}
     </div>
   );
 }
 
 // ------ CustomSelect ----------------------------------------
-// สไตล์ dropdown สีเขียวอ่อน ตาม design
 export function CustomSelect({ label, required, options, value, onChange, disabled }) {
   const [open, setOpen] = useState(false);
 
-  // ปิด dropdown เมื่อคลิกนอก
   useEffect(() => {
     if (!open) return;
     const handler = () => setOpen(false);
@@ -79,8 +152,7 @@ export function CustomSelect({ label, required, options, value, onChange, disabl
     <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
       {label && (
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#222" }}>
-          {label}
-          {required && <span style={{ color: "#e53935" }}>*</span>}
+          {label}{required && <span style={{ color: "#e53935" }}>*</span>}
         </div>
       )}
       <div
@@ -91,8 +163,7 @@ export function CustomSelect({ label, required, options, value, onChange, disabl
           border: "1.5px solid #333", borderRadius: 8,
           padding: "8px 12px", cursor: disabled ? "default" : "pointer",
           fontSize: 14, color: value ? "#111" : "#666",
-          opacity: disabled ? 0.65 : 1,
-          userSelect: "none",
+          opacity: disabled ? 0.65 : 1, userSelect: "none",
         }}
       >
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -108,8 +179,7 @@ export function CustomSelect({ label, required, options, value, onChange, disabl
             position: "absolute", top: "100%", left: 0, right: 0, zIndex: 9999,
             background: "#d4f5c8", border: "1.5px solid #333",
             borderTop: "none", borderRadius: "0 0 8px 8px",
-            boxShadow: "0 4px 16px rgba(0,0,0,0.18)",
-            maxHeight: 240, overflowY: "auto",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.18)", maxHeight: 240, overflowY: "auto",
           }}
         >
           {options.map((opt) => (
@@ -134,29 +204,29 @@ export function CustomSelect({ label, required, options, value, onChange, disabl
 }
 
 // ------ GreenInput ------------------------------------------
-// Input field สไตล์เดียวกับ design (พื้นหลังเขียวอ่อน)
-export function GreenInput({ label, required, value, onChange, placeholder, disabled }) {
+export function GreenInput({ label, required, value, onChange, onBlur, placeholder, disabled, error }) {
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
       {label && (
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#222" }}>
-          {label}
-          {required && <span style={{ color: "#e53935" }}>*</span>}
+          {label}{required && <span style={{ color: "#e53935" }}>*</span>}
         </div>
       )}
       <input
         value={value}
         onChange={(e) => onChange && onChange(e.target.value)}
+        onBlur={onBlur}
         placeholder={placeholder || ""}
         disabled={disabled}
         style={{
           width: "100%", boxSizing: "border-box",
           background: disabled ? "#f0f0f0" : "#d4f5c8",
-          border: "1.5px solid #888", borderRadius: 8,
-          padding: "8px 14px", fontSize: 14, outline: "none",
+          border: `1.5px solid ${error ? "#e53935" : "#888"}`,
+          borderRadius: 8, padding: "8px 14px", fontSize: 14, outline: "none",
           opacity: disabled ? 0.65 : 1,
         }}
       />
+      {error && <div style={{ color: "#e53935", fontSize: 11, marginTop: 3 }}>{error}</div>}
     </div>
   );
 }
@@ -183,7 +253,7 @@ const MODAL_ANIM = `
 function AppModal({ type, title, message, onClose }) {
   const isWarn   = type === "alert";
   const headerBg = isWarn ? "#e65100" : "#1a6b1a";
-  const icon     = isWarn ? "⚠️" : "💬";
+  const Icon     = isWarn ? AlertTriangle : HelpCircle;
   const okColor  = isWarn ? "#e65100" : "#2e7d32";
   const okHover  = isWarn ? "#bf360c" : "#1b5e20";
 
@@ -218,7 +288,7 @@ function AppModal({ type, title, message, onClose }) {
             background: headerBg, padding: "14px 20px",
             display: "flex", alignItems: "center", gap: 12, color: "#fff",
           }}>
-            <span style={{ fontSize: 26, lineHeight: 1, flexShrink: 0 }}>{icon}</span>
+            <Icon size={26} style={{ flexShrink: 0 }} />
             <span style={{ fontWeight: 700, fontSize: 16, fontFamily: "Sarabun, sans-serif" }}>{title}</span>
           </div>
 
@@ -306,16 +376,19 @@ export function useModal() {
 }
 
 // ------ GreenButton -----------------------------------------
-export function GreenButton({ children, onClick, color = "#2e7d32", fullWidth = false, style = {} }) {
+export function GreenButton({ children, onClick, color = "#2e7d32", fullWidth = false, disabled = false, style = {} }) {
   return (
     <button
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
       style={{
-        background: color, color: "#fff", border: "none",
-        borderRadius: 8, padding: "13px 36px",
-        fontSize: 15, fontWeight: 700, cursor: "pointer",
+        background: disabled ? "#9e9e9e" : color,
+        color: "#fff", border: "none", borderRadius: 8,
+        padding: "13px 36px", fontSize: 15, fontWeight: 700,
+        cursor: disabled ? "not-allowed" : "pointer",
         fontFamily: "monospace", letterSpacing: 1,
         width: fullWidth ? "100%" : undefined,
+        opacity: disabled ? 0.7 : 1,
         ...style,
       }}
     >
