@@ -135,12 +135,24 @@ export default function PortalPage({
     <div style={{ minHeight: "100vh", background: "#f0f4f0", fontFamily: "Sarabun, sans-serif" }}>
 
       {/* ── Header ── */}
-      <Header titleOverride="Supplier Evaluation System" />
+      <Header />
 
       <div style={{ maxWidth: 940, margin: "0 auto", padding: "20px 20px 48px" }}>
 
         {/* ── Welcome card ── */}
-        <div style={{
+        {/* Below ~600px, the avatar+name+buttons 3-column row has no room
+            left for the name (Thai script has no spaces, so a squeezed
+            column wraps name text syllable-by-syllable into a tall,
+            unreadable stack) — switch to a stacked, centered layout. */}
+        <style>{`
+          @media (max-width: 600px) {
+            .portal-hero { flex-direction: column !important; text-align: center; padding: 24px 20px !important; }
+            .portal-hero-text { text-align: center !important; }
+            .portal-hero-badges { justify-content: center !important; }
+            .portal-hero-actions { flex-direction: row !important; width: 100%; justify-content: center; }
+          }
+        `}</style>
+        <div className="portal-hero" style={{
           background: "linear-gradient(135deg, #1a6b1a 0%, #2e7d32 60%, #388e3c 100%)",
           borderRadius: 18, padding: "28px 32px", marginBottom: 32,
           boxShadow: "0 6px 28px rgba(26,107,26,0.28)",
@@ -173,14 +185,14 @@ export default function PortalPage({
               : initials}
           </div>
 
-          <div style={{ flex: 1, position: "relative", zIndex: 1 }}>
+          <div className="portal-hero-text" style={{ flex: 1, position: "relative", zIndex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", marginBottom: 4 }}>
               ยินดีต้อนรับเข้าสู่ระบบ
             </div>
             <div style={{ fontSize: 24, fontWeight: 800, color: "#fff", letterSpacing: 0.3 }}>
               {authUser?.fullName}
             </div>
-            <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div className="portal-hero-badges" style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
               <span style={{
                 background: badge.bg, color: badge.color,
                 borderRadius: 20, padding: "3px 12px",
@@ -206,7 +218,7 @@ export default function PortalPage({
             </div>
           </div>
 
-          <div style={{
+          <div className="portal-hero-actions" style={{
             display: "flex", flexDirection: "column", gap: 8,
             flexShrink: 0, position: "relative", zIndex: 1,
           }}>
@@ -304,7 +316,7 @@ export default function PortalPage({
           marginTop: 40, textAlign: "center",
           fontSize: 12, color: "#aaa",
         }}>
-          Supplier Evaluation System · {new Date().getFullYear()}
+          SPES · {new Date().getFullYear()}
         </div>
       </div>
     </div>

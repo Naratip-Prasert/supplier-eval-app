@@ -45,6 +45,18 @@ app.get("/", (req, res) => {
   res.json({ message: "Supplier Eval API is running" });
 });
 
+// Login has no other brute-force protection (no lockout, no CAPTCHA) —
+// cap attempts per IP so password-guessing can't be scripted unbounded.
+const { rateLimit } = require('express-rate-limit');
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'พยายามเข้าสู่ระบบบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่' },
+});
+app.use('/api/auth/login', loginLimiter);
+
 app.use('/api/auth',        require('./routes/auth'));          // public
 app.use('/api/evaluations', requireAuth, require('./routes/evaluations'));
 app.use('/api/employees',   requireAuth, require('./routes/employees'));
@@ -359,6 +371,14 @@ pool.connect()
       CREATE INDEX IF NOT EXISTS idx_supervisor_reviews_status  ON supervisor_reviews(status);
     `).catch(err => console.warn('new tables migration warning:', err.message));
 
+    // notified_at: lets the daily cron's notifySupervisors job use a
+    // sent-flag (like reminder_sent_at/overdue_sent_at) instead of a
+    // "created today" date window, so a missed cron run doesn't
+    // permanently skip notifying supervisors about a pending review.
+    await client.query(`
+      ALTER TABLE supervisor_reviews ADD COLUMN IF NOT EXISTS notified_at TIMESTAMPTZ
+    `).catch(err => console.warn('supervisor_reviews notified_at migration warning:', err.message));
+
     // evaluation_tasks_role_check: sole source of truth for the value list
     // ('BU' was retired — see the note near the top of this function).
     await client.query(`
@@ -385,20 +405,26 @@ pool.connect()
       .then(() => console.log('✅ evaluation_criteria seeded from src/constants.js'))
       .catch(err => console.warn('criteria seed warning:', err.message));
 
-    // Create default ADMIN account if none exists
+    // Create default ADMIN account if none exists. The bootstrap password
+    // is randomly generated (not a fixed, guessable default like the old
+    // 'Admin@1234') — there's now no replacement self-service flow to
+    // change it (register/forgot-password were removed), so whoever reads
+    // this log line should change it from an ADMIN-side flow once one
+    // exists, or treat this account as already provisioned correctly.
     const bcrypt = require('bcrypt');
     const adminExists = await client.query(
       `SELECT employee_id FROM employees WHERE role = 'ADMIN' LIMIT 1`
     );
     if (adminExists.rows.length === 0) {
-      const hash = await bcrypt.hash('Admin@1234', 10);
+      const tempPassword = require('crypto').randomBytes(9).toString('base64').replace(/[+/=]/g, '');
+      const hash = await bcrypt.hash(tempPassword, 10);
       await client.query(
         `INSERT INTO employees (employee_id, full_name, email, role, password_hash, is_active)
          VALUES ('ADMIN-001', 'System Administrator', 'admin@system.local', 'ADMIN', $1, TRUE)
          ON CONFLICT (employee_id) DO NOTHING`,
         [hash]
       );
-      console.log('✅ Admin account created  →  ID: ADMIN-001  |  Password: Admin@1234');
+      console.log(`✅ Admin account created  →  ID: ADMIN-001  |  Password: ${tempPassword}  (save this now — it is not recoverable, there is no self-service reset)`);
     }
 
     client.release();

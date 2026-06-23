@@ -248,7 +248,7 @@ export default function SupervisorPage({ authUser, onBack }) {
         </>
       )}
 
-      <Header titleOverride="Supplier Evaluation System" />
+      <Header />
       <div style={{ maxWidth: 1000, margin: "0 auto", padding: "24px 20px 56px" }}>
 
         {/* Breadcrumb */}

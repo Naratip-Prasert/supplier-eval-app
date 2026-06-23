@@ -59,9 +59,15 @@ async function computeScoreAndGrade(client, scoresInput, criteriaMap) {
 //   }
 // }
 router.post('/', async (req, res) => {
-  const { employeeId, vendorCode, evalType, period, productType, scores, sessionId: taskSessionId } = req.body;
+  const { vendorCode, evalType, period, productType, scores, sessionId: taskSessionId } = req.body;
 
-  const missing = missingFields(req.body, ['employeeId', 'vendorCode', 'evalType', 'period', 'productType', 'scores']);
+  // The acting employee is resolved from the verified JWT (req.user.empId),
+  // never from the request body — req.body used to carry an `employeeId`
+  // field the client could set to ANY employee code, letting one logged-in
+  // user submit (and complete/lock) another employee's evaluation task.
+  const employeeId = req.user.empId;
+
+  const missing = missingFields(req.body, ['vendorCode', 'evalType', 'period', 'productType', 'scores']);
   if (missing.length > 0) {
     return res.status(400).json({ message: 'กรุณากรอกข้อมูลให้ครบถ้วน', missing });
   }
@@ -75,7 +81,7 @@ router.post('/', async (req, res) => {
 
     // 1. Validate employee
     const empResult = await client.query(
-      `SELECT id, role FROM employees WHERE employee_id = $1 AND is_active = TRUE`,
+      `SELECT id, role FROM employees WHERE UPPER(employee_id) = UPPER($1) AND is_active = TRUE`,
       [employeeId]
     );
     if (empResult.rows.length === 0) {
@@ -223,8 +229,20 @@ router.post('/', async (req, res) => {
       console.warn(`[evaluations] รหัสเกณฑ์ไม่มีในตาราง (ข้ามการเก็บ): ${unknownCodes.join(', ')}`);
     }
 
-    // 7. Compute total score and grade on the server (ignore frontend values)
-    const { totalScore, grade } = await computeScoreAndGrade(client, scores, criteriaMap);
+    // 7. Compute total score and grade on the server (ignore frontend values).
+    // IMPORTANT: only feed in codes that exist in criteriaMap — the same set
+    // that actually gets persisted to evaluation_scores below. Previously
+    // this used the full `scores` object (including unknownCodes), so
+    // total_score could include contributions from criteria that were then
+    // silently dropped from evaluation_scores, making the locked total
+    // score permanently unreconcilable against its own per-criterion
+    // breakdown (found auditing live data: ~50% of saved evaluations had
+    // this exact mismatch).
+    const matchedScores = {};
+    for (const code of codes) {
+      if (criteriaMap[code]) matchedScores[code] = scores[code];
+    }
+    const { totalScore, grade } = await computeScoreAndGrade(client, matchedScores, criteriaMap);
 
     // 8. Mark evaluation_task as completed if task-based assignment exists
     const completedTask = await client.query(`
@@ -324,6 +342,15 @@ router.post('/', async (req, res) => {
     });
   } catch (err) {
     await client.query('ROLLBACK');
+    // 23505 = unique_violation. The SELECT-then-INSERT dup-checks above can
+    // lose a race under concurrent submissions (e.g. double-click, two
+    // tabs) — the UNIQUE(session_id, role) constraint is the real backstop,
+    // so translate its violation into the same friendly 409 the earlier
+    // check already returns, instead of a raw 500.
+    if (err.code === '23505') {
+      console.warn('[evaluations] ส่งซ้ำชนกัน (unique violation):', err.detail);
+      return res.status(409).json({ message: 'คุณได้ส่งผลการประเมินสำหรับรายการนี้แล้ว' });
+    }
     console.error('POST /api/evaluations error:', err);
     res.status(500).json({ message: 'บันทึกไม่สำเร็จ', error: err.message });
   } finally {

@@ -34,7 +34,8 @@ async function sendReminderEmails() {
         JOIN suppliers s ON s.id = et.supplier_id
        WHERE et.status = 'pending'
          AND et.reminder_sent_at IS NULL
-         AND et.due_date = CURRENT_DATE + INTERVAL '7 days'
+         AND et.due_date >= CURRENT_DATE
+         AND et.due_date <= CURRENT_DATE + INTERVAL '7 days'
     `);
 
     for (const task of result.rows) {
@@ -62,7 +63,7 @@ async function sendOverdueEmails() {
         JOIN suppliers s ON s.id = et.supplier_id
        WHERE et.status = 'pending'
          AND et.overdue_sent_at IS NULL
-         AND et.due_date = CURRENT_DATE - INTERVAL '3 days'
+         AND et.due_date <= CURRENT_DATE - INTERVAL '3 days'
     `);
 
     for (const task of result.rows) {
@@ -111,7 +112,11 @@ async function sendThankyouEmails() {
 // ── 4. Notify supervisors for new pending_review sessions ─────
 async function notifySupervisors() {
   try {
-    // Find reviews that haven't notified supervisor yet
+    // Find reviews that haven't notified supervisor yet. Gated on
+    // notified_at IS NULL (a flag, like the other jobs) rather than
+    // "created today" — a date-window check ages out and permanently
+    // skips the review if the cron doesn't happen to run on the exact
+    // day it was created.
     const result = await pool.query(`
       SELECT sr.id AS "reviewId", sr.review_due AS "reviewDue",
              es.id AS "sessionId", es.eval_type AS "evalType",
@@ -121,7 +126,7 @@ async function notifySupervisors() {
         JOIN evaluation_sessions es ON es.id = sr.session_id
         JOIN suppliers s ON s.id = es.supplier_id
        WHERE sr.status = 'pending'
-         AND sr.created_at::date = CURRENT_DATE
+         AND sr.notified_at IS NULL
     `);
 
     if (result.rows.length === 0) return;
@@ -144,6 +149,7 @@ async function notifySupervisors() {
           console.warn(`[cron] supervisor notify failed for ${sup.email}:`, e.message);
         }
       }
+      await pool.query(`UPDATE supervisor_reviews SET notified_at = NOW() WHERE id = $1`, [review.reviewId]);
     }
   } catch (e) {
     console.error('[cron] notifySupervisors error:', e.message);
@@ -165,7 +171,8 @@ async function sendPostEvalInvitations() {
        WHERE et.status = 'pending'
          AND et.invitation_sent_at IS NULL
          AND es.eval_type = 'post_eval'
-         AND et.due_date = CURRENT_DATE + INTERVAL '7 days'
+         AND et.due_date >= CURRENT_DATE
+         AND et.due_date <= CURRENT_DATE + INTERVAL '7 days'
     `);
 
     const { sendInvitationEmail } = require('./emailService');
@@ -186,11 +193,51 @@ async function sendPostEvalInvitations() {
   }
 }
 
-// Add post_eval invitations to the daily run
+// ── Retry pre_eval invitations that failed at upload time ─────
+// pre_eval invitations are sent immediately on admin upload
+// (server/routes/admin.js), fire-and-forget — if that send fails (e.g.
+// transient Resend outage during a bulk upload), invitation_sent_at
+// stays NULL forever with nothing to retry it, unlike post_eval which
+// the cron above already catches. No due_date window here: a pre_eval
+// invitation should go out as soon as possible regardless of how far
+// off its due date is, so just keep retrying until it succeeds.
+async function sendPreEvalInvitations() {
+  try {
+    const result = await pool.query(`
+      SELECT et.id, et.assigned_email, et.assigned_name, et.due_date, et.role,
+             s.supplier_name, s.vendor_code
+        FROM evaluation_tasks et
+        JOIN suppliers s            ON s.id  = et.supplier_id
+        JOIN evaluation_sessions es ON es.id = et.session_id
+       WHERE et.status = 'pending'
+         AND et.invitation_sent_at IS NULL
+         AND es.eval_type = 'pre_eval'
+    `);
+
+    const { sendInvitationEmail } = require('./emailService');
+    for (const task of result.rows) {
+      try {
+        await sendInvitationEmail(
+          { ...task, eval_type_label: 'Pre-Evaluation (Supplier ใหม่)' },
+          { supplier_name: task.supplier_name, vendor_code: task.vendor_code }
+        );
+        await pool.query(`UPDATE evaluation_tasks SET invitation_sent_at = NOW() WHERE id = $1`, [task.id]);
+        console.log(`[cron] pre_eval invitation (retry) sent → ${task.assigned_email}`);
+      } catch (e) {
+        console.warn(`[cron] pre_eval invitation retry failed for task ${task.id}:`, e.message);
+      }
+    }
+  } catch (e) {
+    console.error('[cron] sendPreEvalInvitations error:', e.message);
+  }
+}
+
+// Add post_eval + pre_eval-retry invitations to the daily run
 const _origRun = runDailyEmailJobs;
 async function runDailyEmailJobsWithPostEval() {
   await _origRun();
   await sendPostEvalInvitations();
+  await sendPreEvalInvitations();
 }
 
 // Override cron schedule to include post_eval invitations

@@ -169,13 +169,28 @@ router.post('/upload/pre-post', upload.single('file'), async (req, res) => {
         dueDate = addDays(ptaDate, 90);
       }
 
+      const period = evalType === 'pre_eval' ? 'New Supplier / ผู้ขายรายใหม่' : 'Post 90 Days';
+
+      // Skip if this supplier already has an unfinished round for this exact
+      // eval_type+period — re-uploading the same file (or overlapping rows
+      // across uploads) used to silently spawn a second parallel session +
+      // task pair, letting both get evaluated independently with no warning.
+      const existingOpen = await client.query(`
+        SELECT id FROM evaluation_sessions
+         WHERE supplier_id = $1 AND eval_type = $2 AND period = $3 AND status != 'completed'
+         LIMIT 1
+      `, [supplier.id, evalType, period]);
+      if (existingOpen.rows.length > 0) {
+        summary.skipped++;
+        summary.warnings.push(`"${supplierName}" มีรอบประเมิน (${period}) ที่ยังไม่เสร็จสิ้นอยู่แล้ว — ข้ามแถวนี้เพื่อไม่สร้างงานซ้ำ`);
+        continue;
+      }
+
       // Create evaluation session
       const sessionResult = await client.query(`
         INSERT INTO evaluation_sessions (supplier_id, eval_type, period, status, initiated_by)
         VALUES ($1, $2, $3, 'pending', $4) RETURNING id
-      `, [supplier.id, evalType,
-          evalType === 'pre_eval' ? 'New Supplier / ผู้ขายรายใหม่' : 'Post 90 Days',
-          uploaderId]);
+      `, [supplier.id, evalType, period, uploaderId]);
       const sessionId = sessionResult.rows[0].id;
 
       // Match buyer (GCP) and evaluator (USER) by email
@@ -293,7 +308,14 @@ router.post('/upload/periodic', upload.single('file'), async (req, res) => {
     const batchId = batchResult.rows[0].id;
 
     const dueDate = addDays(new Date(), 7);
-    const period  = evalType === 'half_year' ? 'Half-Year' : 'Yearly';
+    // Tag with the calendar year so the SAME supplier's half_year/yearly
+    // round next year is a genuinely new period, not a collision with this
+    // year's round under the open-session unique index — without a year
+    // marker, "Half-Year" is indistinguishable across cycles once one round
+    // is completed, which previously let two unrelated rounds end up
+    // resolved as if they were "the same" evaluation period.
+    const cycleYear = new Date().getFullYear();
+    const period  = evalType === 'half_year' ? `Half-Year ${cycleYear}` : `Yearly ${cycleYear}`;
     const summary = { processed: 0, skipped: 0, warnings: [] };
     const invitationTasks = [];
 
@@ -331,6 +353,19 @@ router.post('/upload/periodic', upload.single('file'), async (req, res) => {
             evaluator_email = COALESCE($4, evaluator_email)
           WHERE id = $5
         `, [buyerName || null, buyerEmail || null, evalName || null, evalEmail || null, supplier.id]);
+      }
+
+      // Skip if this supplier already has an unfinished round for this exact
+      // eval_type+period — see same check in /upload/pre-post for why.
+      const existingOpen = await client.query(`
+        SELECT id FROM evaluation_sessions
+         WHERE supplier_id = $1 AND eval_type = $2 AND period = $3 AND status != 'completed'
+         LIMIT 1
+      `, [supplier.id, evalType, period]);
+      if (existingOpen.rows.length > 0) {
+        summary.skipped++;
+        summary.warnings.push(`"${supplierName || supplier.supplier_name}" มีรอบประเมิน (${period}) ที่ยังไม่เสร็จสิ้นอยู่แล้ว — ข้ามแถวนี้เพื่อไม่สร้างงานซ้ำ`);
+        continue;
       }
 
       const sessionResult = await client.query(`

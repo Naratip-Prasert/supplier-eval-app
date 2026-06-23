@@ -1,6 +1,10 @@
 import { useState, useRef } from "react";
+import * as XLSX from "xlsx";
 import { Upload, X, FileSpreadsheet, Calendar, CheckCircle, AlertTriangle, ChevronRight } from "lucide-react";
 import { authFetch } from "../utils/api";
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB, matches the UI's stated limit
+const ALLOWED_EXT = /\.(xlsx|xls|csv)$/i;
 
 const OVERLAY = {
   position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
@@ -38,18 +42,33 @@ export default function AdminUploadModal({ onClose }) {
   const [loading,    setLoading]    = useState(false);
   const [result,     setResult]     = useState(null);
   const [dragOver,   setDragOver]   = useState(false);
+  const [fileError,  setFileError]  = useState(null);
   const fileRef = useRef();
 
   function handleFileSelect(f) {
     if (!f) return;
-    setFile(f);
     setResult(null);
-    // Preview: read first 5 rows via FileReader + XLSX
+    setPreview(null);
+
+    // Drag-and-drop bypasses the <input accept> filter entirely, so both
+    // checks need to happen here too, not just rely on the file picker.
+    if (!ALLOWED_EXT.test(f.name)) {
+      setFile(null);
+      setFileError("รองรับเฉพาะไฟล์ .xlsx, .xls, .csv");
+      return;
+    }
+    if (f.size > MAX_FILE_SIZE) {
+      setFile(null);
+      setFileError(`ไฟล์ใหญ่เกินไป (${(f.size / 1024 / 1024).toFixed(1)} MB) — สูงสุด 10 MB`);
+      return;
+    }
+
+    setFileError(null);
+    setFile(f);
+    // Preview: read first 5 rows
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const XLSX = window.__XLSX__;
-        if (!XLSX) { setPreview(null); return; }
         const wb = XLSX.read(new Uint8Array(e.target.result), { type: "array" });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
@@ -99,14 +118,14 @@ export default function AdminUploadModal({ onClose }) {
             <>
               <p style={{ margin: "0 0 16px", fontSize: 14, color: "#555" }}>เลือกประเภทการจัดการประเมิน</p>
               <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
-                <div style={CARD(mode === "pre_post")} onClick={() => { setMode("pre_post"); setFile(null); setPreview(null); }}>
+                <div style={CARD(mode === "pre_post")} onClick={() => { setMode("pre_post"); setFile(null); setPreview(null); setFileError(null); }}>
                   <FileSpreadsheet size={28} color="#1b5e20" style={{ marginBottom: 8 }} />
                   <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Pre / Post Evaluation</div>
                   <div style={{ fontSize: 12, color: "#777", lineHeight: 1.5 }}>
                     Supplier ใหม่ (Pre) หรือหลัง PTA 90 วัน (Post)<br />Job Value &gt; 1,000,000 บาท
                   </div>
                 </div>
-                <div style={CARD(mode === "periodic")} onClick={() => { setMode("periodic"); setFile(null); setPreview(null); }}>
+                <div style={CARD(mode === "periodic")} onClick={() => { setMode("periodic"); setFile(null); setPreview(null); setFileError(null); }}>
                   <Calendar size={28} color="#1565c0" style={{ marginBottom: 8 }} />
                   <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Half-Year / Yearly</div>
                   <div style={{ fontSize: 12, color: "#777", lineHeight: 1.5 }}>
@@ -156,6 +175,16 @@ export default function AdminUploadModal({ onClose }) {
                     <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }}
                       onChange={(e) => handleFileSelect(e.target.files[0])} />
                   </div>
+
+                  {fileError && (
+                    <div style={{
+                      display: "flex", alignItems: "center", gap: 6, marginBottom: 12,
+                      background: "#ffebee", border: "1px solid #ef9a9a", borderRadius: 8,
+                      padding: "8px 12px", fontSize: 12.5, color: "#c62828",
+                    }}>
+                      <AlertTriangle size={14} /> {fileError}
+                    </div>
+                  )}
 
                   {/* Preview table */}
                   {preview && preview.length > 1 && (

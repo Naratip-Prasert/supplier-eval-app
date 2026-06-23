@@ -54,12 +54,12 @@ function StatCard({ label, value, color, total }) {
     <div style={{
       background: "#fff", borderRadius: 10,
       border: "1px solid #f0f0f0",
-      padding: "12px 16px",
+      padding: "12px 16px", minWidth: 0,
       boxShadow: "0 1px 4px rgba(0,0,0,0.05)",
     }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-        <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 600 }}>{label}</span>
-        <span style={{ fontSize: 18, fontWeight: 800, color }}>{value}</span>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4, marginBottom: 8 }}>
+        <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+        <span style={{ fontSize: 18, fontWeight: 800, color, flexShrink: 0 }}>{value}</span>
       </div>
       <div style={{ height: 4, background: "#f3f4f6", borderRadius: 99 }}>
         <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: 99, transition: "width 0.4s" }} />
@@ -143,17 +143,31 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
 
         {/* ── Stats row ── */}
         {status === "ok" && records.length > 0 && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 10, marginBottom: 20, animation: "fadeUp 0.3s ease" }}>
-            {(["A","B","C","D","F"]).map(g => (
-              <StatCard
-                key={g}
-                label={`Grade ${g}`}
-                value={gradeCounts[g]}
-                color={GRADE_COLOR[g]?.bar}
-                total={records.length}
-              />
-            ))}
-          </div>
+          <>
+            {/* Plain repeat(5,1fr) doesn't actually let tracks shrink below
+                each card's min-content width (padding + "Grade A" label +
+                value) — on a phone, 5× that minimum exceeds the viewport
+                and the last card(s) overflow off-screen. minmax(0,1fr)
+                lets tracks shrink properly; also drop to 3 cols on very
+                narrow screens since 5 columns get cramped either way. */}
+            <style>{`
+              .hist-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+              @media (max-width: 480px) {
+                .hist-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+              }
+            `}</style>
+            <div className="hist-stats" style={{ display: "grid", gap: 10, marginBottom: 20, animation: "fadeUp 0.3s ease" }}>
+              {(["A","B","C","D","F"]).map(g => (
+                <StatCard
+                  key={g}
+                  label={`Grade ${g}`}
+                  value={gradeCounts[g]}
+                  color={GRADE_COLOR[g]?.bar}
+                  total={records.length}
+                />
+              ))}
+            </div>
+          </>
         )}
 
         {/* ── Search + Filter bar ── */}
@@ -183,7 +197,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
             <button
               onClick={() => setShowFilter(v => !v)}
               style={{
-                display: "flex", alignItems: "center", gap: 6,
+                display: "flex", alignItems: "center", gap: 6, flexShrink: 0, whiteSpace: "nowrap",
                 background: showFilter ? "#f0fdf4" : "none",
                 border: `1px solid ${showFilter ? themeColor : "#e5e7eb"}`,
                 borderRadius: 7, padding: "5px 12px", cursor: "pointer",
@@ -311,8 +325,22 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
         )}
 
         {/* ── Record list ── */}
+        {/* This grid (36px + 1fr + several fixed-px columns totalling
+            ~350-440px) leaves almost no room for the 1fr "Supplier" column
+            — the single most important field in the row — on a phone
+            width, squeezing the supplier name down to 1-2 visible
+            characters. Below ~650px, show a 2-line card per row instead. */}
+        <style>{`
+          .hist-table-desktop { display: block; }
+          .hist-table-mobile { display: none; }
+          @media (max-width: 650px) {
+            .hist-table-desktop { display: none; }
+            .hist-table-mobile { display: block; }
+          }
+        `}</style>
+
         {status === "ok" && filtered.length > 0 && (
-          <div style={{
+          <div className="hist-table-desktop" style={{
             background: "#fff", borderRadius: 12, border: "1px solid #e5e7eb",
             boxShadow: "0 1px 6px rgba(0,0,0,0.05)", overflow: "hidden",
             animation: "fadeUp 0.25s ease",
@@ -435,6 +463,77 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
                   <div>
                     {clickable && <ChevronRight size={15} style={{ color: "#d1d5db" }} />}
                   </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {status === "ok" && filtered.length > 0 && (
+          <div className="hist-table-mobile" style={{
+            background: "#fff", borderRadius: 12, border: "1px solid #e5e7eb",
+            boxShadow: "0 1px 6px rgba(0,0,0,0.05)", overflow: "hidden",
+          }}>
+            {filtered.map((r, idx) => {
+              const gc = GRADE_COLOR[r.grade] ?? GRADE_COLOR.F;
+              const score = r.totalScore != null ? Number(r.totalScore).toFixed(1) : "—";
+              const clickable = !!onViewDetail;
+              return (
+                <div
+                  key={r.evalId}
+                  onClick={() => onViewDetail?.(r.evalId)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10,
+                    padding: "12px 14px",
+                    borderBottom: idx < filtered.length - 1 ? "1px solid #f3f4f6" : "none",
+                    cursor: clickable ? "pointer" : "default",
+                  }}
+                >
+                  <div style={{ width: 4, height: 36, borderRadius: 4, background: gc.bar, flexShrink: 0 }} />
+
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13.5, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {r.supplierName}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {r.vendorCode} · {PRODUCT_LABEL[r.productType] ?? r.productType ?? "—"}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 11.5, color: "#374151", fontWeight: 600 }}>{r.period}</span>
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4,
+                        background: r.evalType === "post_eval" ? "#eff6ff" : "#f0fdf4",
+                        color: r.evalType === "post_eval" ? "#1d4ed8" : "#15803d",
+                      }}>
+                        {EVAL_LABEL[r.evalType] ?? r.evalType}
+                      </span>
+                      {isAdmin && (
+                        <span style={{
+                          fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 4,
+                          background: r.role === "GCP" ? "#eff6ff" : "#f0fdf4",
+                          color: r.role === "GCP" ? "#1d4ed8" : "#15803d",
+                        }}>
+                          {r.evaluatorName ?? "—"} · {r.role}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <span style={{
+                      display: "inline-flex", alignItems: "center", justifyContent: "center",
+                      width: 30, height: 30, borderRadius: 8,
+                      background: gc.bg, color: gc.text, fontSize: 13, fontWeight: 800, marginBottom: 4,
+                    }}>
+                      {r.grade ?? "—"}
+                    </span>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: gc.bar, lineHeight: 1 }}>{score}</div>
+                    <div style={{ fontSize: 9.5, color: "#9ca3af", marginTop: 2 }}>
+                      {formatDate(r.submittedAt).split(" ")[0]}
+                    </div>
+                  </div>
+
+                  {clickable && <ChevronRight size={15} style={{ color: "#d1d5db", flexShrink: 0 }} />}
                 </div>
               );
             })}

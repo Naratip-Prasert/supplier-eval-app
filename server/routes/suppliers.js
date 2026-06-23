@@ -120,6 +120,13 @@ router.patch('/:vendorCode', async (req, res) => {
     return res.status(403).json({ message: 'เฉพาะ Admin เท่านั้น' });
   }
   const { supplierName, productType, isActive } = req.body;
+  if (supplierName !== undefined && !supplierName?.trim()) {
+    return res.status(400).json({ message: 'supplierName ต้องไม่เป็นค่าว่าง' });
+  }
+  const validTypes = ['goods', 'services', 'both'];
+  if (productType !== undefined && !validTypes.includes(productType)) {
+    return res.status(400).json({ message: 'productType ไม่ถูกต้อง' });
+  }
   const fields = [];
   const params = [];
   if (supplierName !== undefined) { params.push(supplierName.trim()); fields.push(`supplier_name = $${params.length}`); }

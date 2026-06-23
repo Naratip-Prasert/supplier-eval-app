@@ -46,7 +46,7 @@ function initWeights(criteria) {
 export default function EvalForm({ formData, savedState, user, profilePic, onBack, onDone }) {
   const CRITERIA = getCriteria(formData.evalType);
 
-  const { showConfirm, ModalEl } = useModal();
+  const { showConfirm, showAlert, ModalEl } = useModal();
   const [scores,       setScores]       = useState(() => savedState?.scores      ?? {});
   const [notes,        setNotes]        = useState(() => savedState?.notes       ?? {});
   const [missingItems, setMissingItems] = useState(null); // null = closed, array = open
@@ -58,6 +58,17 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
 
   const allItems        = CRITERIA.flatMap((s) => s.items.filter((i) => !i.divider));
   const answered        = Object.keys(scores).length;
+
+  // The in-app "กลับหน้าหลัก" button already warns before discarding
+  // entered scores, but closing the tab/refreshing bypassed that entirely
+  // — there's no autosave, so a refresh meant total data loss with zero
+  // warning.
+  useEffect(() => {
+    if (answered === 0) return;
+    const handler = (e) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [answered]);
   const total           = allItems.length;
   const totalItemWeight = allItems.reduce((s, item) => s + (itemWeights[item.no] ?? 0), 0);
   const totalSectionWeight = CRITERIA.reduce((sum, _, si) => sum + (sectionWeights[si] ?? 0), 0);
@@ -160,6 +171,16 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
 
   const handleSubmit = () => {
     if (legalStatus !== "pass") return;
+    // The "น้ำหนักรวม ≠ 100%" indicator next to the sticky bar used to be
+    // purely cosmetic — it could turn red and the form would still submit.
+    // Block here too, matching the same severity as a missing score.
+    if (r2(totalItemWeight) !== 100) {
+      showAlert(
+        `น้ำหนักรวมขณะนี้คือ ${r2(totalItemWeight)}% ต้องรวมให้ได้ 100% ก่อนส่งผลการประเมิน`,
+        "น้ำหนักไม่ครบ 100%"
+      );
+      return;
+    }
     const unanswered = allItems.filter((item) => !scores[item.no]);
     if (unanswered.length > 0) {
       setMissingItems(unanswered);
@@ -182,7 +203,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
         />
       )}
       <Header
-        titleOverride={`Supplier Performance Evaluation - ${evalLabel} Evaluation`}
+        titleOverride={`SPES - ${evalLabel} Evaluation`}
         subtitle={subtitle}
         backLabel="← กลับหน้าหลัก"
         onBack={handleBack}
@@ -190,28 +211,32 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
         profilePic={profilePic}
       />
 
-      {/* DEV: fill-all button */}
-      <button
-        onClick={() => {
-          const filled = {};
-          CRITERIA.forEach(sec =>
-            sec.items.filter(i => !i.divider).forEach(item => {
-              const lvs = item.levelValues || [1, 2, 3, 4, 5];
-              filled[item.no] = Math.max(...lvs);
-            })
-          );
-          setScores(filled);
-        }}
-        style={{
-          position: "fixed", top: 68, right: 12, zIndex: 200,
-          background: "rgba(0,0,0,0.06)", border: "1px dashed #bbb",
-          color: "#999", fontSize: 10, borderRadius: 4,
-          padding: "3px 8px", cursor: "pointer",
-          fontFamily: "monospace",
-        }}
-      >
-        MAX ALL
-      </button>
+      {/* DEV-only: fill-all shortcut for manual testing — must never reach
+          a production build, since it lets anyone one-click a fraudulent
+          maxed-out evaluation. import.meta.env.DEV is false in `vite build`. */}
+      {import.meta.env.DEV && (
+        <button
+          onClick={() => {
+            const filled = {};
+            CRITERIA.forEach(sec =>
+              sec.items.filter(i => !i.divider).forEach(item => {
+                const lvs = item.levelValues || [1, 2, 3, 4, 5];
+                filled[item.no] = Math.max(...lvs);
+              })
+            );
+            setScores(filled);
+          }}
+          style={{
+            position: "fixed", top: 68, right: 12, zIndex: 200,
+            background: "rgba(0,0,0,0.06)", border: "1px dashed #bbb",
+            color: "#999", fontSize: 10, borderRadius: 4,
+            padding: "3px 8px", cursor: "pointer",
+            fontFamily: "monospace",
+          }}
+        >
+          MAX ALL
+        </button>
+      )}
 
       <div style={{ maxWidth: 1280, margin: "0 auto", padding: "16px 16px 0" }}>
         <InfoBar formData={formData} evalLabel={evalLabel} />
@@ -275,8 +300,21 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
           </div>
         </div>
 
-        {/* Table */}
-        <div style={{ borderRadius: 10, overflow: "hidden", border: "1.5px solid #c8d8c8", marginBottom: 16, background: "#fff" }}>
+        {/* Table — the desktop grid (COLS = 10 fixed/fr columns) is
+            unreadable below ~700px: each column gets squeezed to a sliver
+            a few px wide and Thai text wraps character-by-character. Below
+            that width, show a stacked card layout instead (same handlers/
+            state, just different markup) rather than the grid. */}
+        <style>{`
+          .score-table-desktop { display: block; }
+          .score-table-mobile { display: none; }
+          @media (max-width: 700px) {
+            .score-table-desktop { display: none; }
+            .score-table-mobile { display: block; }
+          }
+        `}</style>
+
+        <div className="score-table-desktop" style={{ borderRadius: 10, overflow: "hidden", border: "1.5px solid #c8d8c8", marginBottom: 16, background: "#fff" }}>
           <TableHeader />
           {CRITERIA.map((section, si) => (
             <div key={si}>
@@ -290,6 +328,35 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
                   ? <DividerRow key={item.label} label={item.label} level={item.level} />
                   : (
                     <ScoreRow
+                      key={item.no}
+                      item={item}
+                      weight={itemWeights[item.no] ?? 0}
+                      selected={scores[item.no]}
+                      note={notes[item.no] || ""}
+                      onSelect={(lv) => setScores((s) => ({ ...s, [item.no]: lv }))}
+                      onNote={(v)   => setNotes((n)  => ({ ...n, [item.no]: v }))}
+                      onWeightChange={(v) => handleItemWeightChange(item.no, si, v)}
+                      shaded={ii % 2 !== 0}
+                    />
+                  )
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="score-table-mobile" style={{ borderRadius: 10, overflow: "hidden", border: "1.5px solid #c8d8c8", marginBottom: 16, background: "#fff" }}>
+          {CRITERIA.map((section, si) => (
+            <div key={si}>
+              <SectionHeaderMobile
+                section={section}
+                secWeight={sectionWeights[si] ?? 0}
+                onSectionWeightChange={(val) => handleSectionWeightChange(si, val)}
+              />
+              {section.items.map((item, ii) =>
+                item.divider
+                  ? <DividerMobile key={item.label} label={item.label} level={item.level} />
+                  : (
+                    <ScoreCardMobile
                       key={item.no}
                       item={item}
                       weight={itemWeights[item.no] ?? 0}
@@ -350,19 +417,30 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
         </div>{/* /locked wrapper */}
       </div>
 
-      {/* Sticky score bar */}
-      <div style={{
+      {/* Sticky score bar — 3 flex children (progress / score+grade /
+          submit button) with no wrap used to overflow the viewport on
+          mobile, pushing the Submit button off-screen to the right with
+          no way to reach it. Stack into rows below 700px instead. */}
+      <style>{`
+        @media (max-width: 700px) {
+          .sticky-score-bar { flex-direction: column !important; align-items: stretch !important; padding: 10px 14px !important; gap: 8px !important; }
+          .sticky-score-progress { flex-wrap: wrap; }
+          .sticky-score-totals { justify-content: center !important; }
+          .sticky-score-submit { width: 100%; }
+        }
+      `}</style>
+      <div className="sticky-score-bar" style={{
         position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 100,
         background: "#fff", borderTop: "2px solid #a5d6a7",
         boxShadow: "0 -4px 20px rgba(0,0,0,0.10)",
         padding: "10px 24px",
         display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16,
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1 }}>
+        <div className="sticky-score-progress" style={{ display: "flex", alignItems: "center", gap: 12, flex: 1 }}>
           <span style={{ fontSize: 13, color: "#555", whiteSpace: "nowrap" }}>
             ตอบแล้ว <b style={{ color: "#1a6b1a" }}>{answered}</b>/{total} ข้อ
           </span>
-          <div style={{ flex: 1, height: 8, background: "#e0e0e0", borderRadius: 4, maxWidth: 200 }}>
+          <div style={{ flex: 1, height: 8, background: "#e0e0e0", borderRadius: 4, maxWidth: 200, minWidth: 60 }}>
             <div style={{
               height: "100%", borderRadius: 4, background: "#2e7d32",
               width: `${total > 0 ? (answered / total) * 100 : 0}%`,
@@ -376,7 +454,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
           </span>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div className="sticky-score-totals" style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: "#444" }}>คะแนนรวม:</span>
           <span style={{ fontSize: 28, fontWeight: 800, color: "#1a6b1a", lineHeight: 1 }}>
             {totalScore.toFixed(1)}
@@ -395,6 +473,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
             padding: "10px 32px", fontSize: 15,
             ...(legalStatus !== "pass" && { opacity: 0.38, cursor: "not-allowed", filter: "grayscale(40%)" }),
           }}
+          className="sticky-score-submit"
         >
           Submit Supplier Evaluation
         </GreenButton>
@@ -540,20 +619,28 @@ function InfoBar({ formData, evalLabel }) {
   const now   = new Date();
   const refNo = `SPE-${evalLabel.toUpperCase()}-${now.getFullYear()}${String(now.getMonth()+1).padStart(2,"0")}-AUTO`;
   return (
-    <div style={{
+    <div className="info-bar" style={{
       background: "#fff", border: "1px solid #e0e6e0", borderRadius: 8,
       boxShadow: "0 1px 4px rgba(0,0,0,0.05)",
       padding: "12px 18px", marginBottom: 12,
       display: "flex", alignItems: "center", gap: 18,
     }}>
-      <div style={{
+      <style>{`
+        @media (max-width: 700px) {
+          .info-bar { flex-direction: column !important; align-items: flex-start !important; }
+          .info-bar-category { border-right: none !important; padding-right: 0 !important; border-bottom: 1px solid #e0e6e0; padding-bottom: 10px; margin-bottom: 10px; width: 100%; }
+          .info-bar-grid { grid-template-columns: 1fr !important; width: 100%; }
+          .info-bar-grid > div { word-break: break-word; }
+        }
+      `}</style>
+      <div className="info-bar-category" style={{
         fontSize: 11, color: "#718096", fontWeight: 600,
         letterSpacing: 0.5, textTransform: "uppercase",
         borderRight: "1px solid #e0e6e0", paddingRight: 18, flexShrink: 0,
       }}>
         Consumer / Packaging<br />Retail / Manufacturer
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "5px 28px", fontSize: 13, flex: 1 }}>
+      <div className="info-bar-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "5px 28px", fontSize: 13, flex: 1, minWidth: 0 }}>
         {[
           ["ชื่อผู้ขาย/ผู้ให้บริการ",    formData.supplierName || "—"],
           ["เลขประจำตัวผู้เสียภาษี/Tax ID",    formData.vendorCode   || "—"],
@@ -562,9 +649,9 @@ function InfoBar({ formData, evalLabel }) {
           ["ชื่อผู้ประเมิน/รหัสพนักงาน", formData.empId        || "—"],
           ["รอบการประเมิน",               formData.period       || "—"],
         ].map(([label, val]) => (
-          <div key={label} style={{ display: "flex", gap: 4 }}>
+          <div key={label} style={{ display: "flex", gap: 4, minWidth: 0 }}>
             <span style={{ color: "#718096", flexShrink: 0 }}>{label}:</span>
-            <span style={{ color: "#1a202c", fontWeight: 600 }}>{val}</span>
+            <span style={{ color: "#1a202c", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis" }}>{val}</span>
           </div>
         ))}
       </div>
@@ -851,6 +938,176 @@ function ScoreRow({ item, weight, selected, note, onSelect, onNote, onWeightChan
       <div style={{ padding: "6px 6px", display: "flex", alignItems: "center" }}>
         <NoteCell itemNo={item.no} value={note} onChange={onNote} />
       </div>
+    </div>
+  );
+}
+
+// ---- Mobile-only equivalents of TableHeader/SectionHeaderRow/DividerRow/
+// ScoreRow — the desktop versions are a 10-column CSS grid that has no
+// room to breathe below ~700px (each column collapses to a few px wide).
+// These reuse the exact same props/handlers, just render as stacked
+// cards/lists instead of grid columns, and show level descriptions as a
+// vertical selectable list instead of 5 side-by-side slivers.
+function SectionHeaderMobile({ section, secWeight, onSectionWeightChange }) {
+  const [editing, setEditing] = useState(false);
+  const [draft,   setDraft]   = useState(String(secWeight));
+  useEffect(() => { if (!editing) setDraft(String(secWeight)); }, [secWeight, editing]);
+  const commit = () => { setEditing(false); onSectionWeightChange(draft); };
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+      background: "linear-gradient(90deg,#1a6b1a,#2e7d32)", color: "#fff",
+      padding: "10px 14px",
+    }}>
+      <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: 0.3 }}>{section.section}</div>
+      {editing ? (
+        <input
+          type="number" value={draft} min={0} max={100} autoFocus
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => e.key === "Enter" && commit()}
+          style={{
+            width: 54, textAlign: "center", fontSize: 13, fontWeight: 700,
+            border: "2px solid #fff", borderRadius: 6, padding: "4px 2px",
+            outline: "none", background: "rgba(255,255,255,0.2)", color: "#fff", flexShrink: 0,
+          }}
+        />
+      ) : (
+        <div
+          onClick={() => { setDraft(String(secWeight)); setEditing(true); }}
+          style={{
+            fontSize: 13, fontWeight: 700, color: "#fff", flexShrink: 0,
+            border: "1.5px dashed rgba(255,255,255,0.6)", borderRadius: 6,
+            padding: "4px 10px", cursor: "pointer",
+          }}
+        >
+          {secWeight}%
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DividerMobile({ label, level }) {
+  const isMain = level === 1;
+  return (
+    <div style={{
+      background: isMain ? "#f0f4fa" : "#f7f9fc",
+      borderTop: isMain ? "1.5px solid #b8cce4" : "1px solid #dde6f0",
+      borderBottom: isMain ? "1.5px solid #b8cce4" : "1px solid #dde6f0",
+      padding: isMain ? "8px 14px" : "6px 22px",
+      display: "flex", alignItems: "center", gap: 8,
+    }}>
+      {isMain && <span style={{ width: 3, height: 14, background: "#1558a0", borderRadius: 2, flexShrink: 0 }} />}
+      <span style={{ fontSize: isMain ? 13 : 12, fontWeight: isMain ? 700 : 600, color: isMain ? "#1558a0" : "#4a6080" }}>
+        {label}
+      </span>
+    </div>
+  );
+}
+
+function ScoreCardMobile({ item, weight, selected, note, onSelect, onNote, onWeightChange, shaded }) {
+  const levelValues = item.levelValues || [1, 2, 3, 4, 5];
+  const maxLv       = Math.max(...levelValues);
+  const rowScore    = selected ? ((selected / maxLv) * weight).toFixed(2) : "—";
+  const isCalc      = item.calcType === "capital-ratio";
+  const [editing, setEditing] = useState(false);
+  const [draft,   setDraft]   = useState(String(weight));
+  useEffect(() => { if (!editing) setDraft(String(weight)); }, [weight, editing]);
+  const commit = () => { setEditing(false); onWeightChange(draft); };
+
+  const titleLines = isCalc ? item.title.split("\n") : null;
+  const calcInstr   = isCalc ? titleLines.pop() : null;
+
+  return (
+    <div style={{
+      borderTop: "1px solid #e8ece8", padding: "14px 14px 12px",
+      background: selected ? (shaded ? "#f0faf0" : "#f6fcf6") : (shaded ? "#f8faf8" : "#fff"),
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8 }}>
+        <span style={{ fontSize: 12, fontWeight: 800, color: "#1a6b1a" }}>ข้อ {item.no}</span>
+        {editing ? (
+          <input
+            type="number" value={draft} min={0} max={100} autoFocus
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => e.key === "Enter" && commit()}
+            style={{
+              width: 54, textAlign: "center", fontSize: 13, fontWeight: 700,
+              border: "2px solid #2e7d32", borderRadius: 6, padding: "4px 2px",
+              outline: "none", color: "#1a6b1a", flexShrink: 0,
+            }}
+          />
+        ) : (
+          <div
+            onClick={() => { setDraft(String(weight)); setEditing(true); }}
+            style={{
+              fontSize: 12.5, fontWeight: 700, color: "#1a6b1a", flexShrink: 0,
+              border: "1.5px dashed #a5d6a7", borderRadius: 6, padding: "3px 9px", cursor: "pointer",
+            }}
+          >
+            {weight}%
+          </div>
+        )}
+      </div>
+
+      <div style={{ fontSize: 13.5, lineHeight: 1.7, color: "#1a1a1a", marginBottom: 10, whiteSpace: "pre-line" }}>
+        {isCalc ? titleLines.join("\n") : item.title}
+      </div>
+      {isCalc && (
+        <div style={{
+          marginBottom: 10, background: "#fff3e0", border: "2px solid #fb8c00", borderLeft: "5px solid #e65100",
+          borderRadius: 6, padding: "6px 12px", fontSize: 12, color: "#bf360c", fontWeight: 700, lineHeight: 1.5,
+        }}>
+          {calcInstr}
+        </div>
+      )}
+      {isCalc && <CapitalRatioCalc item={item} selected={selected} onSelect={onSelect} />}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+        {[1, 2, 3, 4, 5].map((lv) => {
+          const available  = levelValues.includes(lv);
+          if (!available) return null;
+          const descIdx    = levelValues.indexOf(lv);
+          const isSelected  = selected === lv;
+          const clickable   = !isCalc && available;
+          return (
+            <div
+              key={lv}
+              onClick={() => clickable && onSelect(lv)}
+              style={{
+                display: "flex", alignItems: "flex-start", gap: 8,
+                padding: "8px 10px", cursor: clickable ? "pointer" : "default",
+                background: isSelected ? LEVEL_COLORS[lv - 1] + "1c" : "#fafafa",
+                border: `1.5px solid ${isSelected ? LEVEL_COLORS[lv - 1] : "#e0e0e0"}`,
+                borderRadius: 8,
+              }}
+            >
+              <span style={{
+                background: LEVEL_COLORS[lv - 1], color: "#fff", borderRadius: "50%",
+                width: 20, height: 20, flexShrink: 0, fontSize: 11, fontWeight: 800,
+                display: "flex", alignItems: "center", justifyContent: "center", marginTop: 1,
+              }}>
+                {lv}
+              </span>
+              <span style={{
+                fontSize: 12.5, lineHeight: 1.5, color: isSelected ? "#1a1a1a" : "#555",
+                fontWeight: isSelected ? 700 : 400, whiteSpace: "pre-line", wordBreak: "break-word",
+              }}>
+                {item.levels[descIdx]}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 12, color: "#718096" }}>คะแนนที่ได้</span>
+        <span style={{ fontSize: 16, fontWeight: 800, color: selected ? "#1a6b1a" : "#ccc" }}>{rowScore}</span>
+      </div>
+
+      <NoteCell itemNo={item.no} value={note} onChange={onNote} />
     </div>
   );
 }

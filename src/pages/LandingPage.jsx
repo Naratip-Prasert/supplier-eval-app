@@ -574,7 +574,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                 onClick={() => setTaskFilterOpen(o => !o)}
                 style={{
                   position: "relative", display: "flex", alignItems: "center", gap: 6,
-                  padding: "8px 14px", borderRadius: 7,
+                  padding: "8px 14px", borderRadius: 7, flexShrink: 0, whiteSpace: "nowrap",
                   border: taskFilterOpen ? `1px solid ${themeColor}` : "1px solid #e5e7eb",
                   background: taskFilterOpen ? `${themeColor}14` : "#fff",
                   color: taskFilterOpen ? themeColor : "#555",
@@ -671,78 +671,160 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
             {filteredTimeline.length === 0 ? (
               <div style={{ textAlign: "center", padding: 30, color: "#9ca3af", fontSize: 13 }}>ไม่มีรายการ</div>
             ) : (
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                  <thead>
-                    <tr style={{ borderBottom: "2px solid #f1f5f9" }}>
-                      {["Supplier", "ประเภท", "สถานะ", "ครบกำหนด", "จัดการ"].map(h => (
-                        <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "#6b7280", fontSize: 11.5, textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" }}>
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {taskPageItems.map(t => {
-                      const isReturned  = t.sessionStatus === "returned";
-                      const overdue     = isOverdue(t.dueDate) && !["completed", "returned"].includes(t.sessionStatus);
-                      const actionable  = t.taskStatus !== "completed"
-                        && ["pending", "in_progress", "returned"].includes(t.sessionStatus);
-                      return (
-                        <tr key={t.taskId} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                          <td style={{ padding: "10px 10px" }}>
+              <>
+                {/* On narrow screens a horizontally-scrolling table hides
+                    the action button ("เริ่มประเมิน") off-screen with no
+                    visible scroll hint — switch to a stacked card list
+                    instead so the action is always reachable. */}
+                <style>{`
+                  .task-table-view { display: block; }
+                  .task-card-view { display: none; }
+                  @media (max-width: 700px) {
+                    .task-table-view { display: none; }
+                    .task-card-view { display: flex; }
+                  }
+                `}</style>
+
+                <div className="task-table-view" style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ borderBottom: "2px solid #f1f5f9" }}>
+                        {["Supplier", "ประเภท", "สถานะ", "ครบกำหนด", "จัดการ"].map(h => (
+                          <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "#6b7280", fontSize: 11.5, textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" }}>
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {taskPageItems.map(t => {
+                        const isReturned  = t.sessionStatus === "returned";
+                        const overdue     = isOverdue(t.dueDate) && !["completed", "returned"].includes(t.sessionStatus);
+                        const actionable  = t.taskStatus !== "completed"
+                          && ["pending", "in_progress", "returned"].includes(t.sessionStatus);
+                        return (
+                          <tr key={t.taskId} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                            <td style={{ padding: "10px 10px" }}>
+                              <div style={{ fontWeight: 700, color: "#111827" }}>{t.supplierName}</div>
+                              <div style={{ fontSize: 11, color: "#9ca3af" }}>{t.vendorCode}</div>
+                              {isReturned && t.supervisorNotes && (
+                                <button
+                                  onClick={() => setReturnedNote({ supplierName: t.supplierName, notes: t.supervisorNotes })}
+                                  style={{
+                                    display: "flex", alignItems: "center", gap: 6, marginTop: 6,
+                                    background: "#fff3e0", color: "#e65100", border: "1.5px solid #ffb74d",
+                                    borderRadius: 8, padding: "7px 14px", cursor: "pointer",
+                                    fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 12.5,
+                                  }}
+                                  onMouseEnter={e => e.currentTarget.style.background = "#ffe0b2"}
+                                  onMouseLeave={e => e.currentTarget.style.background = "#fff3e0"}
+                                >
+                                  ⚠ ดูเหตุผลที่ถูกตีกลับ
+                                </button>
+                              )}
+                            </td>
+                            <td style={{ padding: "10px 10px", color: "#555", fontSize: 12, whiteSpace: "nowrap" }}>
+                              {TASK_EVAL_TYPE_LABEL[t.evalType] || t.evalType}
+                            </td>
+                            <td style={{ padding: "10px 10px" }}>
+                              <TimelineStepper status={t.sessionStatus} dueDate={t.dueDate} compact />
+                            </td>
+                            <td style={{ padding: "10px 10px", color: overdue ? "#c62828" : "#6b7280", fontWeight: overdue ? 700 : 400, whiteSpace: "nowrap", fontSize: 12 }}>
+                              {t.dueDate ? new Date(t.dueDate).toLocaleDateString("th-TH") : "—"}
+                            </td>
+                            <td style={{ padding: "10px 10px" }}>
+                              {actionable ? (
+                                <button
+                                  onClick={() => startTask(t)}
+                                  style={{
+                                    background: isReturned ? "#fb8c00" : themeColor, color: "#fff", border: "none",
+                                    borderRadius: 8, padding: "6px 14px", cursor: "pointer",
+                                    fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 12,
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  {isReturned ? "ประเมินใหม่" : "เริ่มประเมิน"}
+                                </button>
+                              ) : (
+                                <span style={{ fontSize: 11.5, color: "#9ca3af" }}>
+                                  {t.taskStatus === "completed" ? "ส่งแล้ว" : "—"}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="task-card-view" style={{ flexDirection: "column", gap: 12 }}>
+                  {taskPageItems.map(t => {
+                    const isReturned  = t.sessionStatus === "returned";
+                    const overdue     = isOverdue(t.dueDate) && !["completed", "returned"].includes(t.sessionStatus);
+                    const actionable  = t.taskStatus !== "completed"
+                      && ["pending", "in_progress", "returned"].includes(t.sessionStatus);
+                    return (
+                      <div key={t.taskId} style={{
+                        border: "1px solid #f1f5f9", borderRadius: 12, padding: 14,
+                        boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+                      }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
+                          <div>
                             <div style={{ fontWeight: 700, color: "#111827" }}>{t.supplierName}</div>
                             <div style={{ fontSize: 11, color: "#9ca3af" }}>{t.vendorCode}</div>
-                            {isReturned && t.supervisorNotes && (
-                              <button
-                                onClick={() => setReturnedNote({ supplierName: t.supplierName, notes: t.supervisorNotes })}
-                                style={{
-                                  display: "flex", alignItems: "center", gap: 6, marginTop: 6,
-                                  background: "#fff3e0", color: "#e65100", border: "1.5px solid #ffb74d",
-                                  borderRadius: 8, padding: "7px 14px", cursor: "pointer",
-                                  fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 12.5,
-                                }}
-                                onMouseEnter={e => e.currentTarget.style.background = "#ffe0b2"}
-                                onMouseLeave={e => e.currentTarget.style.background = "#fff3e0"}
-                              >
-                                ⚠ ดูเหตุผลที่ถูกตีกลับ
-                              </button>
-                            )}
-                          </td>
-                          <td style={{ padding: "10px 10px", color: "#555", fontSize: 12, whiteSpace: "nowrap" }}>
+                          </div>
+                          <span style={{ color: "#555", fontSize: 11.5, whiteSpace: "nowrap", flexShrink: 0 }}>
                             {TASK_EVAL_TYPE_LABEL[t.evalType] || t.evalType}
-                          </td>
-                          <td style={{ padding: "10px 10px" }}>
-                            <TimelineStepper status={t.sessionStatus} dueDate={t.dueDate} compact />
-                          </td>
-                          <td style={{ padding: "10px 10px", color: overdue ? "#c62828" : "#6b7280", fontWeight: overdue ? 700 : 400, whiteSpace: "nowrap", fontSize: 12 }}>
-                            {t.dueDate ? new Date(t.dueDate).toLocaleDateString("th-TH") : "—"}
-                          </td>
-                          <td style={{ padding: "10px 10px" }}>
-                            {actionable ? (
-                              <button
-                                onClick={() => startTask(t)}
-                                style={{
-                                  background: isReturned ? "#fb8c00" : themeColor, color: "#fff", border: "none",
-                                  borderRadius: 8, padding: "6px 14px", cursor: "pointer",
-                                  fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 12,
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
-                                {isReturned ? "ประเมินใหม่" : "เริ่มประเมิน"}
-                              </button>
-                            ) : (
-                              <span style={{ fontSize: 11.5, color: "#9ca3af" }}>
-                                {t.taskStatus === "completed" ? "ส่งแล้ว" : "—"}
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                          </span>
+                        </div>
+
+                        <div style={{ marginBottom: 8 }}>
+                          <TimelineStepper status={t.sessionStatus} dueDate={t.dueDate} compact />
+                        </div>
+
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: isReturned && t.supervisorNotes ? 8 : 0 }}>
+                          <span style={{ fontSize: 12, color: overdue ? "#c62828" : "#6b7280", fontWeight: overdue ? 700 : 400 }}>
+                            ครบกำหนด: {t.dueDate ? new Date(t.dueDate).toLocaleDateString("th-TH") : "—"}
+                          </span>
+                          {actionable ? (
+                            <button
+                              onClick={() => startTask(t)}
+                              style={{
+                                background: isReturned ? "#fb8c00" : themeColor, color: "#fff", border: "none",
+                                borderRadius: 8, padding: "7px 16px", cursor: "pointer",
+                                fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 12.5,
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {isReturned ? "ประเมินใหม่" : "เริ่มประเมิน"}
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: 11.5, color: "#9ca3af" }}>
+                              {t.taskStatus === "completed" ? "ส่งแล้ว" : "—"}
+                            </span>
+                          )}
+                        </div>
+
+                        {isReturned && t.supervisorNotes && (
+                          <button
+                            onClick={() => setReturnedNote({ supplierName: t.supplierName, notes: t.supervisorNotes })}
+                            style={{
+                              display: "flex", alignItems: "center", gap: 6, width: "100%",
+                              justifyContent: "center",
+                              background: "#fff3e0", color: "#e65100", border: "1.5px solid #ffb74d",
+                              borderRadius: 8, padding: "7px 14px", cursor: "pointer",
+                              fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 12.5,
+                            }}
+                          >
+                            ⚠ ดูเหตุผลที่ถูกตีกลับ
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
             )}
 
             {filteredTimeline.length > 0 && (

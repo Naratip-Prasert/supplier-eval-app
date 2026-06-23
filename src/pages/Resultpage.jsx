@@ -68,9 +68,13 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
 
   const handleDone = async () => {
     if (doneStatus === "saving") return;
-    const ok = await showConfirm("บันทึกผลการประเมินและเสร็จสิ้นใช่ไหม?", "ยืนยันการบันทึก");
-    if (!ok) return;
+    // Lock the button BEFORE awaiting the confirm modal, not after — while
+    // the modal is open doneStatus was still "idle", so a double-click (or
+    // a second tab) could call handleDone again and both get past this
+    // guard and the confirm dialog before either POST fires.
     setDoneStatus("saving");
+    const ok = await showConfirm("บันทึกผลการประเมินและเสร็จสิ้นใช่ไหม?", "ยืนยันการบันทึก");
+    if (!ok) { setDoneStatus("idle"); return; }
     setDoneErrMsg("");
     try {
       const rawScores  = result.scores  ?? {};
@@ -168,6 +172,15 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
         /* print-only header hidden on screen */
         .print-doc-header { display: none; }
 
+        /* ── MOBILE ── */
+        /* result-main-grid / result-bottom-grid are fixed two-column grids
+           (e.g. "1fr 320px") sized for desktop — below ~760px the 320px
+           side column (radar chart / signature block) has no room left
+           and gets clipped at the viewport edge. Stack to one column. */
+        @media screen and (max-width: 760px) {
+          .result-main-grid, .result-bottom-grid { grid-template-columns: 1fr !important; }
+        }
+
         /* ── PRINT ── */
         @media print {
           /* margin: 0 removes browser's auto date/URL/page-number headers */
@@ -232,7 +245,7 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
         {ModalEl}
         <div className="no-print">
           <Header
-            titleOverride={`Supplier Performance Evaluation — ${evalLabel} Evaluation`}
+            titleOverride={`SPES — ${evalLabel} Evaluation`}
             subtitle={subtitle}
             backLabel={readOnly ? "← กลับ" : "← กลับหน้าประเมิน"}
             onBack={handleBackToEval}

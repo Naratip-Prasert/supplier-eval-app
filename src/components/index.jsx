@@ -5,6 +5,23 @@
 import { useState, useEffect, useRef } from "react";
 import { Eye, EyeOff, AlertTriangle, HelpCircle } from "lucide-react";
 
+// ------ Logo --------------------------------------------------
+// Flat badge icon: ascending bars (performance) + a trend line up to a
+// highlighted point — no real brand asset exists for this project yet,
+// so this is a small reusable SVG mark instead of an <img>.
+export function Logo({ size = 32 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" style={{ flexShrink: 0 }}>
+      <rect width="48" height="48" rx="12" fill="#ffffff" />
+      <rect x="10" y="28" width="7" height="10" rx="1.6" fill="#a5d6a7" />
+      <rect x="19" y="22" width="7" height="16" rx="1.6" fill="#66bb6a" />
+      <rect x="28" y="14" width="7" height="24" rx="1.6" fill="#1b5e20" />
+      <path d="M13 27 L22 21 L31 13 L37 10" stroke="#1b5e20" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      <circle cx="37" cy="10" r="4" fill="#ffd54f" stroke="#1b5e20" strokeWidth="1.4" />
+    </svg>
+  );
+}
+
 // ------ Clock -----------------------------------------------
 export function Clock() {
   const [now, setNow] = useState(new Date());
@@ -24,12 +41,23 @@ export function Clock() {
 // ------ Header ----------------------------------------------
 export function Header({ subtitle, backLabel, onBack, titleOverride, user, onLogout, profilePic }) {
   return (
-    <div style={{
+    <div className="app-header" style={{
       background: "#1a6b1a", color: "#fff", padding: "10px 20px",
       display: "flex", alignItems: "center", justifyContent: "space-between",
-      gap: 12,
+      gap: 12, flexWrap: "wrap",
     }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, flex: 1, minWidth: 0 }}>
+      <style>{`
+        /* Both sides are flexShrink:0 by design (title/back button must
+           stay readable, user info must stay legible) — on a narrow phone
+           there just isn't room for both on one row, so they used to
+           overlap instead of wrapping. Force them onto their own rows. */
+        @media (max-width: 640px) {
+          .app-header { row-gap: 8px; }
+          .app-header-left, .app-header-right { flex: 1 1 100% !important; justify-content: space-between; }
+          .app-header-right .app-header-clock { display: none; }
+        }
+      `}</style>
+      <div className="app-header-left" style={{ display: "flex", alignItems: "center", gap: 14, flex: 1, minWidth: 0 }}>
         {onBack && (
           <button
             onClick={onBack}
@@ -43,9 +71,10 @@ export function Header({ subtitle, backLabel, onBack, titleOverride, user, onLog
             {backLabel || "← กลับหน้าหลัก"}
           </button>
         )}
+        <Logo size={28} />
         <div style={{ minWidth: 0 }}>
           <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 15, letterSpacing: 1 }}>
-            {titleOverride || "Supplier Evaluation System"}
+            {titleOverride || "SPES"}
           </div>
           {subtitle && (
             <div style={{ fontSize: 11, color: "#a5d6a7", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -54,7 +83,7 @@ export function Header({ subtitle, backLabel, onBack, titleOverride, user, onLog
           )}
         </div>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
+      <div className="app-header-right" style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
         {user && (
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{
@@ -76,7 +105,7 @@ export function Header({ subtitle, backLabel, onBack, titleOverride, user, onLog
             </div>
           </div>
         )}
-        <Clock />
+        <div className="app-header-clock"><Clock /></div>
         {onLogout && (
           <button
             onClick={onLogout}
@@ -376,11 +405,12 @@ export function useModal() {
 }
 
 // ------ GreenButton -----------------------------------------
-export function GreenButton({ children, onClick, color = "#2e7d32", fullWidth = false, disabled = false, style = {} }) {
+export function GreenButton({ children, onClick, color = "#2e7d32", fullWidth = false, disabled = false, style = {}, className }) {
   return (
     <button
       onClick={disabled ? undefined : onClick}
       disabled={disabled}
+      className={className}
       style={{
         background: disabled ? "#9e9e9e" : color,
         color: "#fff", border: "none", borderRadius: 8,

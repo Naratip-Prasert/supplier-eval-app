@@ -867,7 +867,7 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
     <>
       {modals}
       <div style={{ minHeight: "100vh", background: "#f0f4f0", fontFamily: "Sarabun, sans-serif" }}>
-        <Header titleOverride="Supplier Evaluation System" />
+        <Header />
         <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 20px 48px" }}>
           {content}
         </div>

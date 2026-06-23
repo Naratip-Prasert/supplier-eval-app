@@ -11,9 +11,6 @@ import AdminPage          from "./pages/AdminPage";
 import UploadHistoryPage  from "./pages/UploadHistoryPage";
 import SupervisorPage     from "./pages/SupervisorPage";
 import LoginPage          from "./pages/LoginPage";
-import RegisterPage       from "./pages/RegisterPage";
-import ForgotPasswordPage from "./pages/ForgotPasswordPage";
-import ResetPasswordPage  from "./pages/ResetPasswordPage";
 
 // ── Loader: fetch a saved evaluation and render ResultPage read-only ──
 function EvalHistoryLoader({ evalId, user, profilePic, onBack }) {
@@ -116,11 +113,29 @@ function EvalHistoryLoader({ evalId, user, profilePic, onBack }) {
   );
 }
 
+// JWTs are base64URL-encoded (uses '-'/'_' instead of '+'/'/', no padding) —
+// passing that straight to atob() throws "not correctly encoded" whenever
+// the payload happens to contain '-' or '_' (common — it's 2 of the 64
+// base64 symbols), which silently logged real users out on every page
+// reload where their token's bytes triggered it. Converting to standard
+// base64 first, and decoding through escape/decodeURIComponent, also
+// fixes Thai (UTF-8) names coming out as mojibake.
+function decodeJwtPayload(token) {
+  const base64url = token.split(".")[1];
+  const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+  const binary = atob(padded);
+  const json = decodeURIComponent(
+    binary.split("").map(c => "%" + c.charCodeAt(0).toString(16).padStart(2, "0")).join("")
+  );
+  return JSON.parse(json);
+}
+
 function getStoredUser() {
   try {
     const token = localStorage.getItem("spe_token");
     if (!token) return null;
-    const payload = JSON.parse(atob(token.split(".")[1]));
+    const payload = decodeJwtPayload(token);
     if (payload.exp * 1000 < Date.now()) {
       localStorage.removeItem("spe_token");
       return null;
@@ -152,22 +167,6 @@ export default function App() {
       .catch(() => {});
   }, [user?.empId]);
 
-  // ── Password reset via email link ────────────────────────────
-  const resetToken = new URLSearchParams(window.location.search).get("reset");
-  if (resetToken) {
-    return (
-      <ResetPasswordPage
-        token={resetToken}
-        onDone={() => {
-          window.history.replaceState({}, "", window.location.pathname);
-          setPage("login");
-          // Force re-render so the reset param is gone
-          setUser(null);
-        }}
-      />
-    );
-  }
-
   // ── Auth handlers ─────────────────────────────────────────────
   const handleLogin = (token, userData) => {
     localStorage.setItem("spe_token", token);
@@ -186,24 +185,7 @@ export default function App() {
 
   // ── Not logged in: show auth pages ───────────────────────────
   if (!user) {
-    if (page === "register") {
-      return (
-        <RegisterPage
-          onBack={() => setPage("login")}
-          onDone={() => setPage("login")}
-        />
-      );
-    }
-    if (page === "forgot") {
-      return <ForgotPasswordPage onBack={() => setPage("login")} />;
-    }
-    return (
-      <LoginPage
-        onLogin={handleLogin}
-        onRegister={() => setPage("register")}
-        onForgot={() => setPage("forgot")}
-      />
-    );
+    return <LoginPage onLogin={handleLogin} />;
   }
 
   // ── Logged in: show main app pages ───────────────────────────

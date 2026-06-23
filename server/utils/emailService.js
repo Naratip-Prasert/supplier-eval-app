@@ -1,9 +1,24 @@
 'use strict';
 const { Resend } = require('resend');
+const pool = require('../db');
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 const FROM    = process.env.EMAIL_FROM || 'Supplier Eval <onboarding@resend.dev>';
 const FE_URL  = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+// Escapes values that ultimately come from uploaded Excel data or
+// free-text supervisor notes before interpolating into email HTML —
+// without this, a crafted supplier name/note could inject markup
+// (fake links, broken layout) into emails sent to other employees.
+function esc(value) {
+  if (value == null) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 // ── shared HTML wrapper ────────────────────────────────────────
 function wrap(titleTh, bodyHtml) {
@@ -20,9 +35,26 @@ function wrap(titleTh, bodyHtml) {
     </div>`;
 }
 
-async function send(to, subject, html) {
-  const result = await resend.emails.send({ from: FROM, to: [to], subject, html });
-  return result;
+// email_logs exists specifically so send failures (and successes) are
+// visible somewhere other than console output, which most deployments
+// never persist — previously nothing ever wrote to this table at all.
+async function logEmail(taskId, emailType, toEmail, subject, status, errorMsg) {
+  await pool.query(
+    `INSERT INTO email_logs (task_id, email_type, to_email, subject, status, error_msg)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+    [taskId, emailType, toEmail, subject, status, errorMsg || null]
+  ).catch(e => console.warn('[emailService] email_logs insert failed:', e.message));
+}
+
+async function send(to, subject, html, { taskId = null, emailType = null } = {}) {
+  try {
+    const result = await resend.emails.send({ from: FROM, to: [to], subject, html });
+    await logEmail(taskId, emailType, to, subject, 'sent', null);
+    return result;
+  } catch (err) {
+    await logEmail(taskId, emailType, to, subject, 'failed', err.message);
+    throw err;
+  }
 }
 
 // ── 1. Invitation ──────────────────────────────────────────────
@@ -30,68 +62,68 @@ async function sendInvitationEmail(task, supplier) {
   const dueStr = new Date(task.due_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
   const evalUrl = `${FE_URL}`;
   const html = wrap('แจ้งการประเมิน Supplier', `
-    <p>เรียน <strong>${task.assigned_name || task.assigned_email}</strong></p>
+    <p>เรียน <strong>${esc(task.assigned_name || task.assigned_email)}</strong></p>
     <p>คุณได้รับมอบหมายให้ประเมิน Supplier รายการต่อไปนี้:</p>
     <table style="width:100%;border-collapse:collapse;margin:12px 0">
-      <tr><td style="padding:6px 0;color:#555;width:140px">ชื่อ Supplier</td><td><strong>${supplier.supplier_name}</strong></td></tr>
-      <tr><td style="padding:6px 0;color:#555">รหัส</td><td>${supplier.vendor_code}</td></tr>
-      <tr><td style="padding:6px 0;color:#555">ประเภทการประเมิน</td><td>${task.eval_type_label || ''}</td></tr>
+      <tr><td style="padding:6px 0;color:#555;width:140px">ชื่อ Supplier</td><td><strong>${esc(supplier.supplier_name)}</strong></td></tr>
+      <tr><td style="padding:6px 0;color:#555">รหัส</td><td>${esc(supplier.vendor_code)}</td></tr>
+      <tr><td style="padding:6px 0;color:#555">ประเภทการประเมิน</td><td>${esc(task.eval_type_label || '')}</td></tr>
       <tr><td style="padding:6px 0;color:#555">วันครบกำหนด</td><td><strong style="color:#c62828">${dueStr}</strong></td></tr>
     </table>
     <a href="${evalUrl}" style="display:inline-block;background:#1a6b1a;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">เข้าสู่ระบบประเมิน</a>
   `);
-  return send(task.assigned_email, `[SPE] กรุณาประเมิน Supplier: ${supplier.supplier_name}`, html);
+  return send(task.assigned_email, `[SPE] กรุณาประเมิน Supplier: ${supplier.supplier_name}`, html, { taskId: task.id, emailType: 'invitation' });
 }
 
 // ── 2. Reminder (7 วันก่อน due) ───────────────────────────────
 async function sendReminderEmail(task, supplier) {
   const dueStr = new Date(task.due_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
   const html = wrap('เตือนความจำ: ใกล้ครบกำหนดประเมิน', `
-    <p>เรียน <strong>${task.assigned_name || task.assigned_email}</strong></p>
-    <p>คุณยังไม่ได้ส่งผลการประเมิน Supplier <strong>${supplier.supplier_name}</strong></p>
+    <p>เรียน <strong>${esc(task.assigned_name || task.assigned_email)}</strong></p>
+    <p>คุณยังไม่ได้ส่งผลการประเมิน Supplier <strong>${esc(supplier.supplier_name)}</strong></p>
     <p style="color:#c62828"><strong>ครบกำหนดใน 7 วัน: ${dueStr}</strong></p>
     <a href="${FE_URL}" style="display:inline-block;background:#1a6b1a;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">ประเมินเดี๋ยวนี้</a>
   `);
-  return send(task.assigned_email, `[SPE] เตือน: ครบกำหนดประเมิน ${supplier.supplier_name} ใน 7 วัน`, html);
+  return send(task.assigned_email, `[SPE] เตือน: ครบกำหนดประเมิน ${supplier.supplier_name} ใน 7 วัน`, html, { taskId: task.id, emailType: 'reminder' });
 }
 
 // ── 3. Overdue (3 วันหลัง due) ────────────────────────────────
 async function sendOverdueEmail(task, supplier) {
   const dueStr = new Date(task.due_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
   const html = wrap('เกินกำหนด: ยังไม่ได้ประเมิน', `
-    <p>เรียน <strong>${task.assigned_name || task.assigned_email}</strong></p>
-    <p>การประเมิน Supplier <strong>${supplier.supplier_name}</strong> เกินกำหนด <strong>${dueStr}</strong> แล้ว 3 วัน</p>
+    <p>เรียน <strong>${esc(task.assigned_name || task.assigned_email)}</strong></p>
+    <p>การประเมิน Supplier <strong>${esc(supplier.supplier_name)}</strong> เกินกำหนด <strong>${dueStr}</strong> แล้ว 3 วัน</p>
     <p>กรุณาดำเนินการโดยด่วน หากมีข้อขัดข้องกรุณาติดต่อ Admin</p>
     <a href="${FE_URL}" style="display:inline-block;background:#c62828;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">ประเมินทันที</a>
   `);
-  return send(task.assigned_email, `[SPE] เกินกำหนด: ยังไม่ประเมิน ${supplier.supplier_name}`, html);
+  return send(task.assigned_email, `[SPE] เกินกำหนด: ยังไม่ประเมิน ${supplier.supplier_name}`, html, { taskId: task.id, emailType: 'overdue' });
 }
 
 // ── 4. Thank-you (หลัง submit) ────────────────────────────────
 async function sendThankyouEmail(task, supplier) {
   const html = wrap('ขอบคุณสำหรับการประเมิน', `
-    <p>เรียน <strong>${task.assigned_name || task.assigned_email}</strong></p>
-    <p>ขอบคุณที่ส่งผลการประเมิน Supplier <strong>${supplier.supplier_name}</strong> เรียบร้อยแล้ว</p>
+    <p>เรียน <strong>${esc(task.assigned_name || task.assigned_email)}</strong></p>
+    <p>ขอบคุณที่ส่งผลการประเมิน Supplier <strong>${esc(supplier.supplier_name)}</strong> เรียบร้อยแล้ว</p>
     <p>ผลการประเมินจะถูกส่งให้ Supervisor พิจารณาอนุมัติภายใน 7 วัน</p>
   `);
-  return send(task.assigned_email, `[SPE] ขอบคุณสำหรับการประเมิน: ${supplier.supplier_name}`, html);
+  return send(task.assigned_email, `[SPE] ขอบคุณสำหรับการประเมิน: ${supplier.supplier_name}`, html, { taskId: task.id, emailType: 'thankyou' });
 }
 
 // ── 5. Supervisor notification (ทั้ง BU+GCP submit แล้ว) ───────
 async function sendSupervisorNotifyEmail(supervisorEmail, supervisorName, session, reviewDue) {
   const dueStr = new Date(reviewDue).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
   const html = wrap('รอการอนุมัติผลประเมิน', `
-    <p>เรียน <strong>${supervisorName || supervisorEmail}</strong></p>
+    <p>เรียน <strong>${esc(supervisorName || supervisorEmail)}</strong></p>
     <p>มีผลการประเมิน Supplier รอการอนุมัติของคุณ:</p>
     <table style="width:100%;border-collapse:collapse;margin:12px 0">
-      <tr><td style="padding:6px 0;color:#555;width:140px">Supplier</td><td><strong>${session.supplier_name}</strong></td></tr>
-      <tr><td style="padding:6px 0;color:#555">ประเภท</td><td>${session.eval_type}</td></tr>
+      <tr><td style="padding:6px 0;color:#555;width:140px">Supplier</td><td><strong>${esc(session.supplier_name)}</strong></td></tr>
+      <tr><td style="padding:6px 0;color:#555">ประเภท</td><td>${esc(session.eval_type)}</td></tr>
       <tr><td style="padding:6px 0;color:#555">คะแนนรวม</td><td>${session.final_score ?? '-'}</td></tr>
       <tr><td style="padding:6px 0;color:#555">กรุณาอนุมัติภายใน</td><td><strong style="color:#c62828">${dueStr}</strong></td></tr>
     </table>
     <a href="${FE_URL}" style="display:inline-block;background:#1a6b1a;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">เข้าสู่ระบบอนุมัติ</a>
   `);
-  return send(supervisorEmail, `[SPE] รออนุมัติ: ผลประเมิน ${session.supplier_name}`, html);
+  return send(supervisorEmail, `[SPE] รออนุมัติ: ผลประเมิน ${session.supplier_name}`, html, { emailType: 'supervisor_notify' });
 }
 
 // ── 6. Supervisor result → GCP + BU ───────────────────────────
@@ -99,16 +131,16 @@ async function sendSupervisorResultEmail(toEmail, toName, supplier, status, note
   const isApproved = status === 'approved';
   const titleTh = isApproved ? 'ผลการประเมินได้รับการอนุมัติ' : 'ผลการประเมินถูกส่งคืน';
   const html = wrap(titleTh, `
-    <p>เรียน <strong>${toName || toEmail}</strong></p>
-    <p>ผลการประเมิน Supplier <strong>${supplier.supplier_name}</strong> ได้รับการพิจารณาแล้ว</p>
+    <p>เรียน <strong>${esc(toName || toEmail)}</strong></p>
+    <p>ผลการประเมิน Supplier <strong>${esc(supplier.supplier_name)}</strong> ได้รับการพิจารณาแล้ว</p>
     <p><strong>ผล: ${isApproved ? '✅ อนุมัติ' : '🔄 ส่งคืนเพื่อแก้ไข'}</strong></p>
-    ${notes ? `<p style="background:#fff3e0;padding:12px;border-radius:6px;border-left:4px solid #f57f17"><strong>หมายเหตุ:</strong> ${notes}</p>` : ''}
+    ${notes ? `<p style="background:#fff3e0;padding:12px;border-radius:6px;border-left:4px solid #f57f17"><strong>หมายเหตุ:</strong> ${esc(notes).replace(/\n/g, '<br/>')}</p>` : ''}
     ${!isApproved ? `<a href="${FE_URL}" style="display:inline-block;background:#1565c0;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">แก้ไขและส่งใหม่</a>` : ''}
   `);
   const subject = isApproved
     ? `[SPE] อนุมัติแล้ว: ผลประเมิน ${supplier.supplier_name}`
     : `[SPE] กรุณาแก้ไข: ผลประเมิน ${supplier.supplier_name}`;
-  return send(toEmail, subject, html);
+  return send(toEmail, subject, html, { emailType: 'supervisor_result' });
 }
 
 module.exports = {

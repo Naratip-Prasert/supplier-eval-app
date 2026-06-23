@@ -10,8 +10,8 @@ import { SESSION_STATUS_LABELS, SESSION_STATUS_COLORS, getDisplayStatus } from "
 import { TimelineStepper } from "../components/TimelineStepper";
 import { FilterChips, toggleInSet } from "../components/FilterChips";
 import {
-  Users, Package, ClipboardList, Upload,
-  ArrowLeft, Search, RefreshCw, Plus, X, Check,
+  Users, ClipboardList, Upload,
+  ArrowLeft, Search, RefreshCw, X,
   AlertCircle, SlidersHorizontal,
 } from "lucide-react";
 
@@ -31,10 +31,6 @@ const TABS = [
     color: "#1b5e20", circleBg: "radial-gradient(circle at 38% 35%, #f1f8e9, #a5d6a7 130%)",
   },
   {
-    key: "suppliers", label: "ซัพพลายเออร์", labelEn: "Suppliers", icon: Package,
-    color: "#1565c0", circleBg: "radial-gradient(circle at 38% 35%, #e8f4fd, #90caf9 130%)",
-  },
-  {
     key: "tasks", label: "งานประเมิน (Upload)", labelEn: "Evaluation Tasks", icon: Upload,
     color: "#00897b", circleBg: "radial-gradient(circle at 38% 35%, #e0f7f5, #80cbc4 130%)",
   },
@@ -47,7 +43,6 @@ const TABS = [
 // loaded at this level (tasks' pending count lives inside TasksPage itself).
 const TAB_COUNTS = {
   employees: (c) => c.employees,
-  suppliers: (c) => c.suppliers,
   sessions:  (c) => c.pendingSessions,
 };
 
@@ -69,7 +64,6 @@ function loadEntryDateFilter() {
 export default function AdminPage({ authUser, onBack, onViewEvaluation, onViewUploadHistory, initialSessionId, initialTab }) {
   const [tab,             setTab]             = useState(initialTab ?? (initialSessionId ? "sessions" : "employees"));
   const [employees,       setEmployees]       = useState([]);
-  const [suppliers,       setSuppliers]       = useState([]);
   const [sessions,        setSessions]        = useState([]);
   const [loading,         setLoading]         = useState(false);
   const [error,           setError]           = useState(null);
@@ -86,13 +80,11 @@ export default function AdminPage({ authUser, onBack, onViewEvaluation, onViewUp
     setLoading(true);
     setError(null);
     try {
-      const [empRes, supRes, sesRes] = await Promise.all([
+      const [empRes, sesRes] = await Promise.all([
         authFetch("/api/employees").then(r => r.json()),
-        authFetch("/api/suppliers").then(r => r.json()),
         authFetch("/api/sessions").then(r => r.json()),
       ]);
       setEmployees(Array.isArray(empRes) ? empRes : []);
-      setSuppliers(Array.isArray(supRes) ? supRes : []);
       setSessions(Array.isArray(sesRes) ? sesRes : []);
     } catch (e) {
       setError("โหลดข้อมูลไม่สำเร็จ");
@@ -105,13 +97,12 @@ export default function AdminPage({ authUser, onBack, onViewEvaluation, onViewUp
 
   const tabCounts = {
     employees:      employees.length,
-    suppliers:      suppliers.length,
     pendingSessions: sessions.filter(s => s.status === "pending" || s.status === "in_progress").length,
   };
 
   return (
     <div style={{ minHeight: "100vh", background: "#f0f4f0", fontFamily: "Sarabun, sans-serif" }}>
-      <Header titleOverride="Supplier Evaluation System" />
+      <Header />
 
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 20px 48px" }}>
 
@@ -177,7 +168,6 @@ export default function AdminPage({ authUser, onBack, onViewEvaluation, onViewUp
 
         {/* ── Tab content ── */}
         {tab === "employees" && <EmployeesTab employees={employees} onRefresh={fetchAll} authUser={authUser} />}
-        {tab === "suppliers" && <SuppliersTab suppliers={suppliers} onRefresh={fetchAll} />}
         {tab === "tasks"     && <TasksPage embedded onUploadHistory={onViewUploadHistory} />}
         {tab === "sessions"  && (
           <SessionsTab
@@ -278,7 +268,7 @@ function EmployeesTab({ employees, onRefresh, authUser }) {
         </div>
 
         <div style={{ display: "flex", gap: 6 }}>
-          {["ALL", "USER", "GCP", "ADMIN"].map(r => (
+          {["ALL", "USER", "GCP", "ADMIN", "SUPERVISOR"].map(r => (
             <button
               key={r}
               onClick={() => setRoleFilter(r)}
@@ -454,203 +444,6 @@ function VerifyAdminModal({ authUser, targetName, onCancel, onVerified }) {
   );
 }
 
-// ── Suppliers Tab ─────────────────────────────────────────────
-function SuppliersTab({ suppliers, onRefresh }) {
-  const [search,   setSearch]   = useState("");
-  const [showForm, setShowForm] = useState(false);
-  const [form,     setForm]     = useState({ vendorCode: "", supplierName: "", productType: "goods" });
-  const [saving,   setSaving]   = useState(false);
-  const [patchId,  setPatchId]  = useState(null);
-  const [msg,      setMsg]      = useState(null);
-
-  const filtered = suppliers.filter(s => {
-    const q = search.toLowerCase();
-    return !q || s.vendorCode?.toLowerCase().includes(q) || s.supplierName?.toLowerCase().includes(q);
-  });
-
-  const showMsg = (type, text) => {
-    setMsg({ type, text });
-    setTimeout(() => setMsg(null), 3500);
-  };
-
-  const addSupplier = async () => {
-    if (!form.vendorCode.trim() || !form.supplierName.trim()) {
-      return showMsg("err", "กรุณากรอก Vendor Code และชื่อ");
-    }
-    setSaving(true);
-    try {
-      const r = await authFetch("/api/suppliers", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.message);
-      showMsg("ok", "เพิ่มซัพพลายเออร์สำเร็จ");
-      setShowForm(false);
-      setForm({ vendorCode: "", supplierName: "", productType: "goods" });
-      onRefresh();
-    } catch (e) {
-      showMsg("err", e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const toggleActive = async (vendorCode, current) => {
-    setPatchId(vendorCode);
-    try {
-      const r = await authFetch(`/api/suppliers/${vendorCode}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isActive: !current }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.message);
-      onRefresh();
-    } catch (e) {
-      showMsg("err", e.message);
-    } finally {
-      setPatchId(null);
-    }
-  };
-
-  const PRODUCT_LABELS = { goods: "สินค้า", services: "บริการ", both: "สินค้า+บริการ" };
-
-  return (
-    <div>
-      {msg && (
-        <div style={{
-          background: msg.type === "ok" ? "#e8f5e9" : "#ffebee",
-          border: `1px solid ${msg.type === "ok" ? "#a5d6a7" : "#ef9a9a"}`,
-          color: msg.type === "ok" ? "#1b5e20" : "#b71c1c",
-          borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 13,
-        }}>
-          {msg.text}
-        </div>
-      )}
-
-      {/* Add form */}
-      {showForm && (
-        <div style={{
-          background: "#fff", border: "1.5px solid #a5d6a7", borderRadius: 12,
-          padding: "20px 22px", marginBottom: 20,
-        }}>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 14, color: "#1b5e20" }}>เพิ่มซัพพลายเออร์ใหม่</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 10, alignItems: "end" }}>
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 600, color: "#666", display: "block", marginBottom: 4 }}>Vendor Code *</label>
-              <input
-                value={form.vendorCode}
-                onChange={e => setForm(f => ({ ...f, vendorCode: e.target.value }))}
-                placeholder="SUP-XXX"
-                style={inputStyle}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 600, color: "#666", display: "block", marginBottom: 4 }}>ชื่อซัพพลายเออร์ *</label>
-              <input
-                value={form.supplierName}
-                onChange={e => setForm(f => ({ ...f, supplierName: e.target.value }))}
-                placeholder="ชื่อบริษัท..."
-                style={inputStyle}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 600, color: "#666", display: "block", marginBottom: 4 }}>ประเภท</label>
-              <select value={form.productType} onChange={e => setForm(f => ({ ...f, productType: e.target.value }))} style={inputStyle}>
-                <option value="goods">สินค้า</option>
-                <option value="services">บริการ</option>
-                <option value="both">สินค้า+บริการ</option>
-              </select>
-            </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button onClick={addSupplier} disabled={saving} style={btnStyle("#1b5e20", "#fff")}>
-                {saving ? "…" : <><Check size={13} /> บันทึก</>}
-              </button>
-              <button onClick={() => setShowForm(false)} style={btnStyle("#f5f5f5", "#666", "#e0e0e0")}>
-                <X size={13} />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Search + add button */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8,
-          background: "#fff", border: "1px solid #e0e0e0", borderRadius: 8,
-          padding: "8px 12px", flex: 1,
-        }}>
-          <Search size={14} style={{ color: "#bbb" }} />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="ค้นหา vendor code หรือชื่อ…"
-            style={{ border: "none", outline: "none", fontSize: 13, flex: 1, fontFamily: "Sarabun, sans-serif" }}
-          />
-        </div>
-        <button
-          onClick={() => setShowForm(f => !f)}
-          style={btnStyle("#1b5e20", "#fff")}
-        >
-          <Plus size={14} /> เพิ่มซัพพลายเออร์
-        </button>
-      </div>
-
-      <div style={{ fontSize: 12, color: "#aaa", marginBottom: 10 }}>แสดง {filtered.length} รายการ</div>
-
-      <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden", border: "1px solid #dde3dd", boxShadow: "0 2px 10px rgba(0,0,0,0.06)" }}>
-        <table className="admin-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-          <thead>
-            <tr>
-              {["Vendor Code", "ชื่อซัพพลายเออร์", "ประเภท", "สถานะ", "จัดการ"].map(h => (
-                <th key={h}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
-              <tr><td colSpan={5} style={{ padding: 32, textAlign: "center", color: "#bbb" }}>ไม่พบข้อมูล</td></tr>
-            ) : filtered.map((s) => (
-              <tr key={s.vendorCode}>
-                <td style={{ padding: "11px 14px", fontFamily: "monospace", fontSize: 12, fontWeight: 700, color: "#1565c0" }}>{s.vendorCode}</td>
-                <td style={{ padding: "11px 14px", fontWeight: 600, color: "#222" }}>{s.supplierName}</td>
-                <td style={{ padding: "11px 14px", color: "#666", fontSize: 12 }}>{PRODUCT_LABELS[s.productType] ?? s.productType}</td>
-                <td style={{ padding: "11px 14px" }}>
-                  <span style={{
-                    background: s.isActive !== false ? "#e8f5e9" : "#f5f5f5",
-                    color: s.isActive !== false ? "#1b5e20" : "#aaa",
-                    borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700,
-                  }}>
-                    {s.isActive !== false ? "Active" : "Inactive"}
-                  </span>
-                </td>
-                <td style={{ padding: "11px 14px" }}>
-                  <button
-                    onClick={() => toggleActive(s.vendorCode, s.isActive !== false)}
-                    disabled={patchId === s.vendorCode}
-                    style={{
-                      fontSize: 11, fontWeight: 700, fontFamily: "Sarabun, sans-serif",
-                      padding: "4px 10px", borderRadius: 6, cursor: "pointer", border: "1px solid",
-                      borderColor: s.isActive !== false ? "#ef9a9a" : "#a5d6a7",
-                      background: s.isActive !== false ? "#ffebee" : "#e8f5e9",
-                      color: s.isActive !== false ? "#b71c1c" : "#1b5e20",
-                    }}
-                  >
-                    {patchId === s.vendorCode ? "…" : s.isActive !== false ? "Deactivate" : "Activate"}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
 // ── Sessions Tab ──────────────────────────────────────────────
 function SessionsTab({ sessions, onViewEvaluation, initialSessionId, entryDateFilter, setEntryDateFilter }) {
   const [search,            setSearch]            = useState("");
@@ -687,10 +480,13 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId, entryDateFi
       s.supplierName?.toLowerCase().includes(q) ||
       s.vendorCode?.toLowerCase().includes(q) ||
       s.period?.toLowerCase().includes(q);
-    const displayStatus = statusFilter.has("overdue") ? getDisplayStatus(s.status, s.dueDate) : null;
-    const matchStatus   = statusFilter.size === 0
-      || statusFilter.has(s.status)
-      || displayStatus === "overdue";
+    // Always resolve to the same "effective" status the row's badge
+    // actually shows (getDisplayStatus) — filtering by "pending" used to
+    // match on the raw s.status even when the row's badge displayed
+    // "Overdue", since the overdue check only ran when "overdue" itself
+    // was one of the selected filters.
+    const displayStatus = getDisplayStatus(s.status, s.dueDate);
+    const matchStatus   = statusFilter.size === 0 || statusFilter.has(displayStatus);
     const matchEvalType = evalTypeFilter.size === 0 || evalTypeFilter.has(s.evalType);
     const matchPeriod   = periodFilter.size === 0 || s.evalType !== "post_eval" || periodFilter.has(s.period);
     const matchEntry    = matchesDateFilter(s.createdAt, entryDateFilter);
@@ -1123,19 +919,3 @@ function StatusBadge({ status, dueDate }) {
   );
 }
 
-const inputStyle = {
-  width: "100%", padding: "8px 10px", border: "1px solid #e0e0e0", borderRadius: 7,
-  fontSize: 13, fontFamily: "Sarabun, sans-serif", outline: "none",
-  boxSizing: "border-box",
-};
-
-function btnStyle(bg, color, borderColor) {
-  return {
-    display: "flex", alignItems: "center", gap: 6,
-    padding: "8px 14px", borderRadius: 8,
-    border: `1px solid ${borderColor ?? bg}`,
-    background: bg, color, cursor: "pointer",
-    fontSize: 13, fontWeight: 700, fontFamily: "Sarabun, sans-serif",
-    whiteSpace: "nowrap",
-  };
-}

@@ -156,6 +156,21 @@ router.post('/sessions/:id/approve', async (req, res) => {
     const session = sessionResult.rows[0];
     const assignees = await getCurrentAssignees(client, sessionId);
 
+    // Resolve the acting supervisor's row id up front — if it doesn't
+    // resolve (e.g. JWT empId no longer matches any employee), fail loudly
+    // instead of silently writing supervisor_id = NULL and losing the
+    // audit trail of who approved this session.
+    const supervisorResult = await client.query(
+      `SELECT id FROM employees WHERE UPPER(employee_id) = UPPER($1) LIMIT 1`,
+      [req.user.empId]
+    );
+    if (supervisorResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      console.error(`[supervisor] empId จาก JWT ไม่พบใน employees: ${req.user.empId}`);
+      return res.status(401).json({ message: 'ไม่พบบัญชีผู้ใช้ของคุณในระบบ กรุณาเข้าสู่ระบบใหม่' });
+    }
+    const supervisorId = supervisorResult.rows[0].id;
+
     // Update session → completed
     await client.query(`
       UPDATE evaluation_sessions
@@ -173,11 +188,9 @@ router.post('/sessions/:id/approve', async (req, res) => {
     // Update supervisor_review
     await client.query(`
       UPDATE supervisor_reviews
-         SET status = 'approved', supervisor_id = (
-               SELECT id FROM employees WHERE employee_id = $1 LIMIT 1
-             ), notes = $2, reviewed_at = NOW()
+         SET status = 'approved', supervisor_id = $1, notes = $2, reviewed_at = NOW()
        WHERE session_id = $3 AND status = 'pending'
-    `, [req.user.empId, notes || null, sessionId]);
+    `, [supervisorId, notes || null, sessionId]);
 
     await client.query('COMMIT');
 
@@ -229,6 +242,19 @@ router.post('/sessions/:id/return', async (req, res) => {
     const session = sessionResult.rows[0];
     const assignees = await getCurrentAssignees(client, sessionId);
 
+    // Resolve the acting supervisor's row id up front — see same check in
+    // the approve handler for why.
+    const supervisorResult = await client.query(
+      `SELECT id FROM employees WHERE UPPER(employee_id) = UPPER($1) LIMIT 1`,
+      [req.user.empId]
+    );
+    if (supervisorResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      console.error(`[supervisor] empId จาก JWT ไม่พบใน employees: ${req.user.empId}`);
+      return res.status(401).json({ message: 'ไม่พบบัญชีผู้ใช้ของคุณในระบบ กรุณาเข้าสู่ระบบใหม่' });
+    }
+    const supervisorId = supervisorResult.rows[0].id;
+
     // Reset session → returned
     await client.query(`
       UPDATE evaluation_sessions SET status = 'returned' WHERE id = $1
@@ -251,11 +277,9 @@ router.post('/sessions/:id/return', async (req, res) => {
     // Update supervisor_review
     await client.query(`
       UPDATE supervisor_reviews
-         SET status = 'returned', supervisor_id = (
-               SELECT id FROM employees WHERE employee_id = $1 LIMIT 1
-             ), notes = $2, reviewed_at = NOW()
+         SET status = 'returned', supervisor_id = $1, notes = $2, reviewed_at = NOW()
        WHERE session_id = $3 AND status = 'pending'
-    `, [req.user.empId, notes, sessionId]);
+    `, [supervisorId, notes, sessionId]);
 
     await client.query('COMMIT');
 
