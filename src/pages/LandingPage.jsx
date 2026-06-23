@@ -2,7 +2,7 @@
 //  pages/LandingPage.jsx
 // ============================================================
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useModal } from "../components";
 import { TimelineStepper } from "../components/TimelineStepper";
 import { FilterChips, toggleInSet } from "../components/FilterChips";
@@ -13,7 +13,7 @@ import {
   Info, Loader2, AlertCircle, User, LogOut,
   ChevronDown, ClipboardList, Search, CheckCircle2,
   FileText, BarChart3, ArrowRight, Building2,
-  SlidersHorizontal, CalendarRange, ArrowDownUp, X,
+  SlidersHorizontal, CalendarRange, ArrowDownUp, X, RefreshCw,
 } from "lucide-react";
 
 import { PRODUCT_TYPE_OPTIONS, EVAL_PERIOD_OPTIONS, PRE_PERIOD_OPTIONS } from "../constants";
@@ -229,6 +229,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
   const [myTimeline,        setMyTimeline]        = useState([]);
   const [timelineLoading,   setTimelineLoading]   = useState(true);
   const [taskTab,           setTaskTab]           = useState("active"); // 'active' | 'returned'
+  const [returnedNote,      setReturnedNote]      = useState(null); // { supplierName, notes } | null
   const [taskSearch,        setTaskSearch]        = useState("");
   const [taskTypeFilter,    setTaskTypeFilter]    = useState(new Set()); // empty = all
   const [taskDateFrom,      setTaskDateFrom]      = useState("");
@@ -249,16 +250,25 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, [taskFilterOpen]);
 
-  useEffect(() => {
-    // Unlike /my-tasks (to-do list only, drops a task once submitted), this
-    // keeps tracking a task after the user has submitted their part, so they
-    // can see it progress through Submitted → Approved/Returned.
-    authFetch("/api/evaluations/my-timeline")
+  // Unlike /my-tasks (to-do list only, drops a task once submitted), this
+  // keeps tracking a task after the user has submitted their part, so they
+  // can see it progress through Submitted → Approved/Returned.
+  const fetchTimeline = useCallback(() => {
+    return authFetch("/api/evaluations/my-timeline")
       .then(r => r.ok ? r.json() : [])
       .then(data => setMyTimeline(Array.isArray(data) ? data : []))
-      .catch(() => setMyTimeline([]))
-      .finally(() => setTimelineLoading(false));
+      .catch(() => setMyTimeline([]));
   }, []);
+
+  useEffect(() => {
+    fetchTimeline().finally(() => setTimelineLoading(false));
+  }, [fetchTimeline]);
+
+  const [refreshingTimeline, setRefreshingTimeline] = useState(false);
+  const refreshTimeline = () => {
+    setRefreshingTimeline(true);
+    fetchTimeline().finally(() => setRefreshingTimeline(false));
+  };
 
   const startTask = (task) => {
     onSubmit({
@@ -378,6 +388,71 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
       `}</style>
       {ModalEl}
 
+      {returnedNote && (
+        <>
+          <div
+            onClick={() => setReturnedNote(null)}
+            style={{ position: "fixed", inset: 0, zIndex: 9998, background: "rgba(0,0,0,0.48)", animation: "fadeUp 0.15s ease" }}
+          />
+          <div style={{
+            position: "fixed", inset: 0, zIndex: 9999,
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+          }}>
+            <div style={{
+              background: "#fff", borderRadius: 16, width: "min(480px, 100%)",
+              maxHeight: "min(620px, 86vh)", display: "flex", flexDirection: "column",
+              boxShadow: "0 24px 64px rgba(0,0,0,0.28)", overflow: "hidden",
+            }}>
+              <div style={{
+                background: "linear-gradient(135deg, #fb923c, #ea580c)", padding: "18px 22px",
+                display: "flex", alignItems: "flex-start", gap: 12, color: "#fff", flexShrink: 0,
+              }}>
+                <AlertCircle size={24} style={{ flexShrink: 0, marginTop: 1 }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 800, fontSize: 16 }}>เหตุผลที่ถูกตีกลับ</div>
+                  <div style={{ fontSize: 12.5, opacity: 0.9, marginTop: 2 }}>{returnedNote.supplierName}</div>
+                </div>
+                <button
+                  onClick={() => setReturnedNote(null)}
+                  style={{
+                    background: "rgba(255,255,255,0.18)", border: "none", borderRadius: 8,
+                    width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center",
+                    cursor: "pointer", color: "#fff", flexShrink: 0,
+                  }}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div style={{ padding: 22, overflowY: "auto", flex: 1 }}>
+                <div style={{
+                  background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 12,
+                  padding: "16px 18px", fontSize: 14, lineHeight: 1.8, color: "#7c2d12",
+                  whiteSpace: "pre-line", wordBreak: "break-word", overflowWrap: "anywhere",
+                }}>
+                  {returnedNote.notes}
+                </div>
+              </div>
+
+              <div style={{ padding: "14px 22px 20px", flexShrink: 0, textAlign: "right" }}>
+                <button
+                  onClick={() => setReturnedNote(null)}
+                  style={{
+                    background: "#ea580c", color: "#fff", border: "none", borderRadius: 9,
+                    padding: "10px 28px", fontSize: 14, fontWeight: 700, cursor: "pointer",
+                    fontFamily: "Sarabun, sans-serif",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = "#c2410c"}
+                  onMouseLeave={e => e.currentTarget.style.background = "#ea580c"}
+                >
+                  ปิด
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* ── Top banner ── */}
       <div style={{ background: themeBg, position: "relative" }}>
         {/* decorative circles — clipped inside their own overflow:hidden wrapper */}
@@ -443,8 +518,23 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
             boxShadow: "0 4px 32px rgba(0,0,0,0.10)",
             padding: "20px 24px", marginBottom: 16, animation: "fadeUp 0.3s ease",
           }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 14, paddingLeft: 2 }}>
-              งานประเมินของคุณ
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", paddingLeft: 2 }}>
+                งานประเมินของคุณ
+              </div>
+              <button
+                onClick={refreshTimeline}
+                disabled={refreshingTimeline}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8,
+                  padding: "6px 12px", cursor: "pointer", fontSize: 12, color: "#6b7280",
+                  fontFamily: "Sarabun, sans-serif",
+                }}
+              >
+                <RefreshCw size={13} style={{ animation: refreshingTimeline ? "spin 1s linear infinite" : "none" }} />
+                รีเฟรช
+              </button>
             </div>
 
             {/* Tabs */}
@@ -604,7 +694,19 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                             <div style={{ fontWeight: 700, color: "#111827" }}>{t.supplierName}</div>
                             <div style={{ fontSize: 11, color: "#9ca3af" }}>{t.vendorCode}</div>
                             {isReturned && t.supervisorNotes && (
-                              <div style={{ fontSize: 11, color: "#fb8c00", marginTop: 2 }}>⚠ {t.supervisorNotes}</div>
+                              <button
+                                onClick={() => setReturnedNote({ supplierName: t.supplierName, notes: t.supervisorNotes })}
+                                style={{
+                                  display: "flex", alignItems: "center", gap: 6, marginTop: 6,
+                                  background: "#fff3e0", color: "#e65100", border: "1.5px solid #ffb74d",
+                                  borderRadius: 8, padding: "7px 14px", cursor: "pointer",
+                                  fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 12.5,
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.background = "#ffe0b2"}
+                                onMouseLeave={e => e.currentTarget.style.background = "#fff3e0"}
+                              >
+                                ⚠ ดูเหตุผลที่ถูกตีกลับ
+                              </button>
                             )}
                           </td>
                           <td style={{ padding: "10px 10px", color: "#555", fontSize: 12, whiteSpace: "nowrap" }}>

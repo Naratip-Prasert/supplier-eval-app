@@ -450,11 +450,12 @@ router.get('/my-tasks', async (req, res) => {
         s.vendor_code       AS "vendorCode",
         s.supplier_name     AS "supplierName",
         s.product_type      AS "productType",
-        sr.notes            AS "supervisorNotes"
+        (SELECT r.notes FROM supervisor_reviews r
+          WHERE r.session_id = es.id AND r.status = 'returned'
+          ORDER BY r.created_at DESC LIMIT 1)      AS "supervisorNotes"
       FROM evaluation_tasks et
       JOIN evaluation_sessions es ON es.id = et.session_id
       JOIN suppliers s             ON s.id = et.supplier_id
-      LEFT JOIN supervisor_reviews sr ON sr.session_id = es.id AND sr.status = 'returned'
       WHERE et.assigned_email = $1
         AND et.status != 'completed'
         AND es.status IN ('pending', 'in_progress', 'returned')
@@ -489,7 +490,9 @@ router.get('/my-timeline', async (req, res) => {
         s.vendor_code       AS "vendorCode",
         s.supplier_name     AS "supplierName",
         s.product_type      AS "productType",
-        sr.notes            AS "supervisorNotes",
+        (SELECT r.notes FROM supervisor_reviews r
+          WHERE r.session_id = es.id AND r.status = 'returned'
+          ORDER BY r.created_at DESC LIMIT 1)      AS "supervisorNotes",
         COALESCE(
           (SELECT r.review_due FROM supervisor_reviews r WHERE r.session_id = es.id ORDER BY r.created_at DESC LIMIT 1),
           et.due_date
@@ -497,7 +500,6 @@ router.get('/my-timeline', async (req, res) => {
       FROM evaluation_tasks et
       JOIN evaluation_sessions es ON es.id = et.session_id
       JOIN suppliers s             ON s.id = et.supplier_id
-      LEFT JOIN supervisor_reviews sr ON sr.session_id = es.id AND sr.status = 'returned'
       WHERE et.assigned_email = $1
       ORDER BY es.created_at DESC
       LIMIT 50

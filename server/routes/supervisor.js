@@ -47,7 +47,11 @@ router.get('/queue', async (req, res) => {
         sr.status          AS "reviewStatus"
       FROM evaluation_sessions es
       JOIN suppliers s ON s.id = es.supplier_id
-      LEFT JOIN supervisor_reviews sr ON sr.session_id = es.id AND sr.status = 'pending'
+      LEFT JOIN supervisor_reviews sr ON sr.id = (
+        SELECT id FROM supervisor_reviews
+         WHERE session_id = es.id AND status = 'pending'
+         ORDER BY created_at DESC LIMIT 1
+      )
       WHERE es.status = 'pending_review'
       ORDER BY sr.review_due ASC NULLS LAST
     `);
@@ -106,10 +110,12 @@ router.get('/history', async (req, res) => {
         es.final_score     AS "finalScore",
         es.final_grade     AS "finalGrade",
         es.completed_at    AS "completedAt",
+        sr.id              AS "reviewId",
         sr.status          AS "reviewStatus",
         sr.notes           AS "reviewNotes",
         sr.reviewed_at     AS "reviewedAt",
-        sup_emp.full_name  AS "supervisorName"
+        sup_emp.full_name  AS "supervisorName",
+        sup_emp.employee_id AS "supervisorEmpId"
       FROM evaluation_sessions es
       JOIN suppliers s ON s.id = es.supplier_id
       LEFT JOIN supervisor_reviews sr ON sr.session_id = es.id
@@ -270,6 +276,46 @@ router.post('/sessions/:id/return', async (req, res) => {
     res.status(500).json({ message: 'เกิดข้อผิดพลาด', error: err.message });
   } finally {
     client.release();
+  }
+});
+
+// ── PATCH /api/supervisor/reviews/:id/notes ───────────────────
+// Lets a supervisor edit the comment they wrote on a past (already
+// approved/returned) review. Keyed by the specific supervisor_reviews
+// row id — NOT session id, since one session can have several review
+// rows over multiple return/resubmit cycles, and editing by session id
+// would resolve to an arbitrary (often wrong/stale) row among them.
+// Only the supervisor who wrote it (or ADMIN) may edit.
+router.patch('/reviews/:id/notes', async (req, res) => {
+  const { notes } = req.body;
+  const reviewId   = req.params.id;
+
+  if (!notes?.trim()) {
+    return res.status(400).json({ message: 'กรุณาระบุหมายเหตุ' });
+  }
+
+  try {
+    const reviewResult = await pool.query(`
+      SELECT sr.id, emp.employee_id AS "supervisorEmpId"
+        FROM supervisor_reviews sr
+        LEFT JOIN employees emp ON emp.id = sr.supervisor_id
+       WHERE sr.id = $1 AND sr.status IN ('approved', 'returned')
+    `, [reviewId]);
+
+    if (reviewResult.rows.length === 0) {
+      return res.status(404).json({ message: 'ไม่พบประวัติการอนุมัติ' });
+    }
+    const review = reviewResult.rows[0];
+
+    if (req.user.role !== 'ADMIN' && review.supervisorEmpId?.toUpperCase() !== req.user.empId?.toUpperCase()) {
+      return res.status(403).json({ message: 'แก้ไขได้เฉพาะหมายเหตุของตัวเองเท่านั้น' });
+    }
+
+    await pool.query(`UPDATE supervisor_reviews SET notes = $1 WHERE id = $2`, [notes.trim(), review.id]);
+    res.json({ message: 'บันทึกหมายเหตุสำเร็จ' });
+  } catch (err) {
+    console.error('PATCH /api/supervisor/reviews/:id/notes error:', err);
+    res.status(500).json({ message: 'เกิดข้อผิดพลาด', error: err.message });
   }
 });
 

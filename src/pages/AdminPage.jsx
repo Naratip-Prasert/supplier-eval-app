@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Header } from "../components";
 import { authFetch } from "../utils/api";
 import TasksPage from "./TasksPage";
-import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter } from "../utils/dateFilter";
+import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter, todayRangeFilter } from "../utils/dateFilter";
 import { SESSION_STATUS_LABELS, SESSION_STATUS_COLORS, getDisplayStatus } from "../utils/statusLabels";
 import { TimelineStepper } from "../components/TimelineStepper";
 import { FilterChips, toggleInSet } from "../components/FilterChips";
@@ -51,6 +51,20 @@ const TAB_COUNTS = {
   sessions:  (c) => c.pendingSessions,
 };
 
+// Persisted in sessionStorage (not just component/module state) so the
+// filter survives not only SPA tab navigation but also a real browser
+// refresh or a frontend dev-server restart — it only resets when the
+// browser tab/session itself is closed.
+const ENTRY_DATE_FILTER_KEY = "admin_sessions_entryDateFilter";
+
+function loadEntryDateFilter() {
+  try {
+    const raw = sessionStorage.getItem(ENTRY_DATE_FILTER_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore malformed/unavailable storage */ }
+  return todayRangeFilter();
+}
+
 // ── AdminPage ─────────────────────────────────────────────────
 export default function AdminPage({ authUser, onBack, onViewEvaluation, onViewUploadHistory, initialSessionId, initialTab }) {
   const [tab,             setTab]             = useState(initialTab ?? (initialSessionId ? "sessions" : "employees"));
@@ -59,6 +73,14 @@ export default function AdminPage({ authUser, onBack, onViewEvaluation, onViewUp
   const [sessions,        setSessions]        = useState([]);
   const [loading,         setLoading]         = useState(false);
   const [error,           setError]           = useState(null);
+  const [entryDateFilter, setEntryDateFilterState] = useState(loadEntryDateFilter);
+  const setEntryDateFilter = useCallback((value) => {
+    setEntryDateFilterState(prev => {
+      const next = typeof value === "function" ? value(prev) : value;
+      try { sessionStorage.setItem(ENTRY_DATE_FILTER_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -157,7 +179,15 @@ export default function AdminPage({ authUser, onBack, onViewEvaluation, onViewUp
         {tab === "employees" && <EmployeesTab employees={employees} onRefresh={fetchAll} authUser={authUser} />}
         {tab === "suppliers" && <SuppliersTab suppliers={suppliers} onRefresh={fetchAll} />}
         {tab === "tasks"     && <TasksPage embedded onUploadHistory={onViewUploadHistory} />}
-        {tab === "sessions"  && <SessionsTab sessions={sessions} onViewEvaluation={onViewEvaluation} initialSessionId={initialSessionId} />}
+        {tab === "sessions"  && (
+          <SessionsTab
+            sessions={sessions}
+            onViewEvaluation={onViewEvaluation}
+            initialSessionId={initialSessionId}
+            entryDateFilter={entryDateFilter}
+            setEntryDateFilter={setEntryDateFilter}
+          />
+        )}
       </div>
 
       <style>{`
@@ -622,7 +652,7 @@ function SuppliersTab({ suppliers, onRefresh }) {
 }
 
 // ── Sessions Tab ──────────────────────────────────────────────
-function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
+function SessionsTab({ sessions, onViewEvaluation, initialSessionId, entryDateFilter, setEntryDateFilter }) {
   const [search,            setSearch]            = useState("");
   const [statusFilter,      setStatusFilter]      = useState(new Set()); // empty = all
   const [evalTypeFilter,    setEvalTypeFilter]    = useState(new Set());
@@ -663,14 +693,16 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
       || displayStatus === "overdue";
     const matchEvalType = evalTypeFilter.size === 0 || evalTypeFilter.has(s.evalType);
     const matchPeriod   = periodFilter.size === 0 || s.evalType !== "post_eval" || periodFilter.has(s.period);
+    const matchEntry    = matchesDateFilter(s.createdAt, entryDateFilter);
     const matchDate     = matchesDateFilter(s.completedAt, dateFilter);
-    return matchSearch && matchStatus && matchEvalType && matchPeriod && matchDate;
+    return matchSearch && matchStatus && matchEvalType && matchPeriod && matchEntry && matchDate;
   });
 
   const activeFilterCount = [
     statusFilter.size > 0,
     evalTypeFilter.size > 0,
     periodFilter.size > 0,
+    !!entryDateFilter.from || !!entryDateFilter.to,
     !!dateFilter.from || !!dateFilter.to || (dateFilter.preset && dateFilter.preset !== "all"),
   ].filter(Boolean).length;
 
@@ -678,6 +710,7 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
     setStatusFilter(new Set());
     setEvalTypeFilter(new Set());
     setPeriodFilter(new Set());
+    setEntryDateFilter(DEFAULT_DATE_FILTER);
     setDateFilter(DEFAULT_DATE_FILTER);
   }
 
@@ -756,8 +789,8 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
                 onClear={() => { setEvalTypeFilter(new Set()); setPeriodFilter(new Set()); }}
               />
 
-              {/* Period sub-filter — relevant when "Post" is included, same options as HistoryPage */}
-              {(evalTypeFilter.size === 0 || evalTypeFilter.has("post_eval")) && (
+              {/* Period sub-filter — only appears once "Post" is explicitly selected */}
+              {evalTypeFilter.has("post_eval") && (
                 <div style={{ marginTop: 8 }}>
                   <FilterChips
                     options={[
@@ -776,8 +809,13 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
             </div>
 
             <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>วันแรกที่ประเมิน</div>
+              <DateFilterBar filter={entryDateFilter} onChange={setEntryDateFilter} label="วันแรกที่ประเมิน" showPresets={false} />
+            </div>
+
+            <div>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>วันที่เสร็จสิ้น</div>
-              <DateFilterBar filter={dateFilter} onChange={setDateFilter} label="วันที่เสร็จสิ้น" />
+              <DateFilterBar filter={dateFilter} onChange={setDateFilter} label="วันที่เสร็จสิ้น" showPresets={false} />
             </div>
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #eee", paddingTop: 12 }}>
@@ -805,14 +843,14 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
         <table className="admin-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
             <tr>
-              {["ซัพพลายเออร์", "ประเภทการประเมิน", "Period", "สถานะ", "เสร็จสิ้นเมื่อ", "คะแนนรวม", "เกรด", "ผู้ประเมิน"].map(h => (
+              {["ซัพพลายเออร์", "ประเภทการประเมิน", "Period", "สถานะ", "วันแรกที่ประเมิน", "เสร็จสิ้นเมื่อ", "คะแนนรวม", "เกรด", "ผู้ประเมิน"].map(h => (
                 <th key={h}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={8} style={{ padding: 32, textAlign: "center", color: "#bbb" }}>ไม่พบข้อมูล</td></tr>
+              <tr><td colSpan={9} style={{ padding: 32, textAlign: "center", color: "#bbb" }}>ไม่พบข้อมูล</td></tr>
             ) : filtered.map((s, i) => (
               <tr
                 key={s.sessionId}
@@ -833,6 +871,9 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
                 </td>
                 <td style={{ padding: "11px 14px", fontSize: 12, color: "#666" }}>{s.period}</td>
                 <td style={{ padding: "11px 14px" }}><StatusBadge status={s.status} dueDate={s.dueDate} /></td>
+                <td style={{ padding: "11px 14px", fontSize: 12, color: "#888", whiteSpace: "nowrap" }}>
+                  {s.createdAt ? new Date(s.createdAt).toLocaleDateString("th-TH") : "—"}
+                </td>
                 <td style={{ padding: "11px 14px", fontSize: 12, color: "#888", whiteSpace: "nowrap" }}>
                   {s.completedAt ? new Date(s.completedAt).toLocaleDateString("th-TH") : "—"}
                 </td>

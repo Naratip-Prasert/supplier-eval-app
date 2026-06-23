@@ -13,6 +13,17 @@ export const DATE_PRESETS = [
 
 export const DEFAULT_DATE_FILTER = { preset: "all", from: "", to: "" };
 
+export function todayStr() {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 10);
+}
+
+export function todayRangeFilter() {
+  const t = todayStr();
+  return { preset: "custom", from: t, to: t };
+}
+
 export function matchesDateFilter(dateStr, filter) {
   const hasRange = !!(filter.from || filter.to);
   if (!hasRange && (!filter.preset || filter.preset === "all")) return true;
@@ -38,11 +49,11 @@ export function matchesDateFilter(dateStr, filter) {
   return d >= cutoff;
 }
 
-export function DateFilterBar({ filter, onChange, label = "ช่วงวันที่" }) {
+export function DateFilterBar({ filter, onChange, label = "ช่วงวันที่", showPresets = true }) {
   const presetActive = !filter.from && !filter.to;
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-      {DATE_PRESETS.map(p => {
+      {showPresets && DATE_PRESETS.map(p => {
         const active = presetActive && filter.preset === p.key;
         return (
           <button
