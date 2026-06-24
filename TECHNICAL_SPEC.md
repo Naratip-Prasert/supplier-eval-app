@@ -1,8 +1,8 @@
 # Technical Specification
-## Supplier Performance Evaluation System (SPE)
+## Supplier Performance Evaluation System (SPES)
 
-> Version 1.0 | Last Updated: June 2026
-> Stack: React + Vite · Express.js · MongoDB Atlas · Mongoose
+> Version 2.0 | Last updated: June 2026
+> Stack: React + Vite · Express.js · PostgreSQL (Neon)
 
 ---
 
@@ -11,35 +11,48 @@
 1. [System Overview](#1-system-overview)
 2. [Tech Stack](#2-tech-stack)
 3. [System Architecture](#3-system-architecture)
-4. [Database Design & Advice](#4-database-design--advice)
+4. [Database Schema](#4-database-schema)
 5. [API Reference](#5-api-reference)
 6. [Application Flow & Pages](#6-application-flow--pages)
 7. [Frontend Components](#7-frontend-components)
 8. [Scoring Logic](#8-scoring-logic)
-9. [Export Features](#9-export-features)
-10. [Environment Configuration](#10-environment-configuration)
-11. [Local Development Setup](#11-local-development-setup)
-12. [Security Considerations](#12-security-considerations)
-13. [Known Limitations & Roadmap](#13-known-limitations--roadmap)
+9. [Email & Scheduled Jobs](#9-email--scheduled-jobs)
+10. [Export Features](#10-export-features)
+11. [Environment Configuration](#11-environment-configuration)
+12. [Local Development Setup](#12-local-development-setup)
+13. [Security Considerations](#13-security-considerations)
+14. [Known Limitations & Roadmap](#14-known-limitations--roadmap)
 
 ---
 
 ## 1. System Overview
 
 ### Purpose
-A web-based internal tool for evaluating supplier/vendor performance. Staff fill out structured scoring forms; the system calculates weighted scores, assigns grades, and stores results in the database.
+An internal tool for evaluating supplier/vendor performance. Buyers (GCP) and
+business users (USER) fill out weighted scoring forms for an assigned
+supplier; the system computes a weighted total score and grade, a supervisor
+reviews and approves the result, and admins manage employees, suppliers, and
+bulk-upload evaluation rounds via Excel.
 
-### Users
-| Role | Thai Label | Capabilities |
-|---|---|---|
-| **User** | ผู้ใช้งานทั่วไป | Fill form, score supplier, view result, save & export |
-| **GCP** | เจ้าหน้าที่จัดซื้อ | Same as User, but UI emphasizes procurement context. Read-only on non-GCP sections (planned) |
+### Roles
+| Role | Capabilities |
+|---|---|
+| **USER** | Fill assigned evaluation tasks, view own submission history |
+| **GCP** | Same as USER — represents the buyer/procurement side of an evaluation pair |
+| **SUPERVISOR** | Approve or return submitted evaluation results once both USER + GCP have submitted |
+| **ADMIN** | Manage employees, bulk-upload evaluation rounds (Excel), view all sessions/history |
 
 ### Evaluation Types
-| Type | Description |
-|---|---|
-| `pre-Evaluation` | Evaluate a supplier **before** engagement |
-| `post-Evaluation` | Evaluate a supplier **after** a completed period |
+| `eval_type` | When it happens | Criteria set used |
+|---|---|---|
+| `pre_eval` | Before onboarding a new supplier | `PRE_CRITERIA` |
+| `post_eval` | 90 days after PTA approval | `POST_CRITERIA` |
+| `half_year` | Periodic, ~June | `POST_CRITERIA` |
+| `yearly` | Periodic, ~December | `POST_CRITERIA` |
+
+Each evaluation round produces one **session** (`evaluation_sessions`) that
+holds one USER submission + one GCP submission; the session's `final_score`
+is the average of the two once both are in.
 
 ---
 
@@ -48,45 +61,43 @@ A web-based internal tool for evaluating supplier/vendor performance. Staff fill
 ### Frontend
 | Item | Value |
 |---|---|
-| Framework | React 19.2.6 |
-| Build Tool | Vite 8.0.12 |
-| Language | JavaScript (JSX / ES Modules) |
-| Styling | Inline styles (no CSS framework) |
-| State Management | React `useState` / `useRef` / `useEffect` (no Redux) |
+| Framework | React 19 |
+| Build tool | Vite |
+| Language | JavaScript (JSX) |
+| Styling | Inline styles + scoped `<style>` media queries (no CSS framework) |
+| State | React `useState`/`useEffect` only — no Redux |
 | Routing | Page state machine in `App.jsx` (no React Router) |
-| Font | Sarabun (Google Fonts — Thai language support) |
+| Font | Sarabun (Thai-language support) |
 
 ### Backend
 | Item | Value |
 |---|---|
-| Runtime | Node.js v24 |
-| Framework | Express.js 5.2.1 |
-| ODM | Mongoose 9.7.0 |
-| Middleware | cors, express.json, dotenv |
-| Entry Point | `server/server.js` |
+| Runtime | Node.js |
+| Framework | Express 5 |
+| Driver | `pg` (raw SQL, no ORM) |
+| Auth | JWT (`jsonwebtoken`), `bcrypt` for password hashing |
+| Middleware | `cors`, `express.json`, `express-rate-limit`, `dotenv` |
+| Scheduled jobs | `node-cron` |
+| Entry point | `server/server.js` |
 
 ### Database
 | Item | Value |
 |---|---|
-| Database | MongoDB Atlas (cloud-hosted) |
-| Cluster | InternCEDTBJC (shared, free tier) |
-| Database Name | `supplier-eval` |
-| Collection | `evaluations` |
-| ODM | Mongoose 9.7.0 |
+| Engine | PostgreSQL (developed against Neon, a managed Postgres) |
+| Schema source of truth | [`database/schema.sql`](./database/schema.sql) |
+| Migrations | Idempotent `ALTER TABLE ... IF NOT EXISTS` blocks run on every server boot (`server/server.js`) — there is no separate migration runner/history table |
 
-### Export Libraries
-| Library | Version | Purpose |
-|---|---|---|
-| jsPDF | latest | Generate PDF from canvas image |
-| html2canvas | latest | Capture DOM node as canvas |
-| xlsx (SheetJS) | latest | Generate Excel (.xlsx) files |
-
-### Dev Tools
-| Tool | Purpose |
+### Other libraries
+| Library | Purpose |
 |---|---|
-| ESLint 10.3.0 | Code linting |
-| Vite HMR | Hot module replacement during development |
-| Git + GitHub | Version control |
+| `xlsx` (SheetJS) | Parse uploaded Excel files (admin bulk upload) and generate the Excel export on the Result page |
+| `resend` | Transactional email (invitation/reminder/overdue/approval) |
+| `lucide-react` | Icon set |
+
+> `jspdf` and `html2canvas` are listed in `package.json` but are not actually
+> imported anywhere in the current code — the "PDF" export is the browser's
+> native print dialog (`window.print()`), not a generated PDF file. See
+> [Known Limitations](#14-known-limitations--roadmap).
 
 ---
 
@@ -95,509 +106,313 @@ A web-based internal tool for evaluating supplier/vendor performance. Staff fill
 ```
 Browser (localhost:5173)
         │
-        │  HTTP (fetch)
+        │  fetch + Bearer JWT
         ▼
 Express API (localhost:5000)
         │
-        │  Mongoose ODM
+        │  pg (parameterized SQL)
         ▼
-MongoDB Atlas (cloud)
-  └─ Database: supplier-eval
-       └─ Collection: evaluations
+PostgreSQL (Neon)
 ```
 
-### Request Flow (Save Evaluation)
-```
-1. User completes form → clicks "บันทึกผล"
-2. ResultPage.jsx calls fetch POST http://localhost:5000/api/evaluations
-3. Express receives request, passes body to Mongoose
-4. Mongoose validates against schema
-5. MongoDB Atlas stores the document
-6. Server returns 201 + saved document
-7. Frontend sets saveStatus = "saved"
-```
+### Auth flow
+1. `POST /api/auth/login` with `{ identifier, password }` (`identifier` = employee_id or email)
+2. Server looks up the employee, verifies the password with bcrypt, signs a JWT containing `{ empId, fullName, role, email, department, jobTitle }`
+3. Frontend stores the token in `localStorage` (`spe_token`) and decodes it client-side (base64url, see `App.jsx#getStoredUser`) to restore the session on reload
+4. Every subsequent request goes through `server/middleware/authMiddleware.js`, which verifies the JWT signature and attaches `req.user`
+5. There is currently no self-service registration or password reset — accounts are provisioned by an ADMIN (or the one-time bootstrap `ADMIN-001` account created on first server boot)
 
-### Port Map
+### Request flow (submit an evaluation)
+1. `EvalForm` collects scores → `Resultpage.jsx` calls `POST /api/evaluations` with `{ vendorCode, evalType, period, productType, sessionId, scores }` (the acting employee is taken from the JWT, not the request body)
+2. Server validates the employee/supplier/session, computes `totalScore`/`grade` server-side, inserts `evaluations` + `evaluation_scores` rows
+3. A DB trigger (`trg_recalculate_score`) fires on insert: once both USER and GCP rows exist for the session, it averages their scores and flips the session to `pending_review`
+4. Supervisor approves/returns via `server/routes/supervisor.js`, flipping the session to `completed` or `returned`
+
+### Port map
 | Service | Port | Command |
 |---|---|---|
 | Frontend (Vite) | 5173 | `npm run dev` (project root) |
-| Backend (Express) | 5000 | `npm start` (server/) |
+| Backend (Express) | 5000 | `npm run dev` or `npm start` (`server/`) |
 
 ---
 
-## 4. Database Design & Advice
+## 4. Database Schema
 
-### 4.1 Current Schema (`server/models/Evaluation.js`)
+Full DDL lives in [`database/schema.sql`](./database/schema.sql) — keep that
+file in sync with any future `ALTER TABLE` added to `server/server.js`'s boot
+migration block. Summary of the core tables:
 
-```javascript
-{
-  // Evaluator info
-  role:         String,   // "user" | "gcp"
-  empId:        String,   // required — employee ID
-  dept:         String,   // department
-  job:          String,   // job title
-  evalType:     String,   // "pre-Evaluation" | "post-Evaluation"
-
-  // Supplier info
-  vendorCode:   String,   // e.g. "SUP-001"
-  supplierName: String,
-  productType:  String,   // "สินค้า" | "บริการ" | "สินค้าและบริการ"
-  period:       String,   // "Monthly / รายเดือน" | "Annual / รายปี" | ...
-
-  // Scores (Mixed — plain object, keys = criterion IDs)
-  scores: Mixed,          // { "1.1": 4, "1.2": 3, "2.1": 5, ... }
-  notes:  Mixed,          // { "1.1": "comment", "2.1": "note" }
-
-  // Result
-  totalScore:   Number,   // 0–100 (weighted)
-  grade:        String,   // "A" | "B" | "C" | "D"
-
-  // Auto
-  createdAt:    Date,
-  updatedAt:    Date,
-}
-```
-
-**Indexes defined:**
-```javascript
-{ supplierName: 1, createdAt: -1 }  // supplier history queries
-{ empId: 1 }                         // evaluator queries
-{ vendorCode: 1 }                    // vendor lookup
-{ grade: 1 }                         // filter by grade
-```
-
----
-
-### 4.2 Is MongoDB a Good Choice? — Analysis
-
-#### ✅ Why MongoDB works here
-- **Flexible scores object** — each evaluation can have different criteria keys without needing to change a table schema
-- **No joins needed** — each evaluation document is self-contained (no foreign key lookups)
-- **Easy to scale** — MongoDB Atlas handles horizontal scaling automatically
-- **Rapid prototyping** — no migration scripts needed when adding fields
-- **Matches data shape** — one evaluation = one document (natural fit)
-
-#### ⚠️ Current Concerns
-
-| Concern | Detail |
+| Table | Purpose |
 |---|---|
-| **`scores` is Mixed type** | The object `{"1.1": 4, "2.1": 3}` cannot be efficiently indexed or queried per criterion. You cannot ask: *"find all evaluations where criterion 1.1 scored below 3"* |
-| **No Supplier master collection** | Supplier name and vendor code are stored as plain strings inside every evaluation. If a supplier changes their name, old records become inconsistent |
-| **No Employee master collection** | `empId` is just a string. No validation that the employee exists |
-| **Dot-notation keys** | Keys like `"1.1"` in MongoDB documents can cause issues with path-based queries (MongoDB uses `.` as a field separator) |
-| **No audit/history for edits** | Once saved, no version history exists |
+| `employees` | Login accounts (`employee_id`, `email`, `password_hash`, `role`) |
+| `suppliers` | Vendor master data, including the full pre/post-eval upload template fields (tax ID, buyer/evaluator contacts, job value, PTA date) |
+| `evaluation_sessions` | One evaluation round for one supplier+period. `status`: `pending → in_progress → pending_review → completed \| returned` |
+| `evaluation_tasks` | One assignment (USER or GCP) within a session; tracks the invitation/reminder/overdue/thank-you email lifecycle |
+| `evaluations` | One person's submitted scoring (`status`: `draft` \| `saved`), one row per session per role |
+| `evaluation_scores` | Per-criterion score + weight backing each `evaluations` row |
+| `evaluation_criteria` / `score_level_descriptions` | The scoring rubric, seeded from `src/constants.js` on every boot |
+| `supervisor_reviews` | One row per approve/return decision — a session can have several across return→resubmit cycles |
+| `supplier_upload_batches` | One row per admin Excel upload |
+| `email_logs` | Send-status record for every email the app sends |
+| `grade_thresholds` | Configurable A–F score boundaries |
 
-#### 🆚 MongoDB vs. PostgreSQL for this system
-
-| Factor | MongoDB (current) | PostgreSQL (alternative) |
-|---|---|---|
-| Schema flexibility | High — add fields freely | Low — requires migration for changes |
-| Query power on scores | Poor — Mixed type is a black box | High — each score is a row, fully queryable |
-| Reporting (e.g. avg score per supplier over 12 months) | Hard — requires `$unwind` on Mixed | Easy — standard SQL GROUP BY |
-| Referential integrity | None — supplier/employee are strings | Strong — foreign keys enforce consistency |
-| Setup complexity | Low (Atlas free tier) | Higher (need managed PostgreSQL or local) |
-| Best for | Flexible, document-shaped data | Relational, analytical, reporting-heavy data |
-
-**Verdict:** MongoDB is acceptable for this system at its current scale and complexity. However, as soon as you need reporting (trend analysis, supplier comparison over time, average scores per criterion), you will hit the limits of the current `Mixed` schema.
-
----
-
-### 4.3 Recommended Schema Improvement (Still MongoDB)
-
-Replace `scores: Mixed` with a **structured array**. This keeps MongoDB but makes each criterion score queryable and indexable.
-
-**Current (problematic):**
-```json
-{
-  "scores": { "1.1": 4, "1.2": 3, "2.1": 5 },
-  "notes":  { "1.1": "No claim", "2.1": "On time" }
-}
-```
-
-**Recommended:**
-```json
-{
-  "criteriaScores": [
-    { "no": "1.1", "section": 1, "weight": 14, "score": 4, "note": "No claim" },
-    { "no": "1.2", "section": 1, "weight": 8,  "score": 3, "note": "" },
-    { "no": "2.1", "section": 2, "weight": 15, "score": 5, "note": "On time" }
-  ]
-}
-```
-
-**Why this is better:**
-```javascript
-// Can now query: "find all evals where criterion 1.1 scored below 3"
-db.evaluations.find({ "criteriaScores": { $elemMatch: { no: "1.1", score: { $lt: 3 } } } })
-
-// Can index per criterion for performance
-db.evaluations.createIndex({ "criteriaScores.no": 1, "criteriaScores.score": 1 })
-
-// Can aggregate: average score per criterion across all suppliers
-db.evaluations.aggregate([
-  { $unwind: "$criteriaScores" },
-  { $group: { _id: "$criteriaScores.no", avgScore: { $avg: "$criteriaScores.score" } } }
-])
-```
-
-**Recommended full improved schema:**
-```javascript
-const criteriaScoreSchema = new mongoose.Schema({
-  no:      { type: String, required: true },  // "1.1", "2.1"
-  section: { type: Number },                  // 1, 2
-  weight:  { type: Number },                  // 14, 8, 15 ...
-  score:   { type: Number, min: 1, max: 5 },
-  note:    { type: String, default: "" },
-}, { _id: false });
-
-const evaluationSchema = new mongoose.Schema({
-  role:           { type: String, enum: ["user", "gcp"] },
-  empId:          { type: String, required: true, trim: true },
-  dept:           { type: String, trim: true },
-  job:            { type: String, trim: true },
-  evalType:       { type: String, enum: ["pre-Evaluation", "post-Evaluation"] },
-  vendorCode:     { type: String, trim: true },
-  supplierName:   { type: String, trim: true },
-  productType:    { type: String, enum: ["สินค้า", "บริการ", "สินค้าและบริการ"] },
-  period:         { type: String },
-  criteriaScores: [criteriaScoreSchema],      // ← replaces scores + notes Mixed
-  totalScore:     { type: Number, min: 0, max: 100 },
-  grade:          { type: String, enum: ["A", "B", "C", "D"] },
-}, { timestamps: true });
-```
+Notable constraints:
+- `evaluation_sessions` has a **partial unique index** on `(supplier_id, eval_type, period) WHERE status != 'completed'` — prevents two open rounds existing for the same supplier+period at once. `period` for `half_year`/`yearly` always includes the calendar year (e.g. `"Half-Year 2026"`) precisely so next year's round doesn't collide with this one.
+- `evaluations` has `UNIQUE (session_id, role)` — one USER + one GCP submission per session.
 
 ---
 
 ## 5. API Reference
 
-**Base URL:** `http://localhost:5000`
+**Base URL:** `http://localhost:5000` · all routes except `POST /api/auth/login` require `Authorization: Bearer <token>`.
 
----
+### Auth (`/api/auth`)
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/login` | Rate-limited; body `{ identifier, password }` |
+| POST | `/verify-password` | Re-confirms the *current* user's own password (used before granting ADMIN role) |
 
-### POST `/api/evaluations`
-Save a new evaluation result.
+### Evaluations (`/api/evaluations`)
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/` | Submit a scoring form. Acting employee resolved from JWT, not the body |
+| GET | `/my` | Current user's own submitted evaluations |
+| GET | `/all` | ADMIN only — every evaluation |
+| GET | `/my-tasks` | Current user's pending/in-progress/returned tasks |
+| GET | `/my-timeline` | Every task ever assigned to the current user, including completed ones, for the stage-tracker UI |
+| GET | `/:id` | Single evaluation with its per-criterion scores |
 
-**Request Body:**
-```json
-{
-  "role": "user",
-  "empId": "123456",
-  "dept": "ฝ่ายจัดซื้อ",
-  "job": "JB-001 จัดซื้อวัสดุสำนักงาน",
-  "evalType": "post-Evaluation",
-  "vendorCode": "SUP-001",
-  "supplierName": "ABC Supply Co.,Ltd.",
-  "productType": "สินค้า",
-  "period": "Annual / รายปี",
-  "scores": { "1.1": 4, "1.2": 3, "2.1": 5, "2.2": 4 },
-  "notes": { "1.1": "No claim this year", "2.1": "" },
-  "totalScore": 78.5,
-  "grade": "B"
-}
-```
+### Sessions (`/api/sessions`)
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/` | List sessions (ADMIN results/history view) |
+| GET | `/:id` | Session detail — both evaluators' full breakdown |
 
-**Success Response `201`:**
-```json
-{
-  "message": "บันทึกสำเร็จ",
-  "data": {
-    "_id": "665f2a3b...",
-    "empId": "123456",
-    "supplierName": "ABC Supply Co.,Ltd.",
-    "totalScore": 78.5,
-    "grade": "B",
-    "createdAt": "2026-06-12T08:00:00.000Z",
-    "updatedAt": "2026-06-12T08:00:00.000Z"
-  }
-}
-```
+### Supervisor (`/api/supervisor`) — SUPERVISOR or ADMIN only
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/queue` | Sessions awaiting this supervisor's decision |
+| GET | `/history` | Past approve/return decisions |
+| POST | `/sessions/:id/approve` | Body `{ notes }` |
+| POST | `/sessions/:id/return` | Body `{ notes }` (required) — deletes the rejected evaluations and reopens both tasks |
+| PATCH | `/reviews/:id/notes` | Edit a note on a past decision — keyed by review id, not session id, since a session can have multiple review rows |
 
-**Error Response `400`:**
-```json
-{
-  "message": "บันทึกไม่สำเร็จ",
-  "error": "Evaluation validation failed: empId: Path `empId` is required."
-}
-```
+### Admin (`/api/admin`) — ADMIN only
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/upload/pre-post` | multipart Excel upload — creates pre_eval/post_eval sessions+tasks |
+| POST | `/upload/periodic` | multipart Excel upload — body also needs `evalType: half_year \| yearly` |
+| GET | `/tasks` | All evaluation tasks, filterable by `status`/`role`/`vendorCode` |
+| PATCH | `/tasks/:id` | Edit a task's assignee/due date |
+| POST | `/tasks/:id/remind` / `/tasks/remind-all` | Manually trigger reminder email(s) |
+| DELETE | `/sessions/:sessionId` | Delete a session |
+| POST | `/sessions/bulk-delete` | Delete multiple sessions |
+| GET | `/batches` | Upload history |
 
----
+### Employees (`/api/employees`)
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/` | ADMIN only — employee list |
+| GET / PATCH | `/me` | Current user's own profile |
+| GET / PATCH | `/:employeeId` | ADMIN only |
 
-### GET `/api/evaluations`
-Retrieve all evaluations, sorted newest first.
+### Suppliers (`/api/suppliers`)
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/` | List |
+| GET | `/validate` | Check a vendor code exists (used by the manual-entry form) |
+| GET / POST / PATCH | `/`, `/:vendorCode` | ADMIN only for create/update |
+| GET | `/:vendorCode/permission` | Permission check for a BU employee (currently unenforced — see [Limitations](#14-known-limitations--roadmap)) |
 
-**Response `200`:**
-```json
-[
-  {
-    "_id": "665f2a3b...",
-    "supplierName": "ABC Supply Co.,Ltd.",
-    "grade": "B",
-    "totalScore": 78.5,
-    "createdAt": "2026-06-12T08:00:00.000Z"
-  },
-  { ... }
-]
-```
-
----
-
-### GET `/api/evaluations/:id`
-Retrieve a single evaluation by its MongoDB ObjectId.
-
-**URL Param:** `id` — MongoDB `_id` (24-char hex string)
-
-**Success Response `200`:** Full evaluation document
-
-**Error Response `404`:**
-```json
-{ "message": "ไม่พบข้อมูล" }
-```
+### Criteria (`/api/criteria`)
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/` | Read-only — the scoring rubric as stored in the DB |
 
 ---
 
 ## 6. Application Flow & Pages
 
-### Page State Machine (`App.jsx`)
+`App.jsx` is a hand-rolled page state machine (no React Router) keyed off a
+`page` string and a decoded JWT in `user` state.
 
-```
-[landing] ──onSelect(role)──► [form] ──onSubmit(data)──► [eval] ──onDone(result)──► [result]
-    ▲                           │                            │                           │
-    └───────────────────────────┴────────────────────────────┴──────────onBack───────────┘
-```
-
-### Pages
-
-| Page | File | Props In | Props Out |
-|---|---|---|---|
-| **LandingPage** | `LandingPage.jsx` | — | `onSelect(role)` |
-| **UserForm** | `Userform.jsx` | `role` | `onSubmit(formData)` |
-| **EvalForm** | `Evalform.jsx` | `formData` | `onDone({ scores, notes, totalScore, grade })` |
-| **ResultPage** | `Resultpage.jsx` | `formData`, `result` | `onBack()` |
-
-### Data Passed Between Pages
-
-```
-formData = {
-  role, empId, dept, job,
-  evalType, vendorCode, supplierName, productType, period
-}
-
-result = {
-  scores: { "1.1": 4, ... },
-  notes:  { "1.1": "comment", ... },
-  totalScore: 78.5,
-  grade: "B"
-}
-```
+| Page | File | Used by |
+|---|---|---|
+| LoginPage | `LoginPage.jsx` | Everyone, unauthenticated |
+| PortalPage | `PortalPage.jsx` | Everyone — module picker after login |
+| LandingPage | `LandingPage.jsx` | USER/GCP (task list + start evaluation) and ADMIN (manual vendor-code entry) |
+| EvalForm | `Evalform.jsx` | USER/GCP — the scoring form |
+| ResultPage | `Resultpage.jsx` | USER/GCP — summary after submit, also used read-only from History |
+| HistoryPage | `HistoryPage.jsx` | USER/GCP (own history) and ADMIN (everyone's) |
+| ProfilePage | `ProfilePage.jsx` | Everyone |
+| AdminPage | `AdminPage.jsx` | ADMIN — employees, evaluation tasks (embeds `TasksPage`), results & history |
+| TasksPage | `TasksPage.jsx` | ADMIN — upload/manage evaluation tasks |
+| UploadHistoryPage | `UploadHistoryPage.jsx` | ADMIN — past Excel upload batches |
+| SupervisorPage | `SupervisorPage.jsx` | SUPERVISOR/ADMIN — approval queue + history |
 
 ---
 
 ## 7. Frontend Components
 
-All shared components are in `src/components/index.jsx`.
+Shared components live in `src/components/index.jsx` (plus `FilterChips.jsx`
+and `TimelineStepper.jsx` alongside it).
 
-| Component | Props | Description |
-|---|---|---|
-| `<Header>` | `titleOverride`, `subtitle`, `backLabel`, `onBack` | Top navigation bar with clock |
-| `<Clock>` | — | Live real-time clock (HH:MM:SS) rendered inside Header |
-| `<CustomSelect>` | `label`, `required`, `options[]`, `value`, `onChange`, `disabled` | Styled dropdown (green border) |
-| `<GreenInput>` | `label`, `required`, `value`, `onChange`, `placeholder`, `disabled` | Styled text input (green border) |
-| `<GreenButton>` | `onClick`, `fullWidth`, `color`, `disabled`, `style` | Primary action button |
+| Component | Description |
+|---|---|
+| `<Logo>` | SVG brand mark (bar-chart + trend line) |
+| `<Header>` | Top nav bar — logo + title, live clock, back button, logged-in user info. Stacks into two rows below 640px |
+| `<Clock>` | Live HH:MM:SS + date, rendered inside `Header` |
+| `<GreenInput>` / `<PasswordInput>` / `<CustomSelect>` | Styled form inputs |
+| `<GreenButton>` | Primary action button |
+| `useModal()` → `{ showAlert, showConfirm, ModalEl }` | Promise-based alert/confirm dialogs (render `{ModalEl}` once per page) |
+| `<FilterChips>` / `toggleInSet` | Multi-select filter chip group, used by Admin/Tasks/History filter panels |
+| `<TimelineStepper>` | Pending → In Process → Submitted → Approved/Returned stage tracker |
 
 ---
 
 ## 8. Scoring Logic
 
-### Formula
-
-Each criterion has a `weight` (integer, represents percentage contribution).
+### Formula (`computeScoreAndGrade`, `server/routes/evaluations.js`)
 
 ```
-weightedScore(item) = (selectedLevel / 5) × item.weight
+weightedScore(item) = (selectedLevel / maxLevel) × item.weight
 
-totalRawScore = Σ weightedScore(item) for all items with a selection
+totalRawScore       = Σ weightedScore(item) over criteria that exist in the DB
+totalPossibleWeight = Σ item.weight over those same criteria
 
 totalScore = (totalRawScore / totalPossibleWeight) × 100
 ```
 
-### Example
+The total is computed **only** from criteria that actually get persisted to
+`evaluation_scores` — this guarantees `total_score` is always reconstructable
+from `SUM(weighted_score)/SUM(weight)*100` over the stored rows.
 
-| Criterion | Weight | Selected Level | Weighted Score |
-|---|---|---|---|
-| 1.1 | 14 | 4 | (4/5) × 14 = 11.2 |
-| 1.2 | 8  | 3 | (3/5) × 8  = 4.8  |
-| 2.1 | 15 | 5 | (5/5) × 15 = 15.0 |
-| 2.2 | 15 | 4 | (4/5) × 15 = 12.0 |
-| **Total** | **52** | — | **43.0** |
+### Grade thresholds (`grade_thresholds` table / `getGrade()` in `src/constants.js`)
 
-`totalScore = (43.0 / 70) × 100 = 61.4` → **Grade B**
+| Grade | Score range |
+|---|---|
+| A | ≥ 90 |
+| B | 80 – 89.9 |
+| C | 70 – 79.9 |
+| D | 60 – 69.9 |
+| F | < 60 |
 
-> Note: `totalPossibleWeight` = sum of weights of **all** defined criteria (not just answered ones). Unanswered criteria contribute 0.
+### Criteria sets (`src/constants.js`)
+- `PRE_CRITERIA` — 5 sections (Quality, Cost, Delivery, Financial Stability, ESG), used for `pre_eval`
+- `POST_CRITERIA` — 6 sections (Pricing & Value, Quality, Delivery, Service & Responsiveness, Financial Standing, ESG), used for `post_eval`/`half_year`/`yearly`
+- `getCriteria(evalType)` picks the right set; `isPostEvalType(evalType)` is the switch
+- Some items use a 1–5 level scale; a few use a restricted `levelValues` subset (e.g. `[1,3,5]`) or a `capital-ratio` calculator (`CapitalRatioCalc` in `Evalform.jsx`) that auto-selects a level from a financial ratio
 
-### Grade Thresholds
+---
 
-| Grade | Score Range | Thai Label |
+## 9. Email & Scheduled Jobs
+
+`server/utils/cronJobs.js` runs daily at 08:00 Asia/Bangkok via `node-cron`:
+
+| Job | Trigger |
+|---|---|
+| Reminders | Task due within 7 days, not yet reminded |
+| Overdue notices | Task ≥3 days past due, still pending |
+| Thank-you | Task completed, not yet thanked (also sent immediately on submit) |
+| Supervisor notify | New `pending_review` session, supervisor not yet notified |
+| Pre/post-eval invitation retry | Catches invitations that failed at upload time |
+
+All date checks use `<=`/`>=` ranges guarded by a `*_sent_at IS NULL` column,
+not exact-date equality — a missed cron run self-heals on the next run
+instead of permanently skipping a notification. Every send (success or
+failure) is logged to `email_logs` via `server/utils/emailService.js`.
+
+---
+
+## 10. Export Features
+
+Triggered from the **Export ▾** dropdown on the Result page (`Resultpage.jsx`):
+
+| Format | How | Notes |
 |---|---|---|
-| **A** | 81 – 100 | ดีมาก (Excellent) |
-| **B** | 61 – 80  | ดี (Good) |
-| **C** | 51 – 60  | พอใช้ (Acceptable) |
-| **D** | < 50     | ต้องปรับปรุง (Needs Improvement) |
-
-### Criteria Structure (`src/constants.js`)
-
-```
-CRITERIA
-├── Section 1: ด้านคุณภาพสินค้า/Quality Performance (น้ำหนักรวม 40%)
-│   ├── 1.1  อัตราการ Reject/Claim          weight: 14
-│   ├── 1.2  ความสมบูรณ์ของเอกสาร           weight:  8
-│   ├── 1.3  ความรวดเร็วในการแก้ไขปัญหา     weight:  8
-│   └── 1.4  อัตราการ Reject/Claim (ซ้ำ)    weight: 10
-│
-└── Section 2: ด้านการส่งมอบ/Delivery Performance (น้ำหนักรวม 30%)
-    ├── 2.1  ความตรงต่อเวลาในการส่งมอบ      weight: 15
-    └── 2.2  ความครบถ้วนของปริมาณสินค้า     weight: 15
-```
-
-> Total defined weight = 70 (not 100). The scoring formula normalises to 100 via `(rawScore / 70) × 100`.
+| **Excel** | `xlsx` (SheetJS), `exportExcel()` | 2-sheet workbook: summary + full per-criterion detail |
+| **"PDF" / Print** | `window.print()`, `printPDF()` | Opens the browser's native print dialog with a print-only stylesheet (`@media print` in `Resultpage.jsx`) — user saves as PDF or prints physically. There is no server-generated PDF file |
 
 ---
 
-## 9. Export Features
+## 11. Environment Configuration
 
-All three export types are triggered from the **Export Result ▾** dropdown on the Result page.
+See `.env.example` (frontend) and `server/.env.example` (backend) for the
+full, current list of variables — both are placeholders only, safe to copy.
 
-| Format | Library | Output | File Name |
-|---|---|---|---|
-| **PDF** | jsPDF + html2canvas | Image-based multi-page A4 PDF | `SPE-{supplierName}-{YYYYMMDD}.pdf` |
-| **Excel** | xlsx (SheetJS) | 2-sheet `.xlsx` workbook | `SPE-{supplierName}-{YYYYMMDD}.xlsx` |
-| **Print** | `window.open` + `window.print()` | Browser print dialog (supports Save as PDF, physical printer) | — |
+| File | Key variables |
+|---|---|
+| `.env` | `VITE_API_URL` |
+| `server/.env` | `DATABASE_URL`, `DATABASE_SSL`, `PORT`, `FRONTEND_URL`, `JWT_SECRET`, `RESEND_API_KEY`, `EMAIL_FROM` |
 
-### Excel Workbook Structure
-
-**Sheet 1 — Summary**
-- Supplier info (name, vendor code, evaluator, department, type, period, date)
-- Overall score and grade
-- Per-section score vs. max weight
-
-**Sheet 2 — Detail**
-- Every criterion: No. / Criteria / Detail / Weight / Score (1–5) / Weighted Score / Note
+`server/.env` is gitignored and must never be committed.
 
 ---
 
-## 10. Environment Configuration
+## 12. Local Development Setup
 
-### Backend (`server/.env`)
-
-| Variable | Required | Example | Description |
-|---|---|---|---|
-| `MONGODB_URI` | ✅ Yes | `mongodb+srv://user:pass@cluster.net/supplier-eval?...` | Full MongoDB connection string including database name |
-| `PORT` | No | `5000` | Express server port (default: 5000) |
-
-> ⚠️ `server/.env` is listed in `.gitignore` and must **never** be committed to version control.
-
-### Frontend
-No `.env` file required. The API base URL is hardcoded in `Resultpage.jsx`:
-```javascript
-fetch("http://localhost:5000/api/evaluations", ...)
-```
-For production deployment, this should be moved to `VITE_API_URL` environment variable.
-
----
-
-## 11. Local Development Setup
-
-### Prerequisites
-| Tool | Minimum Version | Check |
-|---|---|---|
-| Node.js | v18+ | `node --version` |
-| npm | v9+ | `npm --version` |
-| Git | any | `git --version` |
-| MongoDB Atlas account | — | Free tier at mongodb.com/atlas |
-
-### Steps
-
-**1. Clone the repository**
 ```bash
-git clone https://github.com/Naratip-Prasert/supplier-eval-app.git
-cd supplier-eval-app
-git checkout march
-```
-
-**2. Install frontend dependencies** (project root)
-```bash
+# 1. Frontend deps (project root)
 npm install
-```
+cp .env.example .env          # set VITE_API_URL
 
-**3. Install backend dependencies**
-```bash
+# 2. Backend deps
 cd server
 npm install
+cp .env.example .env          # set DATABASE_URL, JWT_SECRET, RESEND_API_KEY, ...
+
+# 3. Start backend (terminal 1)
+npm run dev                   # http://localhost:5000 — schema/seed run automatically on boot
+
+# 4. Start frontend (terminal 2, project root)
+npm run dev                   # http://localhost:5173
 ```
 
-**4. Create `server/.env`**
-```env
-MONGODB_URI=mongodb+srv://<username>:<password>@<cluster>.mongodb.net/supplier-eval?retryWrites=true&w=majority
-PORT=5000
-```
-
-**5. Start backend** (Terminal 1)
-```bash
-cd server
-npm start
-# Expected: ✅ MongoDB connected
-#           🚀 Server running on http://localhost:5000
-```
-
-**6. Start frontend** (Terminal 2)
-```bash
-cd ..         # back to project root
-npm run dev
-# Expected: ➜  Local: http://localhost:5173/
-```
-
-**7. Open browser** → `http://localhost:5173`
+On first boot with no ADMIN account in the database, the server creates
+`ADMIN-001` with a randomly generated password printed once to the console —
+save it, there is no self-service reset.
 
 ---
 
-## 12. Security Considerations
+## 13. Security Considerations
 
-### Current Gaps (No Authentication)
+### In place
+- JWT auth on every route except login; password hashing via bcrypt
+- Acting-employee identity for evaluation submission is resolved from the
+  verified JWT, never from client-supplied request data
+- Rate limiting on `/api/auth/login`
+- All SQL is parameterized (no string-concatenated queries)
+- Email templates HTML-escape interpolated values (supplier name, notes,
+  etc.) sourced from uploaded Excel data or free-text input
+- `UNIQUE`/partial-unique DB constraints back up the app-level duplicate
+  checks (evaluation submission, open-session creation)
 
-| Risk | Detail | Recommendation |
-|---|---|---|
-| **No login/auth** | Anyone who can reach port 5173 can submit evaluations as any employee ID | Add JWT-based authentication or SSO (e.g., Azure AD) |
-| **No input sanitisation** | `empId`, `supplierName` etc. are stored as-is from the request body | Mongoose `trim: true` helps, but add server-side validation with Joi or Zod |
-| **Hardcoded API URL** | `http://localhost:5000` is hardcoded in the frontend | Move to `VITE_API_URL` environment variable |
-| **CORS open** | `app.use(cors())` allows all origins | Lock down to specific origin in production: `cors({ origin: "https://your-domain.com" })` |
-| **`.env` in repo risk** | If `.env` is accidentally committed, credentials are exposed | Add pre-commit hook to block `.env` commits; rotate credentials if leaked |
-| **MongoDB credentials in `.env`** | Password is plain text | Use MongoDB Atlas network access controls to restrict allowed IPs |
+### Known gaps
+| Gap | Detail |
+|---|---|
+| No self-service password reset | Removed pending future SSO integration — until then, a lost admin password has no recovery path |
+| `JWT_SECRET` strength | Not enforced/rotated automatically — use a long random value in any real deployment |
+| `xlsx` dependency vulnerability | `npm audit` reports a known prototype-pollution/ReDoS issue in SheetJS with no upstream fix yet; mitigated only by trusting the admin uploader |
+| Supplier permission check unenforced | `employee_supplier_permissions` exists but `evaluations.js` explicitly skips the check ("BU permission check — disabled for now") |
+| `evaluation_tasks`/`supervisor_reviews` FKs are `NO ACTION`, not `CASCADE` | Deleting a session requires deleting its tasks/reviews first (the admin delete routes already do this) |
 
 ---
 
-## 13. Known Limitations & Roadmap
-
-### Current Limitations
+## 14. Known Limitations & Roadmap
 
 | Area | Limitation |
 |---|---|
-| **Scoring** | If user skips a criterion, it counts as 0 (score drops unfairly) |
-| **GCP role** | Read-only restriction for non-GCP sections is not yet enforced in code |
-| **Evaluation History** | History panel on Result page is a placeholder (no data rendered) |
-| **Export Result** | PDF is image-based (not text-searchable); Thai fonts may vary by OS |
-| **No validation on submit** | UserForm has no required-field check before proceeding to EvalForm |
-| **Single collection** | All roles and evaluation types share one flat collection (harder to query by role) |
-| **No edit/delete** | Once saved, evaluations cannot be corrected |
+| Mobile responsiveness | Audited and fixed for USER/GCP-facing pages (Landing, Evalform, Resultpage, Portal, History, Profile, Login). ADMIN/SUPERVISOR pages (dense data tables) have not been audited for mobile yet |
+| `jspdf`/`html2canvas` | Listed as dependencies but unused — the PDF export is actually browser print. Either wire them up for a real generated PDF or remove the dependencies |
+| ADMIN can submit as USER/GCP | An ADMIN account filling in for a buyer/evaluator records `evaluations.role` as USER/GCP, which is correct for the scoring trigger but means that column can't be used to reliably report "who holds which role" without joining back to `employees.role` |
+| No autosave / draft recovery | `EvalForm` warns before navigating away, but a hard refresh or browser crash loses all entered scores |
+| Score-math duplication | The (level/maxLevel)×weight formula is implemented independently in `Evalform.jsx`, `Resultpage.jsx` (×2 call sites), and the backend — no single shared helper, so a future change to one `levelValues` shape needs updating all four |
+| `period` for half_year/yearly | Now includes the calendar year (fixed) — if the business ever needs more granular cycles (e.g. two "Yearly" rounds in one year), the format will need revisiting |
 
-### Suggested Roadmap
-
-| Priority | Feature |
-|---|---|
-| 🔴 High | Add required-field validation before UserForm submit |
-| 🔴 High | Implement GCP read-only mode on non-procurement criteria |
-| 🟡 Medium | Implement Evaluation History panel (fetch from `GET /api/evaluations` filtered by vendorCode) |
-| 🟡 Medium | Add `VITE_API_URL` env variable (remove hardcoded localhost URL) |
-| 🟡 Medium | Migrate `scores/notes: Mixed` to `criteriaScores: Array` for queryability |
-| 🟢 Low | Add authentication (at minimum, employee ID + PIN) |
-| 🟢 Low | Add supplier master data collection |
-| 🟢 Low | Add dashboard/analytics page (average grade per supplier over time) |
-| 🟢 Low | Move CORS to environment-specific origin whitelist |
+### Suggested priorities
+1. Mobile-audit the ADMIN/SUPERVISOR pages (large data tables, upload modal)
+2. Decide on the SSO integration approach, then reintroduce account
+   provisioning/recovery accordingly
+3. Extract the score-weight formula into one shared helper used by both
+   frontend display and the backend's authoritative calculation
+4. Remove or actually use `jspdf`/`html2canvas`
