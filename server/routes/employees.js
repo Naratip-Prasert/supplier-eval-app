@@ -60,44 +60,24 @@ router.get('/me', async (req, res) => {
 });
 
 // ── PATCH /api/employees/me ───────────────────────────────────
+// Name/email are managed by the organization's identity system (or by an
+// ADMIN), not by the employee themselves — this endpoint only ever touches
+// profile_picture, regardless of what else a caller sends.
 router.patch('/me', async (req, res) => {
-  const { fullName, email, profilePicture } = req.body;
+  const { profilePicture } = req.body;
 
-  if (!fullName?.trim()) {
-    return res.status(400).json({ message: 'กรุณากรอกชื่อ-สกุล' });
-  }
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-    return res.status(400).json({ message: 'รูปแบบ Email ไม่ถูกต้อง' });
-  }
   if (profilePicture && profilePicture.length > 6 * 1024 * 1024) {
     return res.status(400).json({ message: 'รูปภาพใหญ่เกินไป (สูงสุด ~4.5 MB)' });
   }
 
   const client = await pool.connect();
   try {
-    if (email?.trim()) {
-      const dupe = await client.query(
-        'SELECT employee_id FROM employees WHERE email = $1 AND employee_id != $2',
-        [email.trim().toLowerCase(), req.user.empId]
-      );
-      if (dupe.rows.length > 0) {
-        return res.status(409).json({ message: 'Email นี้ถูกใช้งานแล้ว' });
-      }
-    }
-
     await client.query(
       `UPDATE employees
-          SET full_name       = $1,
-              email           = $2,
-              profile_picture = $3,
+          SET profile_picture = $1,
               updated_at      = NOW()
-        WHERE employee_id = $4`,
-      [
-        fullName.trim(),
-        email?.trim().toLowerCase() || null,
-        profilePicture || null,
-        req.user.empId,
-      ]
+        WHERE employee_id = $2`,
+      [profilePicture || null, req.user.empId]
     );
 
     const updated = await client.query(

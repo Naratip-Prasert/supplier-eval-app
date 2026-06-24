@@ -207,7 +207,7 @@ function StyledSelect({ value, onChange, options, placeholder, themeColor }) {
 }
 
 // ── Main ─────────────────────────────────────────────────────
-export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, onProfile, onHistory, onBack }) {
+export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, onProfile, onHistory, onBack, initialTaskTab }) {
   const { showAlert, ModalEl } = useModal();
 
   const isGCP      = authUser.role === "GCP";
@@ -228,7 +228,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
 
   const [myTimeline,        setMyTimeline]        = useState([]);
   const [timelineLoading,   setTimelineLoading]   = useState(true);
-  const [taskTab,           setTaskTab]           = useState("active"); // 'active' | 'returned'
+  const [taskTab,           setTaskTab]           = useState(initialTaskTab === "returned" ? "returned" : "active"); // 'active' | 'returned'
   const [returnedNote,      setReturnedNote]      = useState(null); // { supplierName, notes } | null
   const [taskSearch,        setTaskSearch]        = useState("");
   const [taskTypeFilter,    setTaskTypeFilter]    = useState(new Set()); // empty = all

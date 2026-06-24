@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Header } from "../components";
-import { ShieldCheck, Edit3, Check, X, Camera } from "lucide-react";
+import { ShieldCheck, Camera, Loader2 } from "lucide-react";
 import { authFetch } from "../utils/api";
 
 const ROLE_LABEL = { gcp: "GCP", user: "USER", admin: "ADMIN", supervisor: "SUPERVISOR" };
@@ -13,13 +13,11 @@ const ROLE_COLOR = { gcp: "#1565c0", user: "#1a6b1a", admin: "#6a1b9a", supervis
 export default function ProfilePage({ authUser, onBack, onProfileUpdate }) {
   const themeColor = ROLE_COLOR[authUser.role?.toLowerCase()] ?? "#1a6b1a";
 
-  const [profilePic, setProfilePic]   = useState(null);
-  const [editMode,   setEditMode]     = useState(false);
-  const [fullName,   setFullName]     = useState(authUser.fullName || "");
-  const [email,      setEmail]        = useState(authUser.email    || "");
-  const [newPic,     setNewPic]       = useState(null);
-  const [saving,     setSaving]       = useState(false);
-  const [error,      setError]        = useState("");
+  const [profilePic, setProfilePic] = useState(null);
+  const [fullName,   setFullName]   = useState(authUser.fullName || "");
+  const [email,      setEmail]      = useState(authUser.email    || "");
+  const [saving,     setSaving]     = useState(false);
+  const [error,      setError]      = useState("");
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -33,55 +31,41 @@ export default function ProfilePage({ authUser, onBack, onProfileUpdate }) {
       .catch(() => {});
   }, []);
 
+  // Name/email are managed by the organization's identity system, not
+  // editable here — the only thing a user can change on their own profile
+  // is their picture, so selecting a file saves immediately.
   const handleFile = (e) => {
     const file = e.target.files[0];
+    e.target.value = "";
     if (!file) return;
     if (file.size > 4 * 1024 * 1024) {
       setError("รูปภาพต้องมีขนาดไม่เกิน 4 MB");
       return;
     }
     const reader = new FileReader();
-    reader.onload = (ev) => setNewPic(ev.target.result);
+    reader.onload = async (ev) => {
+      const dataUrl = ev.target.result;
+      setSaving(true);
+      setError("");
+      try {
+        const res  = await authFetch("/api/employees/me", {
+          method: "PATCH",
+          body: JSON.stringify({ profilePicture: dataUrl }),
+        });
+        const data = await res.json();
+        if (!res.ok) { setError(data.message || "บันทึกไม่สำเร็จ"); return; }
+        setProfilePic(dataUrl);
+        onProfileUpdate(data.token, data.user, dataUrl);
+      } catch {
+        setError("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้");
+      } finally {
+        setSaving(false);
+      }
+    };
     reader.readAsDataURL(file);
   };
 
-  const handleSave = async () => {
-    if (!fullName.trim()) { setError("กรุณากรอกชื่อ-สกุล"); return; }
-    setSaving(true);
-    setError("");
-    try {
-      const res  = await authFetch("/api/employees/me", {
-        method: "PATCH",
-        body: JSON.stringify({
-          fullName: fullName.trim(),
-          email:    email.trim() || null,
-          profilePicture: newPic ?? profilePic,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) { setError(data.message || "บันทึกไม่สำเร็จ"); return; }
-      const updatedPic = newPic ?? profilePic;
-      if (newPic) setProfilePic(newPic);
-      setNewPic(null);
-      setEditMode(false);
-      onProfileUpdate(data.token, data.user, updatedPic);
-    } catch {
-      setError("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleCancel = () => {
-    setEditMode(false);
-    setNewPic(null);
-    setError("");
-    setFullName(authUser.fullName || "");
-    setEmail(authUser.email || "");
-  };
-
-  const displayPic = editMode ? (newPic ?? profilePic) : profilePic;
-  const initials   = fullName.split(" ").map((w) => w[0] ?? "").join("").slice(0, 2).toUpperCase() || "?";
+  const initials = fullName.split(" ").map((w) => w[0] ?? "").join("").slice(0, 2).toUpperCase() || "?";
 
   return (
     <div style={{ minHeight: "100vh", background: "#f5f5f5", fontFamily: "Sarabun, sans-serif" }}>
@@ -99,39 +83,41 @@ export default function ProfilePage({ authUser, onBack, onProfileUpdate }) {
             padding: "28px 24px 22px",
             display: "flex", alignItems: "center", gap: 20,
           }}>
-            {/* Avatar */}
+            {/* Avatar — the only editable field */}
             <div style={{ position: "relative", flexShrink: 0 }}>
               <div
-                onClick={() => editMode && fileRef.current?.click()}
+                onClick={() => !saving && fileRef.current?.click()}
+                title="คลิกเพื่อเปลี่ยนรูปโปรไฟล์"
                 style={{
                   width: 80, height: 80, borderRadius: "50%",
                   border: "3px solid rgba(255,255,255,0.8)",
                   overflow: "hidden",
-                  background: displayPic ? "transparent" : "rgba(255,255,255,0.25)",
+                  background: profilePic ? "transparent" : "rgba(255,255,255,0.25)",
                   display: "flex", alignItems: "center", justifyContent: "center",
                   fontSize: 28, fontWeight: 700, color: "#fff",
-                  cursor: editMode ? "pointer" : "default",
+                  cursor: saving ? "default" : "pointer",
+                  opacity: saving ? 0.6 : 1,
                   transition: "opacity 0.15s",
                 }}
               >
-                {displayPic
-                  ? <img src={displayPic} alt="profile" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                {profilePic
+                  ? <img src={profilePic} alt="profile" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   : initials}
               </div>
-              {editMode && (
-                <div
-                  onClick={() => fileRef.current?.click()}
-                  style={{
-                    position: "absolute", bottom: 1, right: 1,
-                    width: 26, height: 26, borderRadius: "50%",
-                    background: "#fff", border: `2px solid ${themeColor}`,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    cursor: "pointer", boxShadow: "0 1px 4px rgba(0,0,0,0.2)",
-                  }}
-                >
-                  <Camera size={13} style={{ color: themeColor }} />
-                </div>
-              )}
+              <div
+                onClick={() => !saving && fileRef.current?.click()}
+                style={{
+                  position: "absolute", bottom: 1, right: 1,
+                  width: 26, height: 26, borderRadius: "50%",
+                  background: "#fff", border: `2px solid ${themeColor}`,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  cursor: saving ? "default" : "pointer", boxShadow: "0 1px 4px rgba(0,0,0,0.2)",
+                }}
+              >
+                {saving
+                  ? <Loader2 size={13} style={{ color: themeColor, animation: "spin 1s linear infinite" }} />
+                  : <Camera size={13} style={{ color: themeColor }} />}
+              </div>
               <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFile} />
             </div>
 
@@ -152,39 +138,9 @@ export default function ProfilePage({ authUser, onBack, onProfileUpdate }) {
                 {ROLE_LABEL[authUser.role?.toLowerCase()] ?? authUser.role}
               </span>
             </div>
-
-            {/* Edit / Save / Cancel buttons */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0, alignSelf: "flex-start" }}>
-              {!editMode ? (
-                <button
-                  onClick={() => setEditMode(true)}
-                  style={btnStyle("rgba(255,255,255,0.2)", "rgba(255,255,255,0.5)", "#fff")}
-                >
-                  <Edit3 size={13} /> แก้ไข
-                </button>
-              ) : (
-                <>
-                  <button
-                    onClick={handleSave}
-                    disabled={saving}
-                    style={btnStyle(
-                      saving ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.28)",
-                      "rgba(255,255,255,0.5)", "#fff",
-                      saving
-                    )}
-                  >
-                    <Check size={13} /> {saving ? "กำลังบันทึก…" : "บันทึก"}
-                  </button>
-                  <button
-                    onClick={handleCancel}
-                    style={btnStyle("rgba(255,255,255,0.08)", "rgba(255,255,255,0.3)", "rgba(255,255,255,0.8)")}
-                  >
-                    <X size={13} /> ยกเลิก
-                  </button>
-                </>
-              )}
-            </div>
           </div>
+
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
 
           {/* ── Error bar ── */}
           {error && (
@@ -196,32 +152,14 @@ export default function ProfilePage({ authUser, onBack, onProfileUpdate }) {
             </div>
           )}
 
-          {/* ── Editable fields ── */}
+          {/* ── Read-only fields (managed by the organization's identity
+              system — only the profile picture above can be changed here) ── */}
           <div style={{ padding: "4px 0 8px" }}>
-            <Field
-              label="ชื่อ-สกุล"
-              value={fullName}
-              editMode={editMode}
-              onChange={setFullName}
-              placeholder="กรอกชื่อ-สกุล"
-              themeColor={themeColor}
-            />
-            <Field
-              label="อีเมล"
-              value={email}
-              editMode={editMode}
-              onChange={setEmail}
-              placeholder="กรอก Email"
-              type="email"
-              themeColor={themeColor}
-            />
-          </div>
-
-          {/* ── Read-only fields ── */}
-          <div style={{ borderTop: "1px solid #f0f0f0", padding: "4px 0 8px" }}>
             {[
+              { label: "ชื่อ-สกุล", value: fullName },
+              { label: "อีเมล", value: email },
               { label: "รหัสพนักงาน", value: authUser.empId },
-              { label: "ฝ่าย/แผนก",   value: authUser.department },
+              { label: "ฝ่าย/แผนก", value: authUser.department },
               authUser.jobTitle && { label: "ตำแหน่ง", value: authUser.jobTitle },
             ].filter(Boolean).map(({ label, value }) => (
               <div
@@ -229,13 +167,16 @@ export default function ProfilePage({ authUser, onBack, onProfileUpdate }) {
                 style={{
                   display: "flex", alignItems: "center",
                   padding: "12px 24px", gap: 12,
+                  borderBottom: "1px solid #f9f9f9",
                 }}
               >
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 11, color: "#b0b0b0", marginBottom: 2 }}>{label}</div>
-                  <div style={{ fontSize: 14, color: "#555" }}>{value}</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: value ? "#1a1a1a" : "#ccc" }}>
+                    {value || "ยังไม่ได้กรอก"}
+                  </div>
                 </div>
-                <div style={{ fontSize: 10, color: "#ccc" }}>แก้ไขไม่ได้</div>
+                <div style={{ fontSize: 10, color: "#ccc", whiteSpace: "nowrap" }}>แก้ไขไม่ได้</div>
               </div>
             ))}
           </div>
@@ -243,42 +184,4 @@ export default function ProfilePage({ authUser, onBack, onProfileUpdate }) {
       </div>
     </div>
   );
-}
-
-function Field({ label, value, editMode, onChange, placeholder, type = "text", themeColor }) {
-  return (
-    <div style={{ padding: "12px 24px", borderBottom: "1px solid #f9f9f9" }}>
-      <div style={{ fontSize: 11, color: "#9e9e9e", marginBottom: 5 }}>{label}</div>
-      {editMode ? (
-        <input
-          type={type}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          style={{
-            width: "100%", boxSizing: "border-box",
-            border: `1.5px solid ${themeColor}`,
-            borderRadius: 8, padding: "8px 12px",
-            fontSize: 14, fontFamily: "Sarabun, sans-serif",
-            outline: "none", background: "#fafff8",
-          }}
-        />
-      ) : (
-        <div style={{ fontSize: 14, fontWeight: 600, color: value ? "#1a1a1a" : "#ccc" }}>
-          {value || "ยังไม่ได้กรอก"}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function btnStyle(bg, border, color, disabled = false) {
-  return {
-    display: "flex", alignItems: "center", gap: 6,
-    background: bg, border: `1px solid ${border}`,
-    borderRadius: 8, padding: "6px 12px",
-    color, fontSize: 12, fontFamily: "Sarabun, sans-serif",
-    cursor: disabled ? "not-allowed" : "pointer",
-    whiteSpace: "nowrap",
-  };
 }

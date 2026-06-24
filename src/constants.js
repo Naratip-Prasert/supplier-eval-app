@@ -1307,6 +1307,62 @@ export function getCriteria(evalType) {
   return isPostEvalType(evalType) ? POST_CRITERIA : PRE_CRITERIA;
 }
 
+// ── ESG HO/Store vs Factory split ─────────────────────────────
+// The ESG section lists HO/Store items followed by Factory items, marked
+// off by two `{ divider: true, level: 1 }` rows. Evaluators only assess one
+// facility type, so both Evalform (editing) and ResultPage (read-only
+// display/export) need to show just the chosen half — using the same split
+// logic here keeps the two screens from ever disagreeing about which items
+// belong to which group.
+const ESG_HO_MARKER      = "สำนักงานใหญ่";
+const ESG_FACTORY_MARKER = "โรงงาน";
+
+export function findEsgSectionIndex(criteria) {
+  return criteria.findIndex((s) => s.items.some((i) => i.divider && i.label?.includes(ESG_HO_MARKER)));
+}
+
+export function splitEsgGroups(items) {
+  const hoIdx      = items.findIndex((i) => i.divider && i.label?.includes(ESG_HO_MARKER));
+  const factoryIdx = items.findIndex((i) => i.divider && i.label?.includes(ESG_FACTORY_MARKER));
+  if (hoIdx === -1 || factoryIdx === -1) return { ho: items, factory: [] };
+  // drop the marker row itself — the EsgTargetSelector buttons replace it
+  return {
+    ho:      items.slice(hoIdx + 1, factoryIdx),
+    factory: items.slice(factoryIdx + 1),
+  };
+}
+
+// Older saved evaluations (and any caller that didn't get an explicit
+// esgTarget) don't carry the HO/Factory choice as its own field — infer it
+// from which group's item codes actually have scores. Self-healing for
+// historical data instead of depending on a DB column that may not exist.
+export function inferEsgTarget(evalType, scores) {
+  const criteria = getCriteria(evalType);
+  const esgIdx   = findEsgSectionIndex(criteria);
+  if (esgIdx === -1 || !scores) return null;
+  const groups = splitEsgGroups(criteria[esgIdx].items);
+  const hoCodes      = groups.ho.filter((i) => !i.divider).map((i) => i.no);
+  const factoryCodes = groups.factory.filter((i) => !i.divider).map((i) => i.no);
+  if (hoCodes.some((c) => scores[c] != null))      return "ho";
+  if (factoryCodes.some((c) => scores[c] != null)) return "factory";
+  return null;
+}
+
+// Returns CRITERIA with the ESG section's items narrowed down to just the
+// chosen facility type (`esgTarget`: "ho" | "factory" | null/undefined).
+// When no choice has been made yet, the ESG section's items are empty.
+export function getDisplayCriteria(evalType, esgTarget) {
+  const criteria = getCriteria(evalType);
+  const esgIdx   = findEsgSectionIndex(criteria);
+  if (esgIdx === -1) return criteria;
+  return criteria.map((section, si) => {
+    if (si !== esgIdx) return section;
+    const groups = splitEsgGroups(section.items);
+    const chosen = esgTarget === "factory" ? groups.factory : esgTarget === "ho" ? groups.ho : [];
+    return { ...section, items: chosen };
+  });
+}
+
 export function getGrade(score) {
   const s = Math.round(score * 10) / 10; // round to 1dp — matches .toFixed(1) display
   if (s >= 90) return "A";

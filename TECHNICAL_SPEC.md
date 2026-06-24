@@ -1,7 +1,7 @@
 # Technical Specification
 ## Supplier Performance Evaluation System (SPES)
 
-> Version 2.0 | Last updated: June 2026
+> Version 1.0 | Last updated: June 2026
 > Stack: React + Vite · Express.js · PostgreSQL (Neon)
 
 ---

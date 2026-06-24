@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { authFetch } from "./utils/api";
-import { getCriteria } from "./constants";
+import { getCriteria, inferEsgTarget } from "./constants";
 import PortalPage         from "./pages/PortalPage";
 import LandingPage        from "./pages/LandingPage";
 import EvalForm           from "./pages/Evalform";
@@ -79,6 +79,7 @@ function EvalHistoryLoader({ evalId, user, profilePic, onBack }) {
             weights:      weightsObj,
             notes:        notesObj,
             radarOverride,
+            esgTarget:    inferEsgTarget(d.evalType, scoresObj),
           },
         });
       })
@@ -158,6 +159,7 @@ export default function App() {
   const [prevPage,       setPrevPage]       = useState(null);
   const [adminSessionId, setAdminSessionId] = useState(null);
   const [adminInitialTab, setAdminInitialTab] = useState(null);
+  const [landingInitialTab, setLandingInitialTab] = useState("active");
 
   useEffect(() => {
     if (!user) { setProfilePic(null); return; }
@@ -197,7 +199,7 @@ export default function App() {
         onLogout={handleLogout}
         onProfile={() => setPage("profile")}
         onHistory={() => setPage("history")}
-        onEvaluate={() => setPage("landing")}
+        onEvaluate={(tab) => { setLandingInitialTab(tab || "active"); setPage("landing"); }}
         onAdmin={() => { setAdminSessionId(null); setAdminInitialTab(null); setPage("admin"); }}
         onSupervisor={() => setPage("supervisor")}
       />
@@ -317,6 +319,7 @@ export default function App() {
       onProfile={() => setPage("profile")}
       onHistory={() => setPage("history")}
       onBack={() => setPage("portal")}
+      initialTaskTab={landingInitialTab}
     />
   );
 }

@@ -91,6 +91,57 @@ const ROLE_BADGE = {
   SUPERVISOR: { label: "Supervisor — ผู้อนุมัติ",       bg: "#f3e5f5", color: "#6a1b9a" },
 };
 
+// Welcome-card gradient per role — same hue family as that role's badge
+// above, so the card itself hints at "which hat you're wearing" at a
+// glance instead of always being the same green for everyone. `pattern` is
+// a CSS-only decorative texture (no image asset) layered on top, themed to
+// suit the role: network nodes for USER, circuit/hex grid for GCP, a
+// radar-style dot-grid + corner sweep for ADMIN, and an ascending
+// trend-line + sparkles for SUPERVISOR.
+const ROLE_HERO = {
+  // network nodes — dots joined by faint crossing lines
+  USER: {
+    gradient: "linear-gradient(135deg, #1a6b1a 0%, #2e7d32 60%, #388e3c 100%)",
+    shadow: "rgba(26,107,26,0.28)",
+    pattern: `
+      radial-gradient(rgba(255,255,255,0.22) 1.6px, transparent 1.8px),
+      repeating-linear-gradient(60deg,  rgba(255,255,255,0.07) 0 1px, transparent 1px 24px),
+      repeating-linear-gradient(-60deg, rgba(255,255,255,0.07) 0 1px, transparent 1px 24px)
+    `,
+    patternSize: "22px 22px, auto, auto",
+  },
+  // circuit / hex grid — diagonal crossing lines
+  GCP: {
+    gradient: "linear-gradient(135deg, #0d47a1 0%, #1565c0 60%, #1976d2 100%)",
+    shadow: "rgba(13,71,161,0.28)",
+    pattern: `
+      repeating-linear-gradient(45deg,  rgba(255,255,255,0.11) 0 1px, transparent 1px 18px),
+      repeating-linear-gradient(-45deg, rgba(255,255,255,0.11) 0 1px, transparent 1px 18px)
+    `,
+    patternSize: "auto",
+  },
+  // radar/target — fine dot-grid plus a soft sweep glow in one corner
+  ADMIN: {
+    gradient: "linear-gradient(135deg, #880e4f 0%, #ad1457 60%, #c2185b 100%)",
+    shadow: "rgba(136,14,79,0.28)",
+    pattern: `
+      radial-gradient(circle at 88% 12%, rgba(255,255,255,0.22) 0%, transparent 42%),
+      radial-gradient(rgba(255,255,255,0.16) 1.3px, transparent 1.5px)
+    `,
+    patternSize: "auto, 16px 16px",
+  },
+  // ascending trend line + sparkle dots
+  SUPERVISOR: {
+    gradient: "linear-gradient(135deg, #4a148c 0%, #6a1b9a 60%, #7b1fa2 100%)",
+    shadow: "rgba(74,20,140,0.28)",
+    pattern: `
+      radial-gradient(rgba(255,255,255,0.55) 1px, transparent 1.3px),
+      repeating-linear-gradient(155deg, transparent 0 17px, rgba(255,255,255,0.13) 17px 19px, transparent 19px 36px)
+    `,
+    patternSize: "42px 42px, auto",
+  },
+};
+
 // ── PortalPage ────────────────────────────────────────────────
 export default function PortalPage({
   authUser, profilePic,
@@ -98,6 +149,7 @@ export default function PortalPage({
 }) {
   const role    = authUser?.role ?? "USER";
   const badge   = ROLE_BADGE[role] ?? ROLE_BADGE.USER;
+  const hero    = ROLE_HERO[role] ?? ROLE_HERO.USER;
 
   // Surface "returned by supervisor" right here on the Portal — previously
   // evaluators only found out by happening to open the evaluate module.
@@ -122,7 +174,7 @@ export default function PortalPage({
 
   const handleModule = (mod) => {
     if (!mod.available) return;
-    if (mod.key === "evaluate")   onEvaluate?.();
+    if (mod.key === "evaluate")   onEvaluate?.("active");
     if (mod.key === "history")    onHistory?.();
     if (mod.key === "admin")      onAdmin?.();
     if (mod.key === "supervisor") onSupervisor?.();
@@ -153,12 +205,20 @@ export default function PortalPage({
           }
         `}</style>
         <div className="portal-hero" style={{
-          background: "linear-gradient(135deg, #1a6b1a 0%, #2e7d32 60%, #388e3c 100%)",
+          background: hero.gradient,
           borderRadius: 18, padding: "28px 32px", marginBottom: 32,
-          boxShadow: "0 6px 28px rgba(26,107,26,0.28)",
+          boxShadow: `0 6px 28px ${hero.shadow}`,
           display: "flex", alignItems: "center", gap: 22,
           position: "relative", overflow: "hidden",
         }}>
+          {/* Role-themed pattern texture */}
+          <div style={{
+            position: "absolute", inset: 0,
+            backgroundImage: hero.pattern,
+            backgroundSize: hero.patternSize,
+            opacity: 0.7,
+          }} />
+
           {/* Decorative circles */}
           <div style={{
             position: "absolute", right: -40, top: -40,
@@ -260,7 +320,7 @@ export default function PortalPage({
         {/* ── Returned-by-supervisor alert ── */}
         {returnedTasks.length > 0 && (
           <div
-            onClick={onEvaluate}
+            onClick={() => onEvaluate?.("returned")}
             style={{
               background: "#fff3e0", border: "1.5px solid #ffb74d", borderRadius: 14,
               padding: "14px 20px", marginBottom: 24, cursor: "pointer",

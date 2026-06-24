@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Header, GreenButton, useModal } from "../components";
-import { getCriteria, isPostEvalType, LEVEL_COLORS, GRADE_MAP, GRADE_GUIDE, getGrade } from "../constants";
+import { getCriteria, isPostEvalType, LEVEL_COLORS, GRADE_MAP, GRADE_GUIDE, getGrade, findEsgSectionIndex, splitEsgGroups, getDisplayCriteria } from "../constants";
 import { AlertTriangle, FileText } from "lucide-react";
 
 const LEVEL_LABELS       = ["ต้องปรับปรุง (Unsatisfactory)", "ต่ำกว่าเกณฑ์ (Below Standard)", "ผ่านเกณฑ์ (Satisfactory)", "ดี (Good)", "ดีเยี่ยม (Excellent)"];
@@ -44,7 +44,11 @@ function initWeights(criteria) {
 // ---- main component ----------------------------------------
 
 export default function EvalForm({ formData, savedState, user, profilePic, onBack, onDone }) {
-  const CRITERIA = getCriteria(formData.evalType);
+  const RAW_CRITERIA   = getCriteria(formData.evalType);
+  const esgSectionIndex = findEsgSectionIndex(RAW_CRITERIA);
+  const esgGroups       = esgSectionIndex !== -1 ? splitEsgGroups(RAW_CRITERIA[esgSectionIndex].items) : null;
+  const esgHoCodes      = esgGroups ? esgGroups.ho.filter((i) => !i.divider).map((i) => i.no) : [];
+  const esgFactoryCodes = esgGroups ? esgGroups.factory.filter((i) => !i.divider).map((i) => i.no) : [];
 
   const { showConfirm, showAlert, ModalEl } = useModal();
   const [scores,       setScores]       = useState(() => savedState?.scores      ?? {});
@@ -52,12 +56,69 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
   const [missingItems, setMissingItems] = useState(null); // null = closed, array = open
   const [legalStatus, setLegalStatus]   = useState(() => savedState?.legalStatus ?? null);
 
+  // ต้องเลือกก่อนว่าจะประเมินแบบ HO/Store หรือ Factory — สืบจาก savedState
+  // ถ้ามี (resume), ไม่อย่างนั้นเดาจากคะแนนที่บันทึกไว้ก่อนหน้า, ไม่งั้นยังไม่เลือก (null)
+  const [esgTarget, setEsgTarget] = useState(() => {
+    if (savedState?.esgTarget) return savedState.esgTarget;
+    const sc = savedState?.scores ?? {};
+    if (esgHoCodes.some((c) => sc[c] != null))      return "ho";
+    if (esgFactoryCodes.some((c) => sc[c] != null)) return "factory";
+    return null;
+  });
+
+  const CRITERIA = getDisplayCriteria(formData.evalType, esgTarget);
+
   const [ws, setWs] = useState(() => savedState?.ws ?? initWeights(CRITERIA));
   const sectionWeights = ws.sections;
   const itemWeights    = ws.items;
 
+  // เมื่อเลือก/เปลี่ยน HO ↔ Factory: ล้างคะแนน/หมายเหตุ/น้ำหนักของกลุ่มที่ไม่ได้เลือก
+  // ทิ้ง (ไม่ใช่แค่ซ่อน) ไม่งั้นค่าที่เหลือค้างจะหลุดไปรวมกับ payload ที่ส่ง backend
+  // และแจกน้ำหนักของ section ESG ใหม่ให้เฉพาะกลุ่มที่เลือก (เว้นแต่กำลัง resume
+  // ค่าที่ตั้งไว้แล้วจาก savedState — ไม่งั้นจะไปทับน้ำหนักที่ผู้ใช้ปรับเองไว้)
+  useEffect(() => {
+    if (esgSectionIndex === -1) return;
+    const chosenCodes = esgTarget === "ho" ? esgHoCodes : esgTarget === "factory" ? esgFactoryCodes : [];
+    const otherCodes   = esgTarget === "ho" ? esgFactoryCodes : esgTarget === "factory" ? esgHoCodes : [...esgHoCodes, ...esgFactoryCodes];
+
+    if (otherCodes.length > 0) {
+      setScores((s) => {
+        if (!otherCodes.some((c) => c in s)) return s;
+        const next = { ...s };
+        otherCodes.forEach((c) => delete next[c]);
+        return next;
+      });
+      setNotes((n) => {
+        if (!otherCodes.some((c) => c in n)) return n;
+        const next = { ...n };
+        otherCodes.forEach((c) => delete next[c]);
+        return next;
+      });
+    }
+
+    setWs((prev) => {
+      const alreadyWeighted = chosenCodes.length > 0 && chosenCodes.some((c) => prev.items[c] != null);
+      const droppable = otherCodes.some((c) => c in prev.items);
+      if (!droppable && (chosenCodes.length === 0 || alreadyWeighted)) return prev;
+
+      const newItems = { ...prev.items };
+      otherCodes.forEach((c) => delete newItems[c]);
+
+      if (chosenCodes.length > 0 && !alreadyWeighted) {
+        const sw = prev.sections[esgSectionIndex] ?? (RAW_CRITERIA[esgSectionIndex]?.weight ?? 0);
+        const each = r2(sw / chosenCodes.length);
+        let rem = sw;
+        chosenCodes.forEach((code, i) => {
+          if (i === chosenCodes.length - 1) newItems[code] = Math.max(0, r2(rem));
+          else { newItems[code] = each; rem -= each; }
+        });
+      }
+      return { ...prev, items: newItems };
+    });
+  }, [esgTarget]);
+
   const allItems        = CRITERIA.flatMap((s) => s.items.filter((i) => !i.divider));
-  const answered        = Object.keys(scores).length;
+  const answered        = allItems.filter((item) => scores[item.no] != null).length;
 
   // The in-app "กลับหน้าหลัก" button already warns before discarding
   // entered scores, but closing the tab/refreshing bypassed that entirely
@@ -161,7 +222,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
       "ผู้ประเมินจะถูก Disqualified ทันที\nยืนยันส่งผลการประเมิน 'ไม่ผ่าน' ใช่ไหม?",
       "ส่งผล — ไม่ผ่าน (Disqualified)"
     );
-    if (ok) onDone({ scores: {}, notes: {}, totalScore: 0, grade: "F", sectionWeights, weights: itemWeights, disqualified: true, legalStatus: "fail", ws });
+    if (ok) onDone({ scores: {}, notes: {}, totalScore: 0, grade: "F", sectionWeights, weights: itemWeights, disqualified: true, legalStatus: "fail", ws, esgTarget });
   };
 
   const handleBack = async () => {
@@ -171,6 +232,13 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
 
   const handleSubmit = () => {
     if (legalStatus !== "pass") return;
+    if (esgSectionIndex !== -1 && !esgTarget) {
+      showAlert(
+        "กรุณาเลือกประเภทที่จะประเมินในส่วน ESG ก่อน (สำนักงานใหญ่/สาขา หรือ โรงงาน)",
+        "ยังไม่เลือกประเภท ESG"
+      );
+      return;
+    }
     // The "น้ำหนักรวม ≠ 100%" indicator next to the sticky bar used to be
     // purely cosmetic — it could turn red and the form would still submit.
     // Block here too, matching the same severity as a missing score.
@@ -186,7 +254,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
       setMissingItems(unanswered);
       return;
     }
-    onDone({ scores, notes, totalScore, grade, sectionWeights, weights: itemWeights, legalStatus, ws });
+    onDone({ scores, notes, totalScore, grade, sectionWeights, weights: itemWeights, legalStatus, ws, esgTarget });
   };
 
 
@@ -323,6 +391,9 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
                 secWeight={sectionWeights[si] ?? 0}
                 onSectionWeightChange={(val) => handleSectionWeightChange(si, val)}
               />
+              {si === esgSectionIndex && (
+                <EsgTargetSelector value={esgTarget} onChange={setEsgTarget} />
+              )}
               {section.items.map((item, ii) =>
                 item.divider
                   ? <DividerRow key={item.label} label={item.label} level={item.level} />
@@ -352,6 +423,9 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
                 secWeight={sectionWeights[si] ?? 0}
                 onSectionWeightChange={(val) => handleSectionWeightChange(si, val)}
               />
+              {si === esgSectionIndex && (
+                <EsgTargetSelector value={esgTarget} onChange={setEsgTarget} />
+              )}
               {section.items.map((item, ii) =>
                 item.divider
                   ? <DividerMobile key={item.label} label={item.label} level={item.level} />
@@ -686,6 +760,37 @@ function TableHeader() {
       ))}
       <div style={{ fontSize: 12, lineHeight: 1.4 }}>คะแนน<br/>ที่ได้</div>
       <div style={{ fontSize: 12 }}>หมายเหตุ</div>
+    </div>
+  );
+}
+
+function EsgTargetSelector({ value, onChange }) {
+  const pill = (active) => ({
+    padding: "8px 16px", borderRadius: 20, fontSize: 12.5, fontWeight: 700,
+    cursor: "pointer", border: active ? "1.5px solid #1558a0" : "1.5px solid #c8d4e0",
+    background: active ? "#1558a0" : "#fff", color: active ? "#fff" : "#3a4a60",
+    whiteSpace: "nowrap",
+  });
+  return (
+    <div style={{
+      gridColumn: "1 / -1", background: "#fffbea", borderTop: "1.5px solid #fde68a",
+      borderBottom: "1.5px solid #fde68a", padding: "12px 18px",
+      display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+    }}>
+      <span style={{ fontSize: 13, fontWeight: 700, color: "#92400e" }}>
+        เลือกประเภทที่จะประเมิน ESG:
+      </span>
+      <button type="button" style={pill(value === "ho")} onClick={() => onChange("ho")}>
+        สำนักงานใหญ่ / สาขา / Retail Store (HO / Store)
+      </button>
+      <button type="button" style={pill(value === "factory")} onClick={() => onChange("factory")}>
+        โรงงาน / สถานประกอบการผลิต (Factory)
+      </button>
+      {!value && (
+        <span style={{ fontSize: 12, color: "#b45309" }}>
+          ⚠ กรุณาเลือกก่อนกรอกแบบประเมินส่วนนี้
+        </span>
+      )}
     </div>
   );
 }
