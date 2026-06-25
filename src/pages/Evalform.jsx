@@ -4,8 +4,8 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Header, GreenButton, useModal } from "../components";
-import { getCriteria, isPostEvalType, LEVEL_COLORS, GRADE_MAP, GRADE_GUIDE, getGrade, findEsgSectionIndex, splitEsgGroups, getDisplayCriteria } from "../constants";
-import { AlertTriangle, FileText } from "lucide-react";
+import { getCriteria, isPostEvalType, LEVEL_COLORS, GRADE_MAP, GRADE_GUIDE, getGrade, findEsgSectionIndex, splitEsgGroups, getDisplayCriteria, FUNCTION_MODULES, FUNCTION_SECTION_WEIGHT } from "../constants";
+import { AlertTriangle, FileText, Plus, Trash2 } from "lucide-react";
 
 const LEVEL_LABELS       = ["ต้องปรับปรุง (Unsatisfactory)", "ต่ำกว่าเกณฑ์ (Below Standard)", "ผ่านเกณฑ์ (Satisfactory)", "ดี (Good)", "ดีเยี่ยม (Excellent)"];
 const LEVEL_SHORT_LABELS = ["ต้องปรับปรุง", "ต่ำกว่าเกณฑ์", "ผ่านเกณฑ์", "ดี", "ดีเยี่ยม"];
@@ -66,7 +66,18 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
     return null;
   });
 
-  const CRITERIA = getDisplayCriteria(formData.evalType, esgTarget);
+  // Part2 "Function module" — same idea as the ESG selector above, generalized
+  // to 8 choices (M1-M7 + custom). The Function section always sits right
+  // before ESG in CRITERIA (see getDisplayCriteria), so its index is exactly
+  // esgSectionIndex and ESG itself shifts to esgSectionIndex + 1.
+  const functionSectionIndex = esgSectionIndex;
+  const esgSectionIndexInCriteria = esgSectionIndex === -1 ? -1 : esgSectionIndex + 1;
+  const allModuleCodes = Object.values(FUNCTION_MODULES).flatMap((m) => m.items.map((i) => i.no));
+
+  const [moduleCode, setModuleCode] = useState(() => savedState?.moduleCode ?? null);
+  const [customItems, setCustomItems] = useState(() => savedState?.customItems ?? []);
+
+  const CRITERIA = getDisplayCriteria(formData.evalType, esgTarget, moduleCode, customItems);
 
   const [ws, setWs] = useState(() => savedState?.ws ?? initWeights(CRITERIA));
   const sectionWeights = ws.sections;
@@ -117,6 +128,57 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
     });
   }, [esgTarget]);
 
+  // เมื่อเลือก/เปลี่ยนโมดูล: ล้างคะแนน/หมายเหตุ/น้ำหนักของโค้ดที่ไม่ได้อยู่ในโมดูล
+  // ที่เลือกปัจจุบันทิ้ง แล้วแจกน้ำหนักของ section Function ใหม่ให้เฉพาะโค้ดที่
+  // ใช้อยู่ — ตรรกะเดียวกับ ESG ด้านบน
+  useEffect(() => {
+    if (functionSectionIndex === -1) return;
+    const currentCodes = moduleCode === "custom"
+      ? customItems.map((i) => i.no)
+      : moduleCode && FUNCTION_MODULES[moduleCode]
+        ? FUNCTION_MODULES[moduleCode].items.map((i) => i.no)
+        : [];
+    const otherFixedCodes = allModuleCodes.filter((c) => !currentCodes.includes(c));
+
+    const staleCustomCodes = (obj) => Object.keys(obj).filter((c) => c.startsWith("CUSTOM.") && !currentCodes.includes(c));
+
+    setScores((s) => {
+      const toDelete = [...otherFixedCodes, ...staleCustomCodes(s)];
+      if (!toDelete.some((c) => c in s)) return s;
+      const next = { ...s };
+      toDelete.forEach((c) => delete next[c]);
+      return next;
+    });
+    setNotes((n) => {
+      const toDelete = [...otherFixedCodes, ...staleCustomCodes(n)];
+      if (!toDelete.some((c) => c in n)) return n;
+      const next = { ...n };
+      toDelete.forEach((c) => delete next[c]);
+      return next;
+    });
+
+    setWs((prev) => {
+      const toDelete = [...otherFixedCodes, ...staleCustomCodes(prev.items)];
+      const allWeighted = currentCodes.length > 0 && currentCodes.every((c) => prev.items[c] != null);
+      const droppable = toDelete.some((c) => c in prev.items);
+      if (!droppable && (currentCodes.length === 0 || allWeighted)) return prev;
+
+      const newItems = { ...prev.items };
+      toDelete.forEach((c) => delete newItems[c]);
+
+      if (currentCodes.length > 0 && !allWeighted) {
+        const sw = prev.sections[functionSectionIndex] ?? FUNCTION_SECTION_WEIGHT;
+        const each = r2(sw / currentCodes.length);
+        let rem = sw;
+        currentCodes.forEach((code, i) => {
+          if (i === currentCodes.length - 1) newItems[code] = Math.max(0, r2(rem));
+          else { newItems[code] = each; rem -= each; }
+        });
+      }
+      return { ...prev, items: newItems };
+    });
+  }, [moduleCode, customItems]);
+
   const allItems        = CRITERIA.flatMap((s) => s.items.filter((i) => !i.divider));
   const answered        = allItems.filter((item) => scores[item.no] != null).length;
 
@@ -148,7 +210,6 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
 
   const grade      = getGrade(totalScore);
   const gradeColor = GRADE_MAP[grade];
-  const subtitle   = `${formData.empId || "BJC-XXXXX"}|${formData.dept || "ฝ่าย"}`;
   const evalLabel  = isPostEvalType(formData.evalType) ? "Post" : "Pre";
 
   const handleSectionWeightChange = (si, newVal) => {
@@ -222,7 +283,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
       "ผู้ประเมินจะถูก Disqualified ทันที\nยืนยันส่งผลการประเมิน 'ไม่ผ่าน' ใช่ไหม?",
       "ส่งผล — ไม่ผ่าน (Disqualified)"
     );
-    if (ok) onDone({ scores: {}, notes: {}, totalScore: 0, grade: "F", sectionWeights, weights: itemWeights, disqualified: true, legalStatus: "fail", ws, esgTarget });
+    if (ok) onDone({ scores: {}, notes: {}, totalScore: 0, grade: "F", sectionWeights, weights: itemWeights, disqualified: true, legalStatus: "fail", ws, esgTarget, moduleCode, customItems });
   };
 
   const handleBack = async () => {
@@ -236,6 +297,13 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
       showAlert(
         "กรุณาเลือกประเภทที่จะประเมินในส่วน ESG ก่อน (สำนักงานใหญ่/สาขา หรือ โรงงาน)",
         "ยังไม่เลือกประเภท ESG"
+      );
+      return;
+    }
+    if (functionSectionIndex !== -1 && !moduleCode) {
+      showAlert(
+        "กรุณาเลือกโมดูลที่จะประเมินใน Part 2 ก่อน (M1-M7 หรือ อื่นๆ กำหนดเอง)",
+        "ยังไม่เลือกโมดูล"
       );
       return;
     }
@@ -254,7 +322,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
       setMissingItems(unanswered);
       return;
     }
-    onDone({ scores, notes, totalScore, grade, sectionWeights, weights: itemWeights, legalStatus, ws, esgTarget });
+    onDone({ scores, notes, totalScore, grade, sectionWeights, weights: itemWeights, legalStatus, ws, esgTarget, moduleCode, customItems });
   };
 
 
@@ -272,7 +340,6 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
       )}
       <Header
         titleOverride={`SPES - ${evalLabel} Evaluation`}
-        subtitle={subtitle}
         backLabel="← กลับหน้าหลัก"
         onBack={handleBack}
         user={user}
@@ -386,12 +453,21 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
           <TableHeader />
           {CRITERIA.map((section, si) => (
             <div key={si}>
+              {si === 0 && <PartBanner label="Part 1 — Core" />}
+              {si === functionSectionIndex && <PartBanner label="Part 2 — Function Module" />}
+              {si === esgSectionIndexInCriteria && <PartBanner label="Part 3 — ESG" />}
               <SectionHeaderRow
                 section={section}
                 secWeight={sectionWeights[si] ?? 0}
                 onSectionWeightChange={(val) => handleSectionWeightChange(si, val)}
               />
-              {si === esgSectionIndex && (
+              {si === functionSectionIndex && (
+                <ModuleSelector value={moduleCode} onChange={setModuleCode} />
+              )}
+              {si === functionSectionIndex && moduleCode === "custom" && (
+                <CustomModuleBuilder items={customItems} onChange={setCustomItems} />
+              )}
+              {si === esgSectionIndexInCriteria && (
                 <EsgTargetSelector value={esgTarget} onChange={setEsgTarget} />
               )}
               {section.items.map((item, ii) =>
@@ -418,12 +494,21 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
         <div className="score-table-mobile" style={{ borderRadius: 10, overflow: "hidden", border: "1.5px solid #c8d8c8", marginBottom: 16, background: "#fff" }}>
           {CRITERIA.map((section, si) => (
             <div key={si}>
+              {si === 0 && <PartBanner label="Part 1 — Core" />}
+              {si === functionSectionIndex && <PartBanner label="Part 2 — Function Module" />}
+              {si === esgSectionIndexInCriteria && <PartBanner label="Part 3 — ESG" />}
               <SectionHeaderMobile
                 section={section}
                 secWeight={sectionWeights[si] ?? 0}
                 onSectionWeightChange={(val) => handleSectionWeightChange(si, val)}
               />
-              {si === esgSectionIndex && (
+              {si === functionSectionIndex && (
+                <ModuleSelector value={moduleCode} onChange={setModuleCode} />
+              )}
+              {si === functionSectionIndex && moduleCode === "custom" && (
+                <CustomModuleBuilder items={customItems} onChange={setCustomItems} />
+              )}
+              {si === esgSectionIndexInCriteria && (
                 <EsgTargetSelector value={esgTarget} onChange={setEsgTarget} />
               )}
               {section.items.map((item, ii) =>
@@ -760,6 +845,134 @@ function TableHeader() {
       ))}
       <div style={{ fontSize: 12, lineHeight: 1.4 }}>คะแนน<br/>ที่ได้</div>
       <div style={{ fontSize: 12 }}>หมายเหตุ</div>
+    </div>
+  );
+}
+
+function PartBanner({ label }) {
+  return (
+    <div style={{
+      gridColumn: "1 / -1", background: "#1a1a2e", color: "#fff",
+      padding: "7px 18px", fontSize: 11.5, fontWeight: 700,
+      letterSpacing: 1, textTransform: "uppercase",
+    }}>
+      {label}
+    </div>
+  );
+}
+
+const MODULE_LABELS = {
+  m1: "M1 · Maintenance / Project",
+  m2: "M2 · Logistics / Transport",
+  m3: "M3 · Calibration / Lab",
+  m4: "M4 · Food / OEM",
+  m5: "M5 · Raw Material / RM-PM",
+  m6: "M6 · Warehouse / 3PL",
+  m7: "M7 · IT / Software / Service",
+  custom: "อื่นๆ (กำหนดเอง)",
+};
+
+function ModuleSelector({ value, onChange }) {
+  const pill = (active) => ({
+    padding: "7px 14px", borderRadius: 20, fontSize: 12, fontWeight: 700,
+    cursor: "pointer", border: active ? "1.5px solid #6b3fa0" : "1.5px solid #d8cce8",
+    background: active ? "#6b3fa0" : "#fff", color: active ? "#fff" : "#4a3a60",
+    whiteSpace: "nowrap",
+  });
+  return (
+    <div style={{
+      gridColumn: "1 / -1", background: "#f8f4ff", borderTop: "1.5px solid #d8cce8",
+      borderBottom: "1.5px solid #d8cce8", padding: "12px 18px",
+      display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+    }}>
+      <span style={{ fontSize: 13, fontWeight: 700, color: "#5b2d90", width: "100%" }}>
+        เลือกโมดูลที่จะประเมิน (Part 2 — Function Module):
+      </span>
+      {Object.entries(MODULE_LABELS).map(([code, label]) => (
+        <button key={code} type="button" style={pill(value === code)} onClick={() => onChange(code)}>
+          {label}
+        </button>
+      ))}
+      {!value && (
+        <span style={{ fontSize: 12, color: "#9333ea", width: "100%" }}>
+          ⚠ กรุณาเลือกโมดูลก่อนกรอกแบบประเมินส่วนนี้
+        </span>
+      )}
+    </div>
+  );
+}
+
+function CustomModuleBuilder({ items, onChange }) {
+  const addItem = () => {
+    onChange([...items, { no: `CUSTOM.${items.length + 1}`, title: "", levels: ["", "", ""], levelValues: [1, 3, 5] }]);
+  };
+  const removeItem = (idx) => {
+    onChange(items.filter((_, i) => i !== idx).map((it, i) => ({ ...it, no: `CUSTOM.${i + 1}` })));
+  };
+  const updateItem = (idx, patch) => {
+    onChange(items.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
+  };
+  const inputStyle = {
+    width: "100%", fontSize: 12.5, padding: "6px 9px", borderRadius: 6,
+    border: "1px solid #d8cce8", outline: "none", boxSizing: "border-box",
+    fontFamily: "inherit",
+  };
+  return (
+    <div style={{ gridColumn: "1 / -1", background: "#fcfaff", borderBottom: "1.5px solid #d8cce8", padding: "12px 18px" }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: "#5b2d90", marginBottom: 10 }}>
+        กำหนดหัวข้อประเมินเอง — พิมพ์ชื่อหัวข้อและคำอธิบายแต่ละระดับ (1 / 3 / 5)
+      </div>
+      {items.map((item, idx) => (
+        <div key={item.no} style={{
+          background: "#fff", border: "1px solid #e4d8f4", borderRadius: 8,
+          padding: 12, marginBottom: 10,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#6b3fa0", flexShrink: 0 }}>{item.no}</span>
+            <input
+              value={item.title}
+              onChange={(e) => updateItem(idx, { title: e.target.value })}
+              placeholder="ชื่อหัวข้อที่จะประเมิน"
+              style={{ ...inputStyle, fontWeight: 600 }}
+            />
+            <button
+              type="button" onClick={() => removeItem(idx)} title="ลบหัวข้อนี้"
+              style={{ background: "none", border: "none", cursor: "pointer", flexShrink: 0, display: "flex", padding: 4 }}
+            >
+              <Trash2 size={15} style={{ color: "#c62828" }} />
+            </button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+            {[0, 1, 2].map((li) => (
+              <div key={li}>
+                <div style={{ fontSize: 10.5, color: "#9ca3af", marginBottom: 3 }}>คำอธิบายระดับ {[1, 3, 5][li]}</div>
+                <input
+                  value={item.levels[li]}
+                  onChange={(e) => updateItem(idx, { levels: item.levels.map((l, j) => (j === li ? e.target.value : l)) })}
+                  placeholder={`ระดับ ${[1, 3, 5][li]}`}
+                  style={inputStyle}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      <button
+        type="button" onClick={addItem}
+        style={{
+          display: "flex", alignItems: "center", gap: 6,
+          background: "#fff", border: "1.5px dashed #6b3fa0", borderRadius: 8,
+          padding: "8px 14px", cursor: "pointer", color: "#6b3fa0",
+          fontSize: 12.5, fontWeight: 700, fontFamily: "inherit",
+        }}
+      >
+        <Plus size={14} /> เพิ่มหัวข้อ
+      </button>
+      {items.length === 0 && (
+        <div style={{ fontSize: 12, color: "#9333ea", marginTop: 8 }}>
+          ⚠ ยังไม่มีหัวข้อ — กรุณาเพิ่มอย่างน้อย 1 หัวข้อ
+        </div>
+      )}
     </div>
   );
 }

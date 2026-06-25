@@ -73,7 +73,8 @@ router.get('/', async (req, res) => {
          ev.status,
          ev.submitted_at  AS "submittedAt",
          emp.employee_id  AS "employeeId",
-         emp.full_name    AS "fullName"
+         emp.full_name    AS "fullName",
+         emp.profile_picture AS "profilePicture"
        FROM evaluations ev
        JOIN employees emp ON emp.id = ev.employee_id
        WHERE ev.session_id = ANY($1)`,
@@ -142,6 +143,7 @@ router.get('/:id', async (req, res) => {
          ev.submitted_at AS "submittedAt",
          emp.employee_id AS "employeeId",
          emp.full_name   AS "fullName",
+         emp.profile_picture AS "profilePicture",
          d.name_th       AS "department",
          j.name_th       AS "jobTitle"
        FROM evaluations ev

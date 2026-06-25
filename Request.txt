@@ -1,0 +1,33 @@
+เพิ่มและแก้หน่อยเพื่อความถูกต้อง ลองคิดว่าต้องทำอันไหนก่อน
+1.ประวัติการประเมินของฉัน ของ USER GCP เพิ่มcolumnวันที่ตอนที่เข้ามาด้วย  เพิ่มfilterวันที่ด้วย
+2.Score Comparison ในADMIN-ผลและประวัติ History หรือที่อื่นทั้งหมดตอนนี้ ช่องของ ESGมันยังแปลกๆอยู่ ช่วยแก้หน่อย
+3.หน้าอนุมัติผลการประเมิน supervisor คลิกที่itemแล้ว ต้องเห็นresultของทั้ง2 คน เพราะงั้นต้องทำScore Comparisonก่อนให้มันถูก เพราะต้องแสดงในหน้านี้ด้วย
+4.หน้าResult ตรง "SPES — Post Evaluation EMP-001|ฝ่ายจัดซื้อ" เอาEMP-001|ฝ่ายจัดซื้อ ออก ทั้งPre-Postเลย
+5.หน้าADMIN-พนักงาน ตรงcolunmชื่อ-สกุล ให้ใส่รูปของUSERนั้นๆด้วย ใส่ไว้หน้าชื่อก็ได้
+6.หน้าADMIN-ผลและประวัติ ตรงitem ที่คลิกUSER GCPแล้วจะเข้าหน้าresult แล้วใส่รูปUserคนนั้นๆด้วย ใส่ไว้หน้าชื่อก็ได้
+
+7.อันนี้งานใหญ่เลย คือจะแบ่ง part1-3 ในevalform part1(section) = Core เป็นหัวข้อประเมินที่จะเก็บหัวข้อที่ไม่ใช่esg  part2(section) = function อันนี้ให้เพิ่ม
+โมดูล                                                                               	ใช้สำหรับ                                                		หัวข้อเพิ่มเติมหลัก                                                                                                                           				ตัวอย่างเกณฑ์การให้คะแนนเพิ่มเติม 
+M1 · Maintenance / Project       	ผู้รับเหมาซ่อมบำรุง งาน Project   		Safety, Permit to Work, ใบอนุญาต, การรายงานความปลอดภัย        					1=ไม่มีใบอนุญาต / 3=มีครบแต่ไม่สม่ำเสมอ / 5=ครบถ้วน พร้อม HIRA 
+
+M2 · Logistics / Transport       	บริษัทขนส่ง จัดส่งสินค้า                            		สภาพยานพาหนะ, ใบอนุญาตขับขี่, GPS Tracking, พฤติกรรมคนขับ               					1=ไม่มี GPS / 3=มี GPS แต่ไม่ครบ / 5=Real-time Tracking ครบทุกคัน 
+
+M3 · Calibration / Lab           	ห้องปฏิบัติการ สอบเทียบเครื่องมือ               		ISO/IEC 17025, Scope of Accreditation, Turnaround Time, Calibration Tag  	1=ไม่มี Accreditation / 3=มี แต่ Scope จำกัด / 5=ครบ Scope + Turnaround <5 วัน 
+
+M4 · Food / OEM                  	ผู้ผลิตอาหาร OEM วัตถุดิบอาหาร บรรจุภัณฑ์อาหาร 	GHP, HACCP, Food Safety Culture, Allergen Control, Pest Control, Traceability 	1=ไม่มี GHP / 3=มี GHP พื้นฐาน / 5=HACCP + FSSC + Allergen Control 
+
+M5 · Raw Material / RM-PM 		ผู้จำหน่ายวัตถุดิบ บรรจุภัณฑ์ สินค้าทางการเกษตร 	Spec conformance, COA, Traceability, Sustainable Sourcing, RSPO/ASC/MSC 	1=ไม่มี COA / 3=มี COA ไม่ครบ / 5=มีครบ + Certified Sustainable 
+
+M6 · Warehouse / 3PL 			คลังสินค้า บริษัท 3PL 			สภาพคลังสินค้า, FIFO/FEFO, อุณหภูมิ, ความชื้น, WMS, Security 					1=ไม่มี FIFO / 3=มี FIFO แต่ไม่ครบ / 5=WMS ครบ + ควบคุมอุณหภูมิ 
+
+M7 · IT / Software / Service 		ผู้ให้บริการ IT ซอฟต์แวร์ บริการวิชาชีพ 		Data Security, SLA, Uptime, Disaster Recovery, Business Continuity 		1=ไม่มี SLA / 3=มี SLA แต่ไม่ครอบคลุม / 5=SLA ครบ + DR Plan + ISO 27001 
+
+อื่นๆ					พิมเอง				พิมเอง										กำหนด 1, 3, 5
+
+ให้เป็นตัวให่เลือกDropdownก็ได้ แล้วตั้งค่าdefultไว้ตามนั้น ช่อง ใช่สำหรับ,หัวข้อเพิ่มเติม แก้ไขได้
+
+part3(section) = ESG ส่วนesgทั้งหมดอยู่อยู่ล่างสุด
+
+8.อันนี้ถามเฉยๆว่าจะเก็บdataเหมือนเดิมไหมหรือจะมีtable ใหม่ไว้เก็บ Sectionก่อน แล้วก็มีtableย่อยๆ เก็บ Core function esg
+
+งานมันยาก7 8 นี่แหละลองดู

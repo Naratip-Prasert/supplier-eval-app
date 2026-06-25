@@ -276,6 +276,12 @@ CREATE TABLE evaluations (
   created_at    TIMESTAMPTZ DEFAULT NOW(),
   updated_at    TIMESTAMPTZ DEFAULT NOW(),
   raw_scores    JSONB,
+  module_code   VARCHAR(10),                         -- Part2 "Function module" choice: 'm1'..'m7' or 'custom'
+                                                       -- (independent per evaluator, same as the ESG HO/Factory
+                                                       -- choice — not shared via evaluation_sessions)
+  custom_module_items JSONB,                          -- only set when module_code='custom': evaluator-typed
+                                                       -- [{no, title, levels:[lvl1,lvl3,lvl5]}], since these
+                                                       -- items have no catalog row to look text up from later
   UNIQUE (session_id, role)                          -- one USER eval + one GCP eval per session
 );
 

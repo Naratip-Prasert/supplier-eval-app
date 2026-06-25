@@ -307,8 +307,23 @@ function EmployeesTab({ employees, onRefresh, authUser }) {
               <tr key={emp.employeeId}>
                 <td style={{ padding: "11px 14px", fontFamily: "monospace", fontSize: 12, color: "#555" }}>{emp.employeeId}</td>
                 <td style={{ padding: "11px 14px" }}>
-                  <div style={{ fontWeight: 700, color: "#222" }}>{emp.fullName}</div>
-                  {emp.email && <div style={{ fontSize: 11, color: "#aaa" }}>{emp.email}</div>}
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{
+                      width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
+                      overflow: "hidden", background: "#e8efe8",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 11, fontWeight: 700, color: "#4a6b4a",
+                    }}>
+                      {emp.profilePicture
+                        ? <img src={emp.profilePicture} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        : (emp.fullName || "?").split(" ").map((w) => w[0] ?? "").join("").slice(0, 2).toUpperCase()
+                      }
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, color: "#222" }}>{emp.fullName}</div>
+                      {emp.email && <div style={{ fontSize: 11, color: "#aaa" }}>{emp.email}</div>}
+                    </div>
+                  </div>
                 </td>
                 <td style={{ padding: "11px 14px", color: "#666", fontSize: 12 }}>
                   {emp.department ?? "—"}
@@ -694,6 +709,17 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId, entryDateFi
                             background: rc.bg, color: rc.color,
                             borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 700,
                           }}>{ev.role}</span>
+                          <span style={{
+                            width: 18, height: 18, borderRadius: "50%", flexShrink: 0,
+                            overflow: "hidden", background: "#e8efe8",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            fontSize: 8, fontWeight: 700, color: "#4a6b4a",
+                          }}>
+                            {ev.profilePicture
+                              ? <img src={ev.profilePicture} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                              : (ev.fullName || "?").split(" ").map((w) => w[0] ?? "").join("").slice(0, 2).toUpperCase()
+                            }
+                          </span>
                           <span style={{ fontSize: 11, color: "#555" }}>{ev.fullName}</span>
                           {ev.totalScore != null && (
                             <span style={{ fontSize: 10, color: "#aaa" }}>({parseFloat(ev.totalScore).toFixed(1)})</span>
@@ -818,6 +844,17 @@ function SessionDetail({ sessionId, onBack, onViewEvaluation }) {
                       background: rc.bg, color: rc.color,
                       borderRadius: 10, padding: "3px 10px", fontSize: 11, fontWeight: 700,
                     }}>{ev.role}</span>
+                    <div style={{
+                      width: 36, height: 36, borderRadius: "50%", flexShrink: 0,
+                      overflow: "hidden", background: "#e8efe8",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 13, fontWeight: 700, color: "#4a6b4a",
+                    }}>
+                      {ev.profilePicture
+                        ? <img src={ev.profilePicture} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        : (ev.fullName || "?").split(" ").map((w) => w[0] ?? "").join("").slice(0, 2).toUpperCase()
+                      }
+                    </div>
                     <div style={{ flex: 1, minWidth: 160 }}>
                       <div style={{ fontWeight: 700, fontSize: 14, color: "#222" }}>{ev.fullName}</div>
                       <div style={{ fontSize: 11, color: "#aaa" }}>

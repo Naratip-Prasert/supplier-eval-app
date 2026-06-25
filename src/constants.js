@@ -58,7 +58,7 @@ export const GRADE_GUIDE = [
 export const PRE_CRITERIA = [
   {
     section: "1. คุณภาพสินค้า / บริการ (Quality of Goods & Services)",
-    weight: 30,
+    weight: 21,
     items: [
       {
         no: "1.1",
@@ -99,7 +99,7 @@ export const PRE_CRITERIA = [
   },
   {
     section: "2. ราคาและความคุ้มค่า (Cost, Pricing, and Value)",
-    weight: 20,
+    weight: 14,
     items: [
       {
         no: "2.1",
@@ -151,7 +151,7 @@ export const PRE_CRITERIA = [
   },
   {
     section: "3. ความสามารถในการส่งมอบ (Delivery & Logistics Capability)",
-    weight: 20,
+    weight: 14,
     items: [
       {
         no: "3.1",
@@ -202,7 +202,7 @@ export const PRE_CRITERIA = [
   },
   {
     section: "4. ฐานะทางการเงินและความน่าเชื่อถือ (Financial Stability & Reliability)",
-    weight: 15,
+    weight: 11,
     items: [
       {
         no: "4.1",
@@ -668,7 +668,7 @@ export const PRE_CRITERIA = [
 export const POST_CRITERIA = [
   {
     section: "1. ราคาและมูลค่าเพิ่ม (Pricing & Value Added)",
-    weight: 20,
+    weight: 14,
     items: [
       {
         no: "1.1",
@@ -709,7 +709,7 @@ export const POST_CRITERIA = [
   },
   {
     section: "2. คุณภาพสินค้า / บริการ (Quality Performance)",
-    weight: 20,
+    weight: 14,
     items: [
       {
         no: "2.1",
@@ -727,7 +727,7 @@ export const POST_CRITERIA = [
   },
   {
     section: "3. การส่งมอบสินค้า / บริการ (Delivery Performance)",
-    weight: 20,
+    weight: 14,
     items: [
       {
         no: "3.1",
@@ -757,7 +757,7 @@ export const POST_CRITERIA = [
   },
   {
     section: "4. การบริการและการตอบสนอง (Service & Responsiveness)",
-    weight: 15,
+    weight: 11,
     items: [
       {
         no: "4.1",
@@ -832,7 +832,7 @@ export const POST_CRITERIA = [
   },
   {
     section: "5. ฐานะทางการเงินและความน่าเชื่อถือของบริษัท (Financial Standing & Corporate Credibility)",
-    weight: 10,
+    weight: 7,
     items: [
       {
         no: "5.1",
@@ -1295,6 +1295,392 @@ export const POST_CRITERIA = [
   },
 ];
 
+// ── Part2 "Function module" — Request.txt item 7 ─────────────────────────
+// Evaluator picks exactly one module template (or "custom") before scoring
+// this part. Items deliberately use weight:1 uniformly (not summed to the
+// section's 25% target) so initWeights' "fallback: equal split" branch
+// divides the 25% evenly across however many items are visible — the same
+// mechanism the ESG section already relies on, so no per-item weight
+// tuning is needed here either.
+export const FUNCTION_MODULES = {
+  m1: {
+    label: "M1 · Maintenance / Project (ผู้รับเหมาซ่อมบำรุง / งาน Project)",
+    items: [
+      {
+        no: "M1.1", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "ระบบบริหารความปลอดภัยในการทำงาน (Safety Management System)",
+        levels: [
+          "ไม่มีระบบหรือมาตรการด้านความปลอดภัย",
+          "มีมาตรการพื้นฐาน แต่ไม่เป็นลายลักษณ์อักษร",
+          "มีมาตรการเป็นลายลักษณ์อักษร แต่ปฏิบัติไม่สม่ำเสมอ",
+          "มีระบบความปลอดภัยครบถ้วน ปฏิบัติตามสม่ำเสมอ",
+          "มีระบบความปลอดภัยครบถ้วน พร้อมการประเมินความเสี่ยง (HIRA) ทุกงาน",
+        ],
+      },
+      {
+        no: "M1.2", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "ใบอนุญาตทำงาน (Permit to Work)",
+        levels: [
+          "ไม่มีใบอนุญาตทำงาน",
+          "มีบางส่วน ไม่ครบทุกงาน",
+          "มีครบ แต่ไม่สม่ำเสมอ",
+          "มีครบทุกงาน เป็นระบบ",
+          "มีครบถ้วน พร้อมการประเมินความเสี่ยง (HIRA) ก่อนเริ่มงานทุกครั้ง",
+        ],
+      },
+      {
+        no: "M1.3", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "ใบอนุญาต/การรับรองที่เกี่ยวข้องกับงาน (License & Certification)",
+        levels: [
+          "ไม่มีใบอนุญาต/การรับรองที่เกี่ยวข้อง",
+          "มีบางส่วน ใกล้หมดอายุหรือไม่ตรงประเภทงาน",
+          "มีครบตามที่กฎหมายกำหนด",
+          "มีครบ พร้อมต่ออายุล่วงหน้า",
+          "มีครบถ้วนทุกประเภทงาน พร้อมระบบติดตามวันหมดอายุ",
+        ],
+      },
+      {
+        no: "M1.4", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "การรายงานและติดตามเหตุการณ์ด้านความปลอดภัย (Safety Incident Reporting)",
+        levels: [
+          "ไม่มีการรายงานเหตุการณ์ด้านความปลอดภัย",
+          "รายงานเฉพาะเหตุการณ์รุนแรง",
+          "รายงานครบ แต่ไม่มีการติดตามแก้ไข",
+          "รายงานครบ พร้อมติดตามแก้ไขอย่างเป็นระบบ",
+          "รายงานครบ ติดตามแก้ไข พร้อมวิเคราะห์ป้องกันเหตุซ้ำ",
+        ],
+      },
+    ],
+  },
+  m2: {
+    label: "M2 · Logistics / Transport (บริษัทขนส่ง / จัดส่งสินค้า)",
+    items: [
+      {
+        no: "M2.1", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "สภาพยานพาหนะ (Vehicle Condition)",
+        levels: [
+          "ไม่มีการตรวจสภาพยานพาหนะ",
+          "ตรวจสภาพไม่สม่ำเสมอ",
+          "ตรวจสภาพตามรอบ แต่ไม่มีบันทึก",
+          "ตรวจสภาพตามรอบ มีบันทึกครบถ้วน",
+          "ตรวจสภาพตามรอบ มีบันทึก พร้อมแผนซ่อมบำรุงเชิงป้องกัน",
+        ],
+      },
+      {
+        no: "M2.2", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "ใบอนุญาตขับขี่และคุณสมบัติคนขับ (Driver License & Qualification)",
+        levels: [
+          "ไม่มีการตรวจสอบใบอนุญาตขับขี่",
+          "ตรวจสอบบางส่วน ไม่ครบทุกคน",
+          "ตรวจสอบครบ แต่ไม่ติดตามวันหมดอายุ",
+          "ตรวจสอบครบ ติดตามวันหมดอายุ",
+          "ตรวจสอบครบถ้วน พร้อมอบรมพนักงานขับขี่ปลอดภัยประจำปี",
+        ],
+      },
+      {
+        no: "M2.3", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "ระบบติดตามยานพาหนะ (GPS Tracking)",
+        levels: [
+          "ไม่มี GPS Tracking",
+          "มี GPS แต่ไม่ครบทุกคัน",
+          "มี GPS ครบทุกคัน แต่ไม่ Real-time",
+          "มี GPS Real-time ครบทุกคัน",
+          "มี GPS Real-time ครบทุกคัน พร้อมระบบแจ้งเตือนเส้นทาง/ความเร็วผิดปกติ",
+        ],
+      },
+      {
+        no: "M2.4", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "พฤติกรรมการขับขี่ของคนขับ (Driver Behavior)",
+        levels: [
+          "ไม่มีการติดตามพฤติกรรมการขับขี่",
+          "มีข้อร้องเรียนด้านพฤติกรรมการขับขี่บ่อยครั้ง",
+          "มีการติดตามบางส่วน มีข้อร้องเรียนเป็นครั้งคราว",
+          "มีการติดตามสม่ำเสมอ ไม่มีข้อร้องเรียน",
+          "มีการติดตามเชิงรุก พร้อมระบบให้คะแนน/ปรับปรุงพฤติกรรมคนขับ",
+        ],
+      },
+    ],
+  },
+  m3: {
+    label: "M3 · Calibration / Lab (ห้องปฏิบัติการ / สอบเทียบเครื่องมือ)",
+    items: [
+      {
+        no: "M3.1", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "การรับรองมาตรฐาน ISO/IEC 17025",
+        levels: [
+          "ไม่มีการรับรอง ISO/IEC 17025",
+          "อยู่ในระหว่างขอการรับรอง",
+          "มีการรับรอง แต่ใกล้หมดอายุหรือไม่ครอบคลุมงานที่ใช้",
+          "มีการรับรองที่ยังไม่หมดอายุ ครอบคลุมงานที่ใช้",
+          "มีการรับรองครบถ้วน เป็นปัจจุบัน พร้อมขอบข่ายครอบคลุมกว้าง",
+        ],
+      },
+      {
+        no: "M3.2", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "ขอบข่ายการรับรอง (Scope of Accreditation)",
+        levels: [
+          "ไม่มีขอบข่ายการรับรองที่เกี่ยวข้อง",
+          "ขอบข่ายจำกัดมาก ไม่ครอบคลุมรายการที่ใช้งานหลัก",
+          "ขอบข่ายครอบคลุมรายการหลักบางส่วน",
+          "ขอบข่ายครอบคลุมรายการที่ใช้งานหลักครบถ้วน",
+          "ขอบข่ายครอบคลุมครบถ้วน พร้อมรายการเสริมที่เกี่ยวข้อง",
+        ],
+      },
+      {
+        no: "M3.3", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "ระยะเวลาดำเนินการสอบเทียบ (Turnaround Time)",
+        levels: [
+          "ไม่มีการกำหนดระยะเวลาดำเนินการ",
+          "ใช้เวลามากกว่า 14 วัน",
+          "ใช้เวลา 6-14 วัน",
+          "ใช้เวลา 5-6 วัน",
+          "ใช้เวลาน้อยกว่า 5 วัน",
+        ],
+      },
+      {
+        no: "M3.4", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "ป้ายแสดงผลการสอบเทียบ (Calibration Tag)",
+        levels: [
+          "ไม่มีป้ายแสดงผลการสอบเทียบ",
+          "มีป้ายแต่ข้อมูลไม่ครบถ้วน",
+          "มีป้ายครบถ้วน แต่ไม่ระบุวันครบกำหนดสอบเทียบครั้งต่อไป",
+          "มีป้ายครบถ้วน ระบุวันครบกำหนดชัดเจน",
+          "มีป้ายครบถ้วน พร้อมระบบติดตาม/แจ้งเตือนวันครบกำหนดอัตโนมัติ",
+        ],
+      },
+    ],
+  },
+  m4: {
+    label: "M4 · Food / OEM (ผู้ผลิตอาหาร OEM / วัตถุดิบอาหาร / บรรจุภัณฑ์อาหาร)",
+    items: [
+      {
+        no: "M4.1", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "หลักเกณฑ์สุขลักษณะที่ดีในการผลิต (GHP)",
+        levels: [
+          "ไม่มีระบบ GHP",
+          "มี GHP บางส่วน ไม่เป็นระบบ",
+          "มี GHP พื้นฐานครบถ้วน",
+          "มี GHP ครบถ้วน พร้อมตรวจประเมินภายในสม่ำเสมอ",
+          "มี GHP ครบถ้วน ผ่านการตรวจประเมินจากหน่วยงานภายนอก",
+        ],
+      },
+      {
+        no: "M4.2", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "ระบบวิเคราะห์อันตรายและจุดวิกฤตที่ต้องควบคุม (HACCP)",
+        levels: [
+          "ไม่มีระบบ HACCP",
+          "อยู่ในระหว่างจัดทำระบบ",
+          "มีระบบ HACCP แต่ยังไม่ได้รับการรับรอง",
+          "มีระบบ HACCP ได้รับการรับรอง",
+          "มีระบบ HACCP ได้รับการรับรอง พร้อมมาตรฐาน FSSC22000 หรือเทียบเท่า",
+        ],
+      },
+      {
+        no: "M4.3", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "การควบคุมสารก่อภูมิแพ้ (Allergen Control)",
+        levels: [
+          "ไม่มีการควบคุมสารก่อภูมิแพ้",
+          "มีการระบุสารก่อภูมิแพ้บนผลิตภัณฑ์เท่านั้น",
+          "มีมาตรการควบคุมการปนเปื้อนข้ามบางส่วน",
+          "มีมาตรการควบคุมการปนเปื้อนข้ามครบถ้วน",
+          "มีมาตรการควบคุมครบถ้วน พร้อมแผนตรวจสอบสารก่อภูมิแพ้ตามรอบ",
+        ],
+      },
+      {
+        no: "M4.4", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "การควบคุมสัตว์พาหะ (Pest Control)",
+        levels: [
+          "ไม่มีระบบควบคุมสัตว์พาหะ",
+          "มีการควบคุมแต่ไม่สม่ำเสมอ",
+          "มีสัญญาควบคุมสัตว์พาหะกับผู้รับเหมาภายนอก",
+          "มีสัญญาควบคุมสัตว์พาหะ พร้อมบันทึกผลตามรอบ",
+          "มีระบบควบคุมครบถ้วน พร้อมแผนวิเคราะห์แนวโน้มและป้องกันล่วงหน้า",
+        ],
+      },
+      {
+        no: "M4.5", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "การสืบย้อนกลับ (Traceability)",
+        levels: [
+          "ไม่มีระบบสืบย้อนกลับ",
+          "สืบย้อนกลับได้บางส่วน ใช้เวลานาน",
+          "สืบย้อนกลับได้ครบ Lot การผลิต",
+          "สืบย้อนกลับได้ครบทั้ง Lot วัตถุดิบและการผลิต",
+          "สืบย้อนกลับได้ครบถ้วนทุกขั้นตอน ภายในเวลาอันรวดเร็ว (<24 ชม.)",
+        ],
+      },
+    ],
+  },
+  m5: {
+    label: "M5 · Raw Material / RM-PM (ผู้จำหน่ายวัตถุดิบ / บรรจุภัณฑ์ / สินค้าทางการเกษตร)",
+    items: [
+      {
+        no: "M5.1", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "ความสอดคล้องตามข้อกำหนด (Spec Conformance)",
+        levels: [
+          "ไม่สอดคล้องกับ Spec ที่กำหนด",
+          "สอดคล้องบางส่วน มีการเบี่ยงเบนบ่อยครั้ง",
+          "สอดคล้องเป็นส่วนใหญ่ มีการเบี่ยงเบนเป็นครั้งคราว",
+          "สอดคล้องตาม Spec ครบถ้วน",
+          "สอดคล้องตาม Spec ครบถ้วน พร้อมหลักฐานการตรวจสอบทุก Lot",
+        ],
+      },
+      {
+        no: "M5.2", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "ใบรับรองผลวิเคราะห์ (Certificate of Analysis — COA)",
+        levels: [
+          "ไม่มี COA",
+          "มี COA ไม่ครบทุก Lot",
+          "มี COA ครบทุก Lot แต่ข้อมูลไม่ครบถ้วน",
+          "มี COA ครบทุก Lot ข้อมูลครบถ้วน",
+          "มี COA ครบทุก Lot พร้อมรับรองจากห้องปฏิบัติการที่ได้มาตรฐาน",
+        ],
+      },
+      {
+        no: "M5.3", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "การสืบย้อนกลับวัตถุดิบ (Traceability)",
+        levels: [
+          "ไม่มีระบบสืบย้อนกลับวัตถุดิบ",
+          "สืบย้อนกลับได้บางส่วน",
+          "สืบย้อนกลับได้ถึงระดับ Lot",
+          "สืบย้อนกลับได้ถึงแหล่งที่มา (Source) ของวัตถุดิบ",
+          "สืบย้อนกลับได้ครบถ้วนตลอดสาย Supply Chain",
+        ],
+      },
+      {
+        no: "M5.4", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "การจัดหาอย่างยั่งยืน (Sustainable Sourcing / RSPO/ASC/MSC)",
+        levels: [
+          "ไม่มีนโยบายการจัดหาอย่างยั่งยืน",
+          "มีนโยบาย แต่ยังไม่มีการรับรอง",
+          "มีการรับรองบางส่วนของผลิตภัณฑ์",
+          "มีการรับรองความยั่งยืน (เช่น RSPO/ASC/MSC) ครบตามสัดส่วนหลัก",
+          "มีการรับรองความยั่งยืนครบถ้วนทุกผลิตภัณฑ์ที่จำหน่าย",
+        ],
+      },
+    ],
+  },
+  m6: {
+    label: "M6 · Warehouse / 3PL (คลังสินค้า / บริษัท 3PL)",
+    items: [
+      {
+        no: "M6.1", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "สภาพคลังสินค้าและความสะอาด (Warehouse Condition)",
+        levels: [
+          "สภาพคลังไม่เหมาะสม ไม่มีการดูแล",
+          "สภาพคลังพอใช้ มีการดูแลไม่สม่ำเสมอ",
+          "สภาพคลังดี มีการดูแลตามรอบ",
+          "สภาพคลังดี เป็นระบบ มีมาตรฐานความสะอาดชัดเจน",
+          "สภาพคลังดีเยี่ยม มีมาตรฐานความสะอาดและตรวจประเมินสม่ำเสมอ",
+        ],
+      },
+      {
+        no: "M6.2", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "ระบบบริหารสินค้าคงคลัง (FIFO/FEFO)",
+        levels: [
+          "ไม่มีระบบ FIFO/FEFO",
+          "มีระบบ FIFO/FEFO แต่ไม่ครบทุกพื้นที่จัดเก็บ",
+          "มีระบบ FIFO/FEFO ครบถ้วน แต่ยังเป็น Manual",
+          "มีระบบ FIFO/FEFO ครบถ้วน รองรับด้วยระบบ",
+          "มีระบบ FIFO/FEFO ครบถ้วน เป็นอัตโนมัติผ่าน WMS",
+        ],
+      },
+      {
+        no: "M6.3", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "การควบคุมอุณหภูมิและความชื้น (Temperature & Humidity Control)",
+        levels: [
+          "ไม่มีการควบคุมอุณหภูมิ/ความชื้น",
+          "มีการควบคุมบางพื้นที่ ไม่มีบันทึก",
+          "มีการควบคุมครบถ้วน มีบันทึก Manual",
+          "มีการควบคุมครบถ้วน มีระบบบันทึกอัตโนมัติ",
+          "มีการควบคุมครบถ้วน พร้อมระบบแจ้งเตือนอัตโนมัติเมื่อผิดเกณฑ์",
+        ],
+      },
+      {
+        no: "M6.4", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "ระบบบริหารคลังสินค้า (Warehouse Management System — WMS)",
+        levels: [
+          "ไม่มีระบบ WMS ใช้การจัดการแบบ Manual ทั้งหมด",
+          "มี WMS บางส่วน ยังพึ่งพา Manual เป็นหลัก",
+          "มี WMS ครอบคลุมการรับ-จ่ายสินค้าหลัก",
+          "มี WMS ครอบคลุมครบทุกกระบวนการ",
+          "มี WMS ครบถ้วน เชื่อมต่อกับระบบลูกค้าแบบ Real-time",
+        ],
+      },
+      {
+        no: "M6.5", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "ระบบรักษาความปลอดภัย (Security)",
+        levels: [
+          "ไม่มีระบบรักษาความปลอดภัย",
+          "มีระบบพื้นฐาน เช่น รปภ. เท่านั้น",
+          "มีกล้องวงจรปิดและ รปภ. แต่ไม่ครอบคลุมทุกจุด",
+          "มีกล้องวงจรปิดครอบคลุมครบถ้วน พร้อม รปภ.",
+          "มีระบบรักษาความปลอดภัยครบถ้วน พร้อมระบบควบคุมการเข้า-ออกและบันทึกตรวจสอบได้",
+        ],
+      },
+    ],
+  },
+  m7: {
+    label: "M7 · IT / Software / Service (ผู้ให้บริการ IT / ซอฟต์แวร์ / บริการวิชาชีพ)",
+    items: [
+      {
+        no: "M7.1", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "ความปลอดภัยของข้อมูล (Data Security)",
+        levels: [
+          "ไม่มีมาตรการด้านความปลอดภัยข้อมูล",
+          "มีมาตรการพื้นฐาน เช่น รหัสผ่าน",
+          "มีมาตรการเข้ารหัสและสิทธิ์การเข้าถึงตามบทบาท",
+          "มีมาตรการครบถ้วน พร้อมตรวจสอบช่องโหว่สม่ำเสมอ",
+          "มีมาตรการครบถ้วน ได้รับการรับรองมาตรฐาน (เช่น ISO 27001)",
+        ],
+      },
+      {
+        no: "M7.2", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "ข้อตกลงระดับการให้บริการ (Service Level Agreement — SLA)",
+        levels: [
+          "ไม่มี SLA",
+          "มี SLA แต่ไม่ครอบคลุมบริการหลัก",
+          "มี SLA ครอบคลุมบริการหลัก แต่ไม่มีบทลงโทษชัดเจน",
+          "มี SLA ครอบคลุมครบถ้วน พร้อมบทลงโทษชัดเจน",
+          "มี SLA ครอบคลุมครบถ้วน พร้อมรายงานผลการปฏิบัติตาม SLA สม่ำเสมอ",
+        ],
+      },
+      {
+        no: "M7.3", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "ความพร้อมใช้งานของระบบ (Uptime)",
+        levels: [
+          "ไม่มีการรับประกัน Uptime",
+          "รับประกัน Uptime ต่ำกว่า 95%",
+          "รับประกัน Uptime 95-99%",
+          "รับประกัน Uptime มากกว่า 99%",
+          "รับประกัน Uptime มากกว่า 99.9% พร้อมระบบติดตามแบบ Real-time",
+        ],
+      },
+      {
+        no: "M7.4", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "แผนกู้คืนระบบจากภัยพิบัติ (Disaster Recovery Plan)",
+        levels: [
+          "ไม่มีแผน Disaster Recovery",
+          "มีแผนแต่ไม่เคยทดสอบ",
+          "มีแผน ทดสอบเป็นครั้งคราว",
+          "มีแผน ทดสอบสม่ำเสมอตามรอบ",
+          "มีแผนครบถ้วน ทดสอบสม่ำเสมอ พร้อม RTO/RPO ที่ชัดเจน",
+        ],
+      },
+      {
+        no: "M7.5", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        title: "แผนความต่อเนื่องทางธุรกิจ (Business Continuity Plan)",
+        levels: [
+          "ไม่มีแผนความต่อเนื่องทางธุรกิจ",
+          "มีแผนเบื้องต้น ไม่เป็นลายลักษณ์อักษร",
+          "มีแผนเป็นลายลักษณ์อักษร ยังไม่ทดสอบ",
+          "มีแผนเป็นลายลักษณ์อักษร ทดสอบเป็นครั้งคราว",
+          "มีแผนครบถ้วน ทดสอบสม่ำเสมอ พร้อมรายงานผลทุกรอบ",
+        ],
+      },
+    ],
+  },
+};
+
 // post_eval/half_year/yearly all score against POST_CRITERIA; pre_eval (and
 // the now-retired "new_supplier") score against PRE_CRITERIA — same mapping
 // the backend uses (server/routes/evaluations.js criteriaSet resolution) so
@@ -1332,35 +1718,83 @@ export function splitEsgGroups(items) {
   };
 }
 
-// Older saved evaluations (and any caller that didn't get an explicit
-// esgTarget) don't carry the HO/Factory choice as its own field — infer it
-// from which group's item codes actually have scores. Self-healing for
-// historical data instead of depending on a DB column that may not exist.
-export function inferEsgTarget(evalType, scores) {
+// Read-only display variant (ResultPage / History / Score Comparison):
+// don't pick a single HO-or-Factory group at all — show whichever ESG
+// item codes actually have a recorded score. For evaluations submitted
+// after the HO/Factory selector existed this is always exactly one group
+// (Evalform purges the other group's scores on submit), but evaluations
+// submitted *before* the selector existed have BOTH groups' codes scored
+// (the old form showed everything concatenated) — picking a single group
+// would silently hide the other half's score from the section total and
+// radar axis, even though it's part of the stored total_score.
+// Showing "whichever has a score" degrades correctly for both cases.
+// Part 2 "Function module" — target weight carved out of the 100% total
+// (Core 60 / Function 25 / ESG 15, see the section-weight rescale above).
+// Items use weight:1 uniformly so they take the same initWeights "equal
+// split" fallback branch ESG items already use — the section's 25% gets
+// divided evenly across however many items are visible.
+export const FUNCTION_SECTION_WEIGHT = 25;
+
+function buildFunctionSection(moduleCode, customItems) {
+  if (!moduleCode) return null;
+  if (moduleCode === "custom") {
+    return { section: "Part 2 · อื่นๆ (กำหนดเอง)", weight: FUNCTION_SECTION_WEIGHT, items: customItems ?? [] };
+  }
+  const mod = FUNCTION_MODULES[moduleCode];
+  if (!mod) return null;
+  return { section: `Part 2 · ${mod.label}`, weight: FUNCTION_SECTION_WEIGHT, items: mod.items };
+}
+
+export function getScoredCriteria(evalType, scores, moduleCode, customItems) {
   const criteria = getCriteria(evalType);
   const esgIdx   = findEsgSectionIndex(criteria);
-  if (esgIdx === -1 || !scores) return null;
-  const groups = splitEsgGroups(criteria[esgIdx].items);
-  const hoCodes      = groups.ho.filter((i) => !i.divider).map((i) => i.no);
-  const factoryCodes = groups.factory.filter((i) => !i.divider).map((i) => i.no);
-  if (hoCodes.some((c) => scores[c] != null))      return "ho";
-  if (factoryCodes.some((c) => scores[c] != null)) return "factory";
-  return null;
+  if (esgIdx === -1 || !scores) return criteria;
+  const core = criteria.map((section, si) => {
+    if (si !== esgIdx) return section;
+    const groups  = splitEsgGroups(section.items);
+    const hoHit      = groups.ho.some((i) => !i.divider && scores[i.no] != null);
+    const factoryHit = groups.factory.some((i) => !i.divider && scores[i.no] != null);
+    const chosen = hoHit && factoryHit ? [...groups.ho, ...groups.factory]
+      : hoHit ? groups.ho
+      : factoryHit ? groups.factory
+      : [];
+    return { ...section, items: chosen };
+  });
+  const functionSection = buildFunctionSection(moduleCode, customItems);
+  if (!functionSection) return core;
+  return [...core.slice(0, esgIdx), functionSection, ...core.slice(esgIdx)];
 }
 
 // Returns CRITERIA with the ESG section's items narrowed down to just the
-// chosen facility type (`esgTarget`: "ho" | "factory" | null/undefined).
-// When no choice has been made yet, the ESG section's items are empty.
-export function getDisplayCriteria(evalType, esgTarget) {
+// chosen facility type (`esgTarget`: "ho" | "factory" | null/undefined),
+// plus a Function-module section spliced in right before ESG. Unlike
+// getScoredCriteria (read-only display, which omits the Function section
+// entirely when nothing was ever chosen), this editing-path builder always
+// inserts a placeholder section even before a module is picked — same
+// reason the ESG section itself always exists with possibly-empty items:
+// Evalform needs a stable `si` slot to attach <ModuleSelector> to, and the
+// section's weight is 0 until chosen, naturally blocking submit via the
+// existing "totalItemWeight must equal 100%" gate.
+export function getDisplayCriteria(evalType, esgTarget, moduleCode, customItems) {
   const criteria = getCriteria(evalType);
   const esgIdx   = findEsgSectionIndex(criteria);
   if (esgIdx === -1) return criteria;
-  return criteria.map((section, si) => {
+  const core = criteria.map((section, si) => {
     if (si !== esgIdx) return section;
     const groups = splitEsgGroups(section.items);
     const chosen = esgTarget === "factory" ? groups.factory : esgTarget === "ho" ? groups.ho : [];
     return { ...section, items: chosen };
   });
+  const functionSection = buildFunctionSection(moduleCode, customItems)
+    // weight stays at the full FUNCTION_SECTION_WEIGHT target even before a
+    // module is chosen — same as the ESG section's weight always being 15
+    // regardless of esgTarget. Only the *items* list is empty until chosen;
+    // zeroing the section weight here (instead of just the items) was the
+    // actual bug — initWeights bakes section weight in once at mount and
+    // nothing later re-raises it, so the 25% never appeared even after a
+    // module was picked.
+    ?? { section: "Part 2 · เลือกโมดูล (ยังไม่เลือก)", weight: FUNCTION_SECTION_WEIGHT, items: [] };
+  return [...core.slice(0, esgIdx), functionSection, ...core.slice(esgIdx)];
 }
 
 export function getGrade(score) {

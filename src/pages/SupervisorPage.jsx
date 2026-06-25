@@ -20,7 +20,7 @@ function daysDiff(dateStr) {
   return diff;
 }
 
-export default function SupervisorPage({ authUser, onBack }) {
+export default function SupervisorPage({ authUser, onBack, onViewEvaluation }) {
   const { showConfirm, ModalEl } = useModal();
   const [tab,     setTab]     = useState("queue");
   const [queue,   setQueue]   = useState([]);
@@ -356,21 +356,46 @@ export default function SupervisorPage({ authUser, onBack }) {
                 {/* Evaluations */}
                 <div style={{ padding: "16px 22px" }}>
                   <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
-                    {session.evaluations.map(ev => (
-                      <div key={ev.id} style={{
-                        background: "#f8fafc", border: "1px solid #eef2f6", borderRadius: 9,
-                        padding: "11px 15px", minWidth: 170,
-                      }}>
-                        <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.3, textTransform: "uppercase", color: "#94a3b8", marginBottom: 5 }}>
-                          {ev.role === "GCP" ? "Buyer (GCP)" : "Evaluator (USER)"}
+                    {session.evaluations.map(ev => {
+                      const clickable = !!onViewEvaluation;
+                      return (
+                        <div
+                          key={ev.id}
+                          onClick={() => onViewEvaluation?.(ev.id)}
+                          title={clickable ? "คลิกเพื่อดูผลการประเมินแบบละเอียด" : undefined}
+                          style={{
+                            background: "#f8fafc", border: "1px solid #eef2f6", borderRadius: 9,
+                            padding: "11px 15px", minWidth: 170,
+                            cursor: clickable ? "pointer" : "default",
+                            transition: "background 0.1s, border-color 0.1s",
+                          }}
+                          onMouseEnter={e => { if (clickable) { e.currentTarget.style.background = "#eef2f6"; e.currentTarget.style.borderColor = "#cbd5e1"; } }}
+                          onMouseLeave={e => { if (clickable) { e.currentTarget.style.background = "#f8fafc"; e.currentTarget.style.borderColor = "#eef2f6"; } }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+                            <div style={{
+                              width: 24, height: 24, borderRadius: "50%", flexShrink: 0,
+                              overflow: "hidden", background: "#e2e8f0",
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                              fontSize: 10, fontWeight: 700, color: "#475569",
+                            }}>
+                              {ev.profilePicture
+                                ? <img src={ev.profilePicture} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                : (ev.fullName || "?").split(" ").map((w) => w[0] ?? "").join("").slice(0, 2).toUpperCase()
+                              }
+                            </div>
+                            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.3, textTransform: "uppercase", color: "#94a3b8" }}>
+                              {ev.role === "GCP" ? "Buyer (GCP)" : "Evaluator (USER)"}
+                            </div>
+                          </div>
+                          <div style={{ fontWeight: 700, fontSize: 13.5, color: "#0f172a" }}>{ev.fullName}</div>
+                          <div style={{ fontSize: 12, color: "#64748b" }}>{ev.department}</div>
+                          <div style={{ marginTop: 7, fontWeight: 700, color: GRADE_COLOR[ev.grade] || "#0f172a" }}>
+                            {ev.totalScore} <span style={{ fontWeight: 500, fontSize: 11, color: "#94a3b8" }}>({ev.grade})</span>
+                          </div>
                         </div>
-                        <div style={{ fontWeight: 700, fontSize: 13.5, color: "#0f172a" }}>{ev.fullName}</div>
-                        <div style={{ fontSize: 12, color: "#64748b" }}>{ev.department}</div>
-                        <div style={{ marginTop: 7, fontWeight: 700, color: GRADE_COLOR[ev.grade] || "#0f172a" }}>
-                          {ev.totalScore} <span style={{ fontWeight: 500, fontSize: 11, color: "#94a3b8" }}>({ev.grade})</span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
 
                   {/* Review panel */}

@@ -28,6 +28,16 @@ function formatDate(iso) {
     + " " + d.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
 }
 
+// Date-only, no time — used for the dedicated "วันที่" column/badge. Don't
+// derive this from formatDate() via .split(" ")[0]: Thai month abbreviations
+// have a trailing dot but no embedded space issue, the date+time STRING
+// itself has multiple space-separated parts (day / month / year / time),
+// so splitting on " " silently truncates to just the day number.
+function formatDateOnly(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("th-TH", { day: "2-digit", month: "short", year: "numeric" });
+}
+
 // ── Pill filter button ────────────────────────────────────────
 function Pill({ active, onClick, children, color }) {
   return (
@@ -76,6 +86,8 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
   const [filterGrade, setFilterGrade] = useState("all");
   const [filterRole,  setFilterRole]  = useState("all");
   const [filterPeriod, setFilterPeriod] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo,   setDateTo]   = useState("");
   const [showFilter,  setShowFilter]  = useState(false);
 
   const isAdmin  = authUser?.role === "ADMIN";
@@ -95,6 +107,13 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
       if (filterGrade  !== "all" && r.grade    !== filterGrade) return false;
       if (filterRole   !== "all" && r.role     !== filterRole)  return false;
       if (filterPeriod !== "all" && r.period   !== filterPeriod) return false;
+      if (r.submittedAt) {
+        const submitted = new Date(r.submittedAt);
+        if (dateFrom && submitted < new Date(`${dateFrom}T00:00:00`)) return false;
+        if (dateTo   && submitted > new Date(`${dateTo}T23:59:59.999`)) return false;
+      } else if (dateFrom || dateTo) {
+        return false; // no submission date to compare — exclude when a date filter is active
+      }
       if (search.trim()) {
         const q = search.trim().toLowerCase();
         const haystack = [r.supplierName, r.vendorCode, r.evaluatorName, r.period].join(" ").toLowerCase();
@@ -102,7 +121,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
       }
       return true;
     });
-  }, [records, search, filterEval, filterGrade, filterRole, filterPeriod]);
+  }, [records, search, filterEval, filterGrade, filterRole, filterPeriod, dateFrom, dateTo]);
 
   // ── Stats ─────────────────────────────────────────────────
   const gradeCounts = useMemo(() => {
@@ -111,10 +130,11 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
     return counts;
   }, [records]);
 
-  const hasFilter = filterEval !== "all" || filterGrade !== "all" || filterRole !== "all" || filterPeriod !== "all" || search.trim();
+  const hasFilter = filterEval !== "all" || filterGrade !== "all" || filterRole !== "all" || filterPeriod !== "all" || !!dateFrom || !!dateTo || search.trim();
 
   const clearFilters = () => {
     setSearch(""); setFilterEval("all"); setFilterGrade("all"); setFilterRole("all"); setFilterPeriod("all");
+    setDateFrom(""); setDateTo("");
   };
 
   const handleEvalFilter = (v) => {
@@ -276,6 +296,34 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
                   </div>
                 )}
 
+                {/* Date submitted */}
+                <div>
+                  <div style={{ fontSize: 11, color: "#9ca3af", fontWeight: 600, marginBottom: 6, textTransform: "uppercase" }}>วันที่ตอนที่เข้ามา</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <input
+                      type="date"
+                      value={dateFrom}
+                      max={dateTo || undefined}
+                      onChange={e => setDateFrom(e.target.value)}
+                      style={{
+                        border: "1px solid #e5e7eb", borderRadius: 6, padding: "4px 8px",
+                        fontSize: 12, fontFamily: "Sarabun, sans-serif", color: "#374151",
+                      }}
+                    />
+                    <span style={{ fontSize: 12, color: "#9ca3af" }}>—</span>
+                    <input
+                      type="date"
+                      value={dateTo}
+                      min={dateFrom || undefined}
+                      onChange={e => setDateTo(e.target.value)}
+                      style={{
+                        border: "1px solid #e5e7eb", borderRadius: 6, padding: "4px 8px",
+                        fontSize: 12, fontFamily: "Sarabun, sans-serif", color: "#374151",
+                      }}
+                    />
+                  </div>
+                </div>
+
                 {hasFilter && (
                   <div style={{ display: "flex", alignItems: "flex-end" }}>
                     <button onClick={clearFilters} style={{
@@ -348,7 +396,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
             {/* Table header */}
             <div style={{
               display: "grid",
-              gridTemplateColumns: isAdmin ? "36px 1fr 130px 90px 80px 80px 20px" : "36px 1fr 130px 80px 80px 20px",
+              gridTemplateColumns: isAdmin ? "36px 1fr 130px 90px 100px 80px 80px 20px" : "36px 1fr 130px 100px 80px 80px 20px",
               gap: "0 12px", padding: "8px 18px",
               background: "#f9fafb", borderBottom: "1px solid #f3f4f6",
               fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: 0.5,
@@ -358,6 +406,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
               <div>Supplier</div>
               <div>รอบ / ประเภท</div>
               {isAdmin && <div>ผู้ประเมิน</div>}
+              <div>วันที่</div>
               <div style={{ textAlign: "center" }}>เกรด</div>
               <div style={{ textAlign: "right" }}>คะแนน</div>
               <div />
@@ -375,7 +424,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
                   onClick={() => onViewDetail?.(r.evalId)}
                   style={{
                     display: "grid",
-                    gridTemplateColumns: isAdmin ? "36px 1fr 130px 90px 80px 80px 20px" : "36px 1fr 130px 80px 80px 20px",
+                    gridTemplateColumns: isAdmin ? "36px 1fr 130px 90px 100px 80px 80px 20px" : "36px 1fr 130px 100px 80px 80px 20px",
                     gap: "0 12px", padding: "11px 18px",
                     borderBottom: idx < filtered.length - 1 ? "1px solid #f3f4f6" : "none",
                     alignItems: "center", cursor: clickable ? "pointer" : "default",
@@ -420,22 +469,40 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
 
                   {/* Evaluator (admin only) */}
                   {isAdmin && (
-                    <div style={{ minWidth: 0 }}>
+                    <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 6 }}>
                       <div style={{
-                        fontSize: 11, color: "#374151", fontWeight: 600,
-                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        width: 22, height: 22, borderRadius: "50%", flexShrink: 0,
+                        overflow: "hidden", background: "#e8efe8",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 9, fontWeight: 700, color: "#4a6b4a",
                       }}>
-                        {r.evaluatorName ?? "—"}
+                        {r.evaluatorPicture
+                          ? <img src={r.evaluatorPicture} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          : (r.evaluatorName || "?").split(" ").map((w) => w[0] ?? "").join("").slice(0, 2).toUpperCase()
+                        }
                       </div>
-                      <span style={{
-                        fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 4,
-                        background: r.role === "GCP" ? "#eff6ff" : "#f0fdf4",
-                        color: r.role === "GCP" ? "#1d4ed8" : "#15803d",
-                      }}>
-                        {r.role}
-                      </span>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{
+                          fontSize: 11, color: "#374151", fontWeight: 600,
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        }}>
+                          {r.evaluatorName ?? "—"}
+                        </div>
+                        <span style={{
+                          fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 4,
+                          background: r.role === "GCP" ? "#eff6ff" : "#f0fdf4",
+                          color: r.role === "GCP" ? "#1d4ed8" : "#15803d",
+                        }}>
+                          {r.role}
+                        </span>
+                      </div>
                     </div>
                   )}
+
+                  {/* Date submitted */}
+                  <div style={{ fontSize: 11.5, color: "#6b7280" }}>
+                    {formatDateOnly(r.submittedAt)}
+                  </div>
 
                   {/* Grade badge */}
                   <div style={{ textAlign: "center" }}>
@@ -453,9 +520,6 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
                   <div style={{ textAlign: "right" }}>
                     <div style={{ fontSize: 15, fontWeight: 800, color: gc.bar, lineHeight: 1 }}>
                       {score}
-                    </div>
-                    <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>
-                      {formatDate(r.submittedAt).split(" ")[0]}
                     </div>
                   </div>
 
@@ -509,10 +573,22 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
                       </span>
                       {isAdmin && (
                         <span style={{
-                          fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 4,
+                          display: "inline-flex", alignItems: "center", gap: 4,
+                          fontSize: 10, fontWeight: 700, padding: "1px 6px 1px 2px", borderRadius: 4,
                           background: r.role === "GCP" ? "#eff6ff" : "#f0fdf4",
                           color: r.role === "GCP" ? "#1d4ed8" : "#15803d",
                         }}>
+                          <span style={{
+                            width: 14, height: 14, borderRadius: "50%", flexShrink: 0,
+                            overflow: "hidden", background: "#fff",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            fontSize: 7, fontWeight: 700,
+                          }}>
+                            {r.evaluatorPicture
+                              ? <img src={r.evaluatorPicture} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                              : (r.evaluatorName || "?").split(" ").map((w) => w[0] ?? "").join("").slice(0, 2).toUpperCase()
+                            }
+                          </span>
                           {r.evaluatorName ?? "—"} · {r.role}
                         </span>
                       )}
@@ -529,7 +605,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
                     </span>
                     <div style={{ fontSize: 14, fontWeight: 800, color: gc.bar, lineHeight: 1 }}>{score}</div>
                     <div style={{ fontSize: 9.5, color: "#9ca3af", marginTop: 2 }}>
-                      {formatDate(r.submittedAt).split(" ")[0]}
+                      {formatDateOnly(r.submittedAt)}
                     </div>
                   </div>
 

@@ -59,7 +59,7 @@ async function computeScoreAndGrade(client, scoresInput, criteriaMap) {
 //   }
 // }
 router.post('/', async (req, res) => {
-  const { vendorCode, evalType, period, productType, scores, sessionId: taskSessionId } = req.body;
+  const { vendorCode, evalType, period, productType, scores, sessionId: taskSessionId, moduleCode, customModuleItems } = req.body;
 
   // The acting employee is resolved from the verified JWT (req.user.empId),
   // never from the request body — req.body used to carry an `employeeId`
@@ -210,21 +210,31 @@ router.post('/', async (req, res) => {
     // numbers (e.g. "1.1") for different criteria, so lookups must be scoped
     // by criteria_set — same mapping the frontend's getCriteria/isPostEvalType
     // (src/constants.js) use to choose between PRE_CRITERIA and POST_CRITERIA.
+    // Part2 "Function module" items (M1-M7) are seeded under their own
+    // criteria_set ('module_m1'..'module_m7') — include the chosen module's
+    // set too, or its codes would never resolve and silently drop out of
+    // total_score (the exact failure mode the matchedScores filter below
+    // was built to prevent for a different cause).
     const criteriaSet = ['post_eval', 'half_year', 'yearly'].includes(sessionEvalType)
       ? 'post_eval'
       : 'pre_eval';
+    const criteriaSets = moduleCode && moduleCode !== 'custom'
+      ? [criteriaSet, `module_${moduleCode}`]
+      : [criteriaSet];
     const codes = Object.keys(scores);
     const criteriaResult = await client.query(
       `SELECT id, code, default_weight
          FROM evaluation_criteria
-        WHERE code = ANY($1) AND is_active = TRUE AND criteria_set = $2`,
-      [codes, criteriaSet]
+        WHERE code = ANY($1) AND is_active = TRUE AND criteria_set = ANY($2)`,
+      [codes, criteriaSets]
     );
     const criteriaMap = {};
     criteriaResult.rows.forEach(c => { criteriaMap[c.code] = c; });
 
-    // Log unknown codes but do not reject (criteria table may be incomplete)
-    const unknownCodes = codes.filter(c => !criteriaMap[c]);
+    // Log unknown codes but do not reject (criteria table may be incomplete).
+    // CUSTOM.* codes are expected to never resolve — they're deliberately
+    // not in any catalog (see matchedScores above) — so they're not "unknown".
+    const unknownCodes = codes.filter(c => !criteriaMap[c] && !c.startsWith('CUSTOM.'));
     if (unknownCodes.length > 0) {
       console.warn(`[evaluations] รหัสเกณฑ์ไม่มีในตาราง (ข้ามการเก็บ): ${unknownCodes.join(', ')}`);
     }
@@ -238,9 +248,14 @@ router.post('/', async (req, res) => {
     // score permanently unreconcilable against its own per-criterion
     // breakdown (found auditing live data: ~50% of saved evaluations had
     // this exact mismatch).
+    // Custom module items ("อื่นๆ พิมพ์เอง") are deliberately never seeded into
+    // evaluation_criteria — they're per-evaluation, free-typed by the
+    // evaluator (title + level text), persisted via custom_module_items
+    // instead of a shared catalog. Their codes (CUSTOM.n) must still count
+    // toward total_score even though criteriaMap can't resolve them.
     const matchedScores = {};
     for (const code of codes) {
-      if (criteriaMap[code]) matchedScores[code] = scores[code];
+      if (criteriaMap[code] || code.startsWith('CUSTOM.')) matchedScores[code] = scores[code];
     }
     const { totalScore, grade } = await computeScoreAndGrade(client, matchedScores, criteriaMap);
 
@@ -258,10 +273,11 @@ router.post('/', async (req, res) => {
     // 9. Insert evaluation record (raw_scores stores every criterion submitted)
     const evalResult = await client.query(
       `INSERT INTO evaluations
-         (session_id, employee_id, role, product_type, status, total_score, grade, submitted_at, raw_scores)
-       VALUES ($1, $2, $3, $4, 'saved', $5, $6, NOW(), $7)
+         (session_id, employee_id, role, product_type, status, total_score, grade, submitted_at, raw_scores, module_code, custom_module_items)
+       VALUES ($1, $2, $3, $4, 'saved', $5, $6, NOW(), $7, $8, $9)
        RETURNING id`,
-      [sessionId, employee.id, evalRole, productType, totalScore, grade, JSON.stringify(scores)]
+      [sessionId, employee.id, evalRole, productType, totalScore, grade, JSON.stringify(scores),
+       moduleCode || null, customModuleItems ? JSON.stringify(customModuleItems) : null]
     );
     const evaluationId = evalResult.rows[0].id;
 
@@ -408,7 +424,8 @@ router.get('/all', async (req, res) => {
          es.final_score     AS "finalScore",
          es.final_grade     AS "finalGrade",
          emp.full_name      AS "evaluatorName",
-         emp.employee_id    AS "evaluatorId"
+         emp.employee_id    AS "evaluatorId",
+         emp.profile_picture AS "evaluatorPicture"
        FROM evaluations ev
        JOIN evaluation_sessions es  ON es.id  = ev.session_id
        JOIN suppliers           s   ON s.id   = es.supplier_id
@@ -551,8 +568,11 @@ router.get('/:id', async (req, res) => {
          ev.grade,
          ev.submitted_at  AS "submittedAt",
          ev.created_at    AS "createdAt",
+         ev.module_code   AS "moduleCode",
+         ev.custom_module_items AS "customModuleItems",
          emp.employee_id  AS "employeeId",
          emp.full_name    AS "fullName",
+         emp.profile_picture AS "profilePicture",
          d.name_th        AS "department",
          j.name_th        AS "jobTitle",
          s.vendor_code    AS "vendorCode",

@@ -14,7 +14,7 @@ function loadConstants() {
   // Cut off at the first exported function — only PRE_CRITERIA/POST_CRITERIA
   // (plain `export const` arrays) are needed above that point.
   const onlyData = src.split(/export function/)[0];
-  const body = onlyData.replace(/export const/g, 'const') + '\nmodule.exports = { PRE_CRITERIA, POST_CRITERIA };';
+  const body = onlyData.replace(/export const/g, 'const') + '\nmodule.exports = { PRE_CRITERIA, POST_CRITERIA, FUNCTION_MODULES };';
   const mod = { exports: {} };
   new Function('module', 'exports', body)(mod, mod.exports);
   return mod.exports;
@@ -69,10 +69,19 @@ async function seedSet(client, sections, criteriaSet, codePrefix) {
   }
 }
 
+// Part 2 "Function module" weight — mirrors FUNCTION_SECTION_WEIGHT in
+// src/constants.js (defined after this file's load-cutoff point, so it
+// isn't importable here; keep the two in sync if the split ever changes).
+const FUNCTION_SECTION_WEIGHT = 25;
+
 async function seedCriteriaFromConstants(client) {
-  const { PRE_CRITERIA, POST_CRITERIA } = loadConstants();
+  const { PRE_CRITERIA, POST_CRITERIA, FUNCTION_MODULES } = loadConstants();
   await seedSet(client, PRE_CRITERIA, 'pre_eval', 'PRE');
   await seedSet(client, POST_CRITERIA, 'post_eval', 'POST');
+  for (const [code, mod] of Object.entries(FUNCTION_MODULES)) {
+    const sections = [{ section: mod.label, weight: FUNCTION_SECTION_WEIGHT, items: mod.items }];
+    await seedSet(client, sections, `module_${code}`, code.toUpperCase());
+  }
 }
 
 module.exports = { seedCriteriaFromConstants };

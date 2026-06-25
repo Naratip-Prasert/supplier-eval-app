@@ -3,8 +3,9 @@
 // ============================================================
 
 import { useState, useRef, Fragment } from "react";
+import * as XLSX from "xlsx";
 import { Header, GreenButton, useModal } from "../components";
-import { isPostEvalType, GRADE_MAP, GRADE_GUIDE, getDisplayCriteria, inferEsgTarget } from "../constants";
+import { isPostEvalType, GRADE_MAP, GRADE_GUIDE, getScoredCriteria } from "../constants";
 import { authFetch } from "../utils/api";
 import { Download, Printer, CheckCircle2, XCircle } from "lucide-react";
 
@@ -33,9 +34,8 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
   const { showConfirm, ModalEl } = useModal();
   const { totalScore, grade, scores = {} } = result;
   const gradeColor = GRADE_MAP[grade];
-  const subtitle   = `${formData.empId || "BJC-XXXXX"}|${formData.dept || "ฝ่าย"}`;
   const evalLabel  = isPostEvalType(formData.evalType) ? "Post" : "Pre";
-  const CRITERIA   = getDisplayCriteria(formData.evalType, result.esgTarget ?? inferEsgTarget(formData.evalType, result.scores));
+  const CRITERIA   = getScoredCriteria(formData.evalType, result.scores, result.moduleCode, result.customItems);
 
   const now     = new Date();
   const dateStr = `${String(now.getDate()).padStart(2,"0")}/${String(now.getMonth()+1).padStart(2,"0")}/${now.getFullYear()}`;
@@ -107,6 +107,8 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
           productType: formData.productType,
           sessionId:   formData.sessionId,
           scores:      mergedScores,
+          moduleCode:        result.moduleCode ?? null,
+          customModuleItems: result.customItems ?? null,
         }),
       });
       if (!res.ok) {
@@ -128,15 +130,16 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
     const rows = [
       ["Supplier Evaluation Report"],
       [],
-      ["Supplier",     formData.supplierName || ""],
-      ["Vendor Code",  formData.vendorCode   || ""],
-      ["Evaluated By", formData.empId        || ""],
-      ["Dept",         formData.dept         || ""],
-      ["Eval Type",    formData.evalType     || ""],
-      ["Period",       formData.period       || ""],
-      ["Date",         dateStr],
-      ["Overall Score", totalScore.toFixed(1)],
-      ["Grade", grade],
+      ["Supplier", "Vendor Code", "Eval Type", "Period", "Date", "Overall Score", "Grade"],
+      [
+        formData.supplierName || "",
+        formData.vendorCode   || "",
+        formData.evalType     || "",
+        formData.period       || "",
+        dateStr,
+        totalScore.toFixed(1),
+        grade,
+      ],
       [],
       ["No.", "Criteria", "Weight(%)", "Score"],
       ...allExportItems.map(item => {
@@ -146,14 +149,18 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
         return [item.no, item.title.replace(/\n/g, " "), iw, lv ? ((lv / maxLv) * iw).toFixed(1) : ""];
       }),
     ];
-    const csv  = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
-    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement("a");
-    a.href = url;
-    a.download = `SupplierEval_${formData.vendorCode || "result"}_${dateStr.replace(/\//g,"-")}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    // Auto-fit each column to its widest cell (capped so the long Thai
+    // criteria titles don't blow the sheet out to one giant column) —
+    // plain CSV has no column-width metadata, so this needs a real .xlsx.
+    const colCount = rows.reduce((max, r) => Math.max(max, r.length), 0);
+    ws["!cols"] = Array.from({ length: colCount }, (_, ci) => {
+      const widest = rows.reduce((max, r) => Math.max(max, String(r[ci] ?? "").length), 10);
+      return { wch: Math.min(widest + 2, 60) };
+    });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Evaluation");
+    XLSX.writeFile(wb, `SupplierEval_${formData.vendorCode || "result"}_${dateStr.replace(/\//g,"-")}.xlsx`);
   };
 
   const printPDF = () => { setShowExport(false); window.print(); };
@@ -246,7 +253,6 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
         <div className="no-print">
           <Header
             titleOverride={`SPES — ${evalLabel} Evaluation`}
-            subtitle={subtitle}
             backLabel={readOnly ? "← กลับ" : "← กลับหน้าประเมิน"}
             onBack={handleBackToEval}
             user={user}
@@ -265,7 +271,7 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
                 </div>
                 <div style={{ fontSize: 11, color: "#555", marginTop: 4 }}>
                   {formData.supplierName || "—"} &nbsp;|&nbsp; Vendor: {formData.vendorCode || "—"} &nbsp;|&nbsp;
-                  Dept: {formData.dept || "—"} &nbsp;|&nbsp; Period: {formData.period || "—"} &nbsp;|&nbsp; Date: {dateStr}
+                  Period: {formData.period || "—"} &nbsp;|&nbsp; Date: {dateStr}
                 </div>
               </div>
               <div style={{ textAlign: "right", flexShrink: 0 }}>
@@ -312,7 +318,7 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
                   boxShadow: "0 8px 24px rgba(0,0,0,0.12)", zIndex: 99, minWidth: 170, overflow: "hidden",
                 }}>
                   <button className="export-btn" onClick={exportExcel} style={{ ...dropdownItemStyle, display: "flex", alignItems: "center", gap: 8 }}>
-                    <Download size={13} style={{ color: "#1558a0" }} /> Export Excel (CSV)
+                    <Download size={13} style={{ color: "#1558a0" }} /> Export Excel (.xlsx)
                   </button>
                   <div style={{ height: 1, background: "#f0f0f0" }} />
                   <button className="export-btn" onClick={printPDF} style={{ ...dropdownItemStyle, display: "flex", alignItems: "center", gap: 8 }}>
@@ -343,8 +349,6 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 20px", fontSize: 12, color: "#718096" }}>
                 <span>Tax ID: <strong style={{ color: "#4a5568" }}>{formData.vendorCode || "—"}</strong></span>
-                <span>Evaluated by: <strong style={{ color: "#4a5568" }}>{formData.empId || "—"}</strong></span>
-                <span>Dept: <strong style={{ color: "#4a5568" }}>{formData.dept || "—"}</strong></span>
                 <span>Period: <strong style={{ color: "#4a5568" }}>{formData.period || "—"}</strong></span>
                 <span>Date: <strong style={{ color: "#4a5568" }}>{dateStr}</strong></span>
               </div>

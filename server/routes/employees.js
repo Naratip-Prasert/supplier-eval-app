@@ -21,7 +21,8 @@ router.get('/', async (req, res) => {
          e.is_active      AS "isActive",
          d.name_th        AS "department",
          j.name_th        AS "jobTitle",
-         e.created_at     AS "createdAt"
+         e.created_at     AS "createdAt",
+         e.profile_picture AS "profilePicture"
        FROM employees e
        LEFT JOIN departments d ON d.id = e.department_id
        LEFT JOIN job_titles  j ON j.id = e.job_title_id

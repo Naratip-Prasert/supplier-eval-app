@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { authFetch } from "./utils/api";
-import { getCriteria, inferEsgTarget } from "./constants";
+import { getCriteria } from "./constants";
 import PortalPage         from "./pages/PortalPage";
 import LandingPage        from "./pages/LandingPage";
 import EvalForm           from "./pages/Evalform";
@@ -79,7 +79,8 @@ function EvalHistoryLoader({ evalId, user, profilePic, onBack }) {
             weights:      weightsObj,
             notes:        notesObj,
             radarOverride,
-            esgTarget:    inferEsgTarget(d.evalType, scoresObj),
+            moduleCode:   d.moduleCode ?? null,
+            customItems:  d.customModuleItems ?? [],
           },
         });
       })
@@ -240,6 +241,11 @@ export default function App() {
       <SupervisorPage
         authUser={user}
         onBack={() => setPage("portal")}
+        onViewEvaluation={(id) => {
+          setPrevPage("supervisor");
+          setEvalDetailId(id);
+          setPage("evalDetail");
+        }}
       />
     );
   }
