@@ -1307,18 +1307,16 @@ export const FUNCTION_MODULES = {
     label: "M1 · Maintenance / Project (ผู้รับเหมาซ่อมบำรุง / งาน Project)",
     items: [
       {
-        no: "M1.1", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M1.1", weight: 1, levelValues: [1, 3, 5],
         title: "ระบบบริหารความปลอดภัยในการทำงาน (Safety Management System)",
         levels: [
-          "ไม่มีระบบหรือมาตรการด้านความปลอดภัย",
-          "มีมาตรการพื้นฐาน แต่ไม่เป็นลายลักษณ์อักษร",
-          "มีมาตรการเป็นลายลักษณ์อักษร แต่ปฏิบัติไม่สม่ำเสมอ",
-          "มีระบบความปลอดภัยครบถ้วน ปฏิบัติตามสม่ำเสมอ",
-          "มีระบบความปลอดภัยครบถ้วน พร้อมการประเมินความเสี่ยง (HIRA) ทุกงาน",
+          "ไม่มีใบอนุญาต",
+          "มีครบแต่ไม่สม่ำเสมอ",
+          "รบถ้วน พร้อม HIRA",
         ],
       },
       {
-        no: "M1.2", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M1.2", weight: 1, levelValues: [1, 3, 5],
         title: "ใบอนุญาตทำงาน (Permit to Work)",
         levels: [
           "ไม่มีใบอนุญาตทำงาน",
@@ -1329,7 +1327,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M1.3", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M1.3", weight: 1, levelValues: [1, 3, 5],
         title: "ใบอนุญาต/การรับรองที่เกี่ยวข้องกับงาน (License & Certification)",
         levels: [
           "ไม่มีใบอนุญาต/การรับรองที่เกี่ยวข้อง",
@@ -1340,7 +1338,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M1.4", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M1.4", weight: 1, levelValues: [1, 3, 5],
         title: "การรายงานและติดตามเหตุการณ์ด้านความปลอดภัย (Safety Incident Reporting)",
         levels: [
           "ไม่มีการรายงานเหตุการณ์ด้านความปลอดภัย",
@@ -1356,7 +1354,7 @@ export const FUNCTION_MODULES = {
     label: "M2 · Logistics / Transport (บริษัทขนส่ง / จัดส่งสินค้า)",
     items: [
       {
-        no: "M2.1", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M2.1", weight: 1, levelValues: [1, 3, 5],
         title: "สภาพยานพาหนะ (Vehicle Condition)",
         levels: [
           "ไม่มีการตรวจสภาพยานพาหนะ",
@@ -1367,7 +1365,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M2.2", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M2.2", weight: 1, levelValues: [1, 3, 5],
         title: "ใบอนุญาตขับขี่และคุณสมบัติคนขับ (Driver License & Qualification)",
         levels: [
           "ไม่มีการตรวจสอบใบอนุญาตขับขี่",
@@ -1378,7 +1376,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M2.3", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M2.3", weight: 1, levelValues: [1, 3, 5],
         title: "ระบบติดตามยานพาหนะ (GPS Tracking)",
         levels: [
           "ไม่มี GPS Tracking",
@@ -1389,7 +1387,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M2.4", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M2.4", weight: 1, levelValues: [1, 3, 5],
         title: "พฤติกรรมการขับขี่ของคนขับ (Driver Behavior)",
         levels: [
           "ไม่มีการติดตามพฤติกรรมการขับขี่",
@@ -1405,7 +1403,7 @@ export const FUNCTION_MODULES = {
     label: "M3 · Calibration / Lab (ห้องปฏิบัติการ / สอบเทียบเครื่องมือ)",
     items: [
       {
-        no: "M3.1", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M3.1", weight: 1, levelValues: [1, 3, 5],
         title: "การรับรองมาตรฐาน ISO/IEC 17025",
         levels: [
           "ไม่มีการรับรอง ISO/IEC 17025",
@@ -1416,7 +1414,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M3.2", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M3.2", weight: 1, levelValues: [1, 3, 5],
         title: "ขอบข่ายการรับรอง (Scope of Accreditation)",
         levels: [
           "ไม่มีขอบข่ายการรับรองที่เกี่ยวข้อง",
@@ -1427,7 +1425,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M3.3", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M3.3", weight: 1, levelValues: [1, 3, 5],
         title: "ระยะเวลาดำเนินการสอบเทียบ (Turnaround Time)",
         levels: [
           "ไม่มีการกำหนดระยะเวลาดำเนินการ",
@@ -1438,7 +1436,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M3.4", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M3.4", weight: 1, levelValues: [1, 3, 5],
         title: "ป้ายแสดงผลการสอบเทียบ (Calibration Tag)",
         levels: [
           "ไม่มีป้ายแสดงผลการสอบเทียบ",
@@ -1454,7 +1452,7 @@ export const FUNCTION_MODULES = {
     label: "M4 · Food / OEM (ผู้ผลิตอาหาร OEM / วัตถุดิบอาหาร / บรรจุภัณฑ์อาหาร)",
     items: [
       {
-        no: "M4.1", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M4.1", weight: 1, levelValues: [1, 3, 5],
         title: "หลักเกณฑ์สุขลักษณะที่ดีในการผลิต (GHP)",
         levels: [
           "ไม่มีระบบ GHP",
@@ -1465,7 +1463,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M4.2", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M4.2", weight: 1, levelValues: [1, 3, 5],
         title: "ระบบวิเคราะห์อันตรายและจุดวิกฤตที่ต้องควบคุม (HACCP)",
         levels: [
           "ไม่มีระบบ HACCP",
@@ -1476,7 +1474,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M4.3", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M4.3", weight: 1, levelValues: [1, 3, 5],
         title: "การควบคุมสารก่อภูมิแพ้ (Allergen Control)",
         levels: [
           "ไม่มีการควบคุมสารก่อภูมิแพ้",
@@ -1487,7 +1485,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M4.4", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M4.4", weight: 1, levelValues: [1, 3, 5],
         title: "การควบคุมสัตว์พาหะ (Pest Control)",
         levels: [
           "ไม่มีระบบควบคุมสัตว์พาหะ",
@@ -1498,7 +1496,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M4.5", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M4.5", weight: 1, levelValues: [1, 3, 5],
         title: "การสืบย้อนกลับ (Traceability)",
         levels: [
           "ไม่มีระบบสืบย้อนกลับ",
@@ -1514,7 +1512,7 @@ export const FUNCTION_MODULES = {
     label: "M5 · Raw Material / RM-PM (ผู้จำหน่ายวัตถุดิบ / บรรจุภัณฑ์ / สินค้าทางการเกษตร)",
     items: [
       {
-        no: "M5.1", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M5.1", weight: 1, levelValues: [1, 3, 5],
         title: "ความสอดคล้องตามข้อกำหนด (Spec Conformance)",
         levels: [
           "ไม่สอดคล้องกับ Spec ที่กำหนด",
@@ -1525,7 +1523,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M5.2", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M5.2", weight: 1, levelValues: [1, 3, 5],
         title: "ใบรับรองผลวิเคราะห์ (Certificate of Analysis — COA)",
         levels: [
           "ไม่มี COA",
@@ -1536,7 +1534,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M5.3", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M5.3", weight: 1, levelValues: [1, 3, 5],
         title: "การสืบย้อนกลับวัตถุดิบ (Traceability)",
         levels: [
           "ไม่มีระบบสืบย้อนกลับวัตถุดิบ",
@@ -1547,7 +1545,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M5.4", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M5.4", weight: 1, levelValues: [1, 3, 5],
         title: "การจัดหาอย่างยั่งยืน (Sustainable Sourcing / RSPO/ASC/MSC)",
         levels: [
           "ไม่มีนโยบายการจัดหาอย่างยั่งยืน",
@@ -1563,7 +1561,7 @@ export const FUNCTION_MODULES = {
     label: "M6 · Warehouse / 3PL (คลังสินค้า / บริษัท 3PL)",
     items: [
       {
-        no: "M6.1", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M6.1", weight: 1, levelValues: [1, 3, 5],
         title: "สภาพคลังสินค้าและความสะอาด (Warehouse Condition)",
         levels: [
           "สภาพคลังไม่เหมาะสม ไม่มีการดูแล",
@@ -1574,7 +1572,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M6.2", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M6.2", weight: 1, levelValues: [1, 3, 5],
         title: "ระบบบริหารสินค้าคงคลัง (FIFO/FEFO)",
         levels: [
           "ไม่มีระบบ FIFO/FEFO",
@@ -1585,7 +1583,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M6.3", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M6.3", weight: 1, levelValues: [1, 3, 5],
         title: "การควบคุมอุณหภูมิและความชื้น (Temperature & Humidity Control)",
         levels: [
           "ไม่มีการควบคุมอุณหภูมิ/ความชื้น",
@@ -1596,7 +1594,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M6.4", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M6.4", weight: 1, levelValues: [1, 3, 5],
         title: "ระบบบริหารคลังสินค้า (Warehouse Management System — WMS)",
         levels: [
           "ไม่มีระบบ WMS ใช้การจัดการแบบ Manual ทั้งหมด",
@@ -1607,7 +1605,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M6.5", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M6.5", weight: 1, levelValues: [1, 3, 5],
         title: "ระบบรักษาความปลอดภัย (Security)",
         levels: [
           "ไม่มีระบบรักษาความปลอดภัย",
@@ -1623,7 +1621,7 @@ export const FUNCTION_MODULES = {
     label: "M7 · IT / Software / Service (ผู้ให้บริการ IT / ซอฟต์แวร์ / บริการวิชาชีพ)",
     items: [
       {
-        no: "M7.1", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M7.1", weight: 1, levelValues: [1, 3, 5],
         title: "ความปลอดภัยของข้อมูล (Data Security)",
         levels: [
           "ไม่มีมาตรการด้านความปลอดภัยข้อมูล",
@@ -1634,7 +1632,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M7.2", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M7.2", weight: 1, levelValues: [1, 3, 5],
         title: "ข้อตกลงระดับการให้บริการ (Service Level Agreement — SLA)",
         levels: [
           "ไม่มี SLA",
@@ -1645,7 +1643,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M7.3", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M7.3", weight: 1, levelValues: [1, 3, 5],
         title: "ความพร้อมใช้งานของระบบ (Uptime)",
         levels: [
           "ไม่มีการรับประกัน Uptime",
@@ -1656,7 +1654,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M7.4", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M7.4", weight: 1, levelValues: [1, 3, 5],
         title: "แผนกู้คืนระบบจากภัยพิบัติ (Disaster Recovery Plan)",
         levels: [
           "ไม่มีแผน Disaster Recovery",
@@ -1667,7 +1665,7 @@ export const FUNCTION_MODULES = {
         ],
       },
       {
-        no: "M7.5", weight: 1, levelValues: [1, 2, 3, 4, 5],
+        no: "M7.5", weight: 1, levelValues: [1, 3, 5],
         title: "แผนความต่อเนื่องทางธุรกิจ (Business Continuity Plan)",
         levels: [
           "ไม่มีแผนความต่อเนื่องทางธุรกิจ",

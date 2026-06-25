@@ -116,7 +116,12 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
       otherCodes.forEach((c) => delete newItems[c]);
 
       if (chosenCodes.length > 0 && !alreadyWeighted) {
-        const sw = prev.sections[esgSectionIndex] ?? (RAW_CRITERIA[esgSectionIndex]?.weight ?? 0);
+        // NOTE: esgSectionIndexInCriteria, not esgSectionIndex — the Function
+        // section is always spliced in right before ESG (see getDisplayCriteria),
+        // so ESG's real slot in ws.sections is shifted by 1. Using the
+        // unshifted index here was reading the Function section's weight (25)
+        // instead of ESG's (15), causing totals like 110% instead of 100%.
+        const sw = prev.sections[esgSectionIndexInCriteria] ?? (RAW_CRITERIA[esgSectionIndex]?.weight ?? 0);
         const each = r2(sw / chosenCodes.length);
         let rem = sw;
         chosenCodes.forEach((code, i) => {

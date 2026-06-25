@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { ArrowLeft, CheckCircle2, RotateCcw, Clock, RefreshCw, AlertCircle, Pencil, Check, X, Eye } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
+import { ArrowLeft, CheckCircle2, RotateCcw, Clock, RefreshCw, AlertCircle, Pencil, Check, X, Eye, ChevronDown, ChevronRight, History as HistoryIcon, Search, SlidersHorizontal } from "lucide-react";
 import { Header, useModal } from "../components";
 import { authFetch } from "../utils/api";
 
@@ -37,6 +37,21 @@ export default function SupervisorPage({ authUser, onBack, onViewEvaluation }) {
   const [editText,    setEditText]    = useState("");
   const [savingNote,  setSavingNote]  = useState(false);
 
+  // ── History filters ──────────────────────────────────────────
+  const [histSearch,      setHistSearch]      = useState("");
+  const [histStatus,      setHistStatus]      = useState("all"); // all | approved | returned
+  const [histEvalType,    setHistEvalType]    = useState("all");
+  const [histDateFrom,    setHistDateFrom]    = useState("");
+  const [histDateTo,      setHistDateTo]      = useState("");
+  const [showHistFilter,  setShowHistFilter]  = useState(false);
+  const [expandedSessions, setExpandedSessions] = useState(new Set());
+
+  // ── Full read-only history detail view ("เปิดหน้าอนุมัติเต็ม") ──────
+  const [viewGroup,   setViewGroup]   = useState(null); // the grouped history entry being viewed
+  const [viewDetail,  setViewDetail]  = useState(null); // /api/sessions/:id response
+  const [viewLoading, setViewLoading] = useState(false);
+  const [viewError,   setViewError]   = useState(null);
+
   const fetchData = useCallback(async () => {
     setLoading(true); setError(null);
     try {
@@ -51,6 +66,86 @@ export default function SupervisorPage({ authUser, onBack, onViewEvaluation }) {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // ── Group by session, then filter the groups ────────────────────
+  // A session can accumulate multiple supervisor_reviews rows over several
+  // return -> resubmit -> review cycles (see database/schema.sql). Grouping
+  // must happen on the FULL unfiltered history first — filtering rows
+  // individually before grouping would strip a session's earlier "returned"
+  // row whenever the status filter is set to "อนุมัติ", making an
+  // approved-after-returned session lose its "เคยถูกส่งคืน" history entirely
+  // instead of just being correctly included under the "approved" filter.
+  const allGroupedHistory = useMemo(() => {
+    const bySession = new Map();
+    history.forEach(row => {
+      const key = row.sessionId;
+      if (!bySession.has(key)) bySession.set(key, []);
+      bySession.get(key).push(row);
+    });
+    const groups = [...bySession.values()].map(rows => {
+      const sorted = [...rows].sort((a, b) => new Date(a.reviewedAt || 0) - new Date(b.reviewedAt || 0));
+      return { latest: sorted[sorted.length - 1], prior: sorted.slice(0, -1), all: sorted };
+    });
+    groups.sort((a, b) => new Date(b.latest.reviewedAt || 0) - new Date(a.latest.reviewedAt || 0));
+    return groups;
+  }, [history]);
+
+  const groupedHistory = useMemo(() => {
+    return allGroupedHistory.filter(group => {
+      const row = group.latest;
+      if (histStatus   !== "all" && row.reviewStatus !== histStatus) return false;
+      if (histEvalType !== "all" && row.evalType     !== histEvalType) return false;
+      if (row.reviewedAt) {
+        const reviewed = new Date(row.reviewedAt);
+        if (histDateFrom && reviewed < new Date(`${histDateFrom}T00:00:00`)) return false;
+        if (histDateTo   && reviewed > new Date(`${histDateTo}T23:59:59.999`)) return false;
+      } else if (histDateFrom || histDateTo) {
+        return false;
+      }
+      if (histSearch.trim()) {
+        const q = histSearch.trim().toLowerCase();
+        // search across every row in the group, not just the latest, so a
+        // match on an older supervisor's name still surfaces the session
+        const haystack = group.all.map(r => [r.supplierName, r.vendorCode, r.supervisorName].join(" ")).join(" ").toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [allGroupedHistory, histStatus, histEvalType, histDateFrom, histDateTo, histSearch]);
+
+  const hasHistFilter = histStatus !== "all" || histEvalType !== "all" || !!histDateFrom || !!histDateTo || histSearch.trim();
+  const clearHistFilters = () => {
+    setHistSearch(""); setHistStatus("all"); setHistEvalType("all"); setHistDateFrom(""); setHistDateTo("");
+  };
+  const toggleExpanded = (sessionId) => {
+    setExpandedSessions(prev => {
+      const next = new Set(prev);
+      next.has(sessionId) ? next.delete(sessionId) : next.add(sessionId);
+      return next;
+    });
+  };
+
+  async function openFullView(group) {
+    setViewGroup(group);
+    setViewDetail(null);
+    setViewError(null);
+    setViewLoading(true);
+    try {
+      const res = await authFetch(`/api/sessions/${group.latest.sessionId}`);
+      if (!res.ok) throw new Error("โหลดข้อมูลไม่สำเร็จ");
+      setViewDetail(await res.json());
+    } catch (e) {
+      setViewError(e.message);
+    } finally {
+      setViewLoading(false);
+    }
+  }
+
+  function closeFullView() {
+    setViewGroup(null);
+    setViewDetail(null);
+    setViewError(null);
+  }
 
   async function handleDecision(sessionId, action) {
     if (action === "return" && !notes.trim()) {
@@ -250,6 +345,145 @@ export default function SupervisorPage({ authUser, onBack, onViewEvaluation }) {
 
       <Header />
       <div style={{ maxWidth: 1000, margin: "0 auto", padding: "24px 20px 56px" }}>
+        {viewGroup ? (
+          <>
+            {/* ── Full read-only history detail ── */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 22 }}>
+              <button onClick={closeFullView} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", color: "#64748b", fontFamily: FONT, fontSize: 13.5 }}>
+                <ArrowLeft size={15} /> กลับไปยังประวัติการอนุมัติ
+              </button>
+            </div>
+
+            {viewLoading ? (
+              <div style={{ textAlign: "center", padding: 48, color: "#94a3b8", fontSize: 13.5 }}>กำลังโหลด…</div>
+            ) : viewError ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 16px", background: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c", borderRadius: 9, fontSize: 13.5 }}>
+                <AlertCircle size={16} /> {viewError}
+              </div>
+            ) : viewDetail && (
+              <>
+                <div style={{
+                  background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0",
+                  marginBottom: 14, overflow: "hidden", boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
+                }}>
+                  <div style={{
+                    padding: "16px 22px", borderBottom: "1px solid #f1f5f9",
+                    display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10,
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontWeight: 700, fontSize: 15, color: "#0f172a" }}>{viewDetail.supplierName}</span>
+                      <span style={{
+                        fontSize: 11.5, fontWeight: 600, color: "#475569",
+                        background: "#f1f5f9", border: "1px solid #e2e8f0",
+                        padding: "3px 9px", borderRadius: 6,
+                      }}>
+                        {EVAL_TYPE_LABEL[viewDetail.evalType] || viewDetail.evalType}
+                      </span>
+                      <span style={{ fontSize: 12.5, color: "#94a3b8" }}>{viewDetail.period}</span>
+                    </div>
+                    {viewDetail.finalScore != null && (
+                      <span style={{ fontSize: 13, color: "#64748b" }}>
+                        คะแนน <strong style={{ color: GRADE_COLOR[viewDetail.finalGrade] || "#0f172a", marginLeft: 4 }}>{viewDetail.finalScore} ({viewDetail.finalGrade})</strong>
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ padding: "16px 22px" }}>
+                    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                      {viewDetail.evaluations.map(ev => {
+                        const clickable = !!onViewEvaluation;
+                        return (
+                          <div
+                            key={ev.id}
+                            onClick={() => onViewEvaluation?.(ev.id)}
+                            title={clickable ? "คลิกเพื่อดูผลการประเมินแบบละเอียด" : undefined}
+                            style={{
+                              background: "#f8fafc", border: "1px solid #eef2f6", borderRadius: 9,
+                              padding: "11px 15px", minWidth: 170,
+                              cursor: clickable ? "pointer" : "default",
+                              transition: "background 0.1s, border-color 0.1s",
+                            }}
+                            onMouseEnter={e => { if (clickable) { e.currentTarget.style.background = "#eef2f6"; e.currentTarget.style.borderColor = "#cbd5e1"; } }}
+                            onMouseLeave={e => { if (clickable) { e.currentTarget.style.background = "#f8fafc"; e.currentTarget.style.borderColor = "#eef2f6"; } }}
+                          >
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+                              <div style={{
+                                width: 24, height: 24, borderRadius: "50%", flexShrink: 0,
+                                overflow: "hidden", background: "#e2e8f0",
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                fontSize: 10, fontWeight: 700, color: "#475569",
+                              }}>
+                                {ev.profilePicture
+                                  ? <img src={ev.profilePicture} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                  : (ev.fullName || "?").split(" ").map((w) => w[0] ?? "").join("").slice(0, 2).toUpperCase()
+                                }
+                              </div>
+                              <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.3, textTransform: "uppercase", color: "#94a3b8" }}>
+                                {ev.role === "GCP" ? "Buyer (GCP)" : ev.role === "USER" ? "Evaluator (USER)" : ev.role}
+                              </div>
+                            </div>
+                            <div style={{ fontWeight: 700, fontSize: 13.5, color: "#0f172a" }}>{ev.fullName}</div>
+                            <div style={{ fontSize: 12, color: "#64748b" }}>{ev.department}</div>
+                            <div style={{ marginTop: 7, fontWeight: 700, color: GRADE_COLOR[ev.grade] || "#0f172a" }}>
+                              {ev.totalScore} <span style={{ fontWeight: 500, fontSize: 11, color: "#94a3b8" }}>({ev.grade})</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {viewDetail.evaluations.length === 0 && (
+                        <span style={{ color: "#94a3b8", fontSize: 13 }}>ยังไม่มีผู้ประเมินส่งผล</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Read-only comment/decision timeline */}
+                <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0", overflow: "hidden", boxShadow: "0 1px 2px rgba(15,23,42,0.04)" }}>
+                  <div style={{ padding: "13px 22px", borderBottom: "1px solid #f1f5f9", fontWeight: 700, fontSize: 13.5, color: "#334155" }}>
+                    ประวัติการพิจารณา
+                  </div>
+                  <div style={{ padding: "16px 22px" }}>
+                    {viewGroup.all.map((p, i) => (
+                      <div key={p.reviewId ?? i} style={{
+                        display: "flex", gap: 12, paddingBottom: 14, marginBottom: 14,
+                        borderBottom: i === viewGroup.all.length - 1 ? "none" : "1px solid #f1f5f9",
+                      }}>
+                        <span style={{
+                          background: p.reviewStatus === "approved" ? "#ecfdf5" : "#eff6ff",
+                          color: p.reviewStatus === "approved" ? "#047857" : "#1d4ed8",
+                          border: `1px solid ${p.reviewStatus === "approved" ? "#a7f3d0" : "#bfdbfe"}`,
+                          padding: "3px 10px", borderRadius: 6, fontSize: 11.5, fontWeight: 700,
+                          height: "fit-content", flexShrink: 0, whiteSpace: "nowrap",
+                        }}>
+                          {p.reviewStatus === "approved" ? "อนุมัติ" : "ส่งคืน"}
+                        </span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12.5, color: "#475569" }}>
+                            <strong style={{ color: "#0f172a" }}>{p.supervisorName || "-"}</strong>
+                            {" · "}
+                            {p.reviewedAt ? new Date(p.reviewedAt).toLocaleString("th-TH") : "-"}
+                          </div>
+                          {p.reviewNotes ? (
+                            <div style={{
+                              marginTop: 6, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8,
+                              padding: "10px 12px", fontSize: 13, lineHeight: 1.7, color: "#334155",
+                              whiteSpace: "pre-line", wordBreak: "break-word",
+                            }}>
+                              {p.reviewNotes}
+                            </div>
+                          ) : (
+                            <div style={{ marginTop: 4, fontSize: 12, color: "#cbd5e1" }}>ไม่มีหมายเหตุ</div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </>
+        ) : (
+          <>
 
         {/* Breadcrumb */}
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 22 }}>
@@ -303,6 +537,95 @@ export default function SupervisorPage({ authUser, onBack, onViewEvaluation }) {
           </button>
           <button style={tabStyle("history")} onClick={() => setTab("history")}>ประวัติการอนุมัติ</button>
         </div>
+
+        {tab === "history" && (
+          <div style={{
+            background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0",
+            marginBottom: 16, overflow: "hidden",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 16px" }}>
+              <Search size={15} style={{ color: "#94a3b8", flexShrink: 0 }} />
+              <input
+                value={histSearch}
+                onChange={e => setHistSearch(e.target.value)}
+                placeholder="ค้นหา supplier, vendor code, ผู้อนุมัติ..."
+                style={{ flex: 1, border: "none", outline: "none", fontSize: 13, fontFamily: FONT, color: "#0f172a", background: "transparent" }}
+              />
+              {histSearch && (
+                <button onClick={() => setHistSearch("")} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: 0 }}>
+                  <X size={14} style={{ color: "#94a3b8" }} />
+                </button>
+              )}
+              <div style={{ width: 1, height: 18, background: "#e2e8f0", flexShrink: 0 }} />
+              <button
+                onClick={() => setShowHistFilter(v => !v)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6, flexShrink: 0, whiteSpace: "nowrap",
+                  background: showHistFilter ? "#eff6ff" : "none",
+                  border: `1px solid ${showHistFilter ? "#1e3a8a" : "#e2e8f0"}`,
+                  borderRadius: 7, padding: "5px 12px", cursor: "pointer",
+                  fontSize: 12, fontWeight: 600, color: showHistFilter ? "#1e3a8a" : "#64748b",
+                  fontFamily: FONT,
+                }}
+              >
+                <SlidersHorizontal size={13} /> ตัวกรอง
+                {hasHistFilter && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#1e3a8a", display: "inline-block" }} />}
+              </button>
+              <span style={{ fontSize: 12, color: "#94a3b8", whiteSpace: "nowrap" }}>{groupedHistory.length}/{allGroupedHistory.length}</span>
+            </div>
+
+            {showHistFilter && (
+              <div style={{ borderTop: "1px solid #f1f5f9", padding: "12px 16px", background: "#f8fafc" }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, marginBottom: 6, textTransform: "uppercase" }}>ผล</div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {[["all","ทั้งหมด"],["approved","อนุมัติ"],["returned","ส่งคืน"]].map(([v,l]) => (
+                        <button key={v} onClick={() => setHistStatus(v)} style={{
+                          padding: "5px 14px", borderRadius: 20, border: "none", fontSize: 12, fontWeight: 600,
+                          cursor: "pointer", fontFamily: FONT,
+                          background: histStatus===v ? "#1e3a8a" : "#fff", color: histStatus===v ? "#fff" : "#64748b",
+                        }}>{l}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, marginBottom: 6, textTransform: "uppercase" }}>ประเภท</div>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {[["all","ทั้งหมด"],["pre_eval","Pre"],["post_eval","Post"],["half_year","Half-Year"],["yearly","Yearly"]].map(([v,l]) => (
+                        <button key={v} onClick={() => setHistEvalType(v)} style={{
+                          padding: "5px 14px", borderRadius: 20, border: "none", fontSize: 12, fontWeight: 600,
+                          cursor: "pointer", fontFamily: FONT,
+                          background: histEvalType===v ? "#1e3a8a" : "#fff", color: histEvalType===v ? "#fff" : "#64748b",
+                        }}>{l}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, marginBottom: 6, textTransform: "uppercase" }}>วันที่อนุมัติ/ส่งคืน</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <input type="date" value={histDateFrom} max={histDateTo || undefined} onChange={e => setHistDateFrom(e.target.value)}
+                        style={{ border: "1px solid #e2e8f0", borderRadius: 6, padding: "4px 8px", fontSize: 12, fontFamily: FONT, color: "#475569" }} />
+                      <span style={{ fontSize: 12, color: "#94a3b8" }}>—</span>
+                      <input type="date" value={histDateTo} min={histDateFrom || undefined} onChange={e => setHistDateTo(e.target.value)}
+                        style={{ border: "1px solid #e2e8f0", borderRadius: 6, padding: "4px 8px", fontSize: 12, fontFamily: FONT, color: "#475569" }} />
+                    </div>
+                  </div>
+                  {hasHistFilter && (
+                    <div style={{ display: "flex", alignItems: "flex-end" }}>
+                      <button onClick={clearHistFilters} style={{
+                        display: "flex", alignItems: "center", gap: 5, background: "none", border: "none",
+                        cursor: "pointer", fontSize: 12, color: "#ef4444", fontFamily: FONT, fontWeight: 600,
+                      }}>
+                        <X size={12} /> ล้างตัวกรอง
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {loading ? (
           <div style={{ textAlign: "center", padding: 48, color: "#94a3b8", fontSize: 13.5 }}>กำลังโหลด…</div>
@@ -468,12 +791,19 @@ export default function SupervisorPage({ authUser, onBack, onViewEvaluation }) {
             }}>
               ยังไม่มีประวัติการอนุมัติ
             </div>
+          ) : groupedHistory.length === 0 ? (
+            <div style={{
+              textAlign: "center", padding: "40px 20px", color: "#94a3b8",
+              background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, fontSize: 13.5,
+            }}>
+              ไม่พบรายการที่ตรงกับตัวกรอง
+            </div>
           ) : (
             <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0", overflow: "hidden", boxShadow: "0 1px 2px rgba(15,23,42,0.04)" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: "#f8fafc" }}>
-                    {["Supplier","ประเภท","คะแนน","เกรด","ผล","ผู้อนุมัติ","วันที่","หมายเหตุ"].map(h => (
+                    {["Supplier","ประเภท","คะแนน","เกรด","ผล","ผู้อนุมัติ","วันที่","หมายเหตุ",""].map(h => (
                       <th key={h} style={{
                         padding: "11px 16px", textAlign: "left", borderBottom: "1px solid #e2e8f0",
                         fontWeight: 700, fontSize: 11.5, textTransform: "uppercase", letterSpacing: 0.3,
@@ -483,51 +813,147 @@ export default function SupervisorPage({ authUser, onBack, onViewEvaluation }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {history.map((row, i) => (
-                    <tr key={i} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                      <td style={{ padding: "11px 16px", fontWeight: 600, color: "#0f172a" }}>{row.supplierName}</td>
-                      <td style={{ padding: "11px 16px", color: "#475569" }}>{EVAL_TYPE_LABEL[row.evalType] || row.evalType}</td>
-                      <td style={{ padding: "11px 16px", color: "#475569" }}>{row.finalScore ?? "-"}</td>
-                      <td style={{ padding: "11px 16px", fontWeight: 700, color: GRADE_COLOR[row.finalGrade] || "#0f172a" }}>{row.finalGrade ?? "-"}</td>
-                      <td style={{ padding: "11px 16px" }}>
-                        <span style={{
-                          background: row.reviewStatus === "approved" ? "#ecfdf5" : "#eff6ff",
-                          color: row.reviewStatus === "approved" ? "#047857" : "#1d4ed8",
-                          border: `1px solid ${row.reviewStatus === "approved" ? "#a7f3d0" : "#bfdbfe"}`,
-                          padding: "3px 10px", borderRadius: 6, fontSize: 11.5, fontWeight: 700,
-                        }}>
-                          {row.reviewStatus === "approved" ? "อนุมัติ" : "ส่งคืน"}
-                        </span>
-                      </td>
-                      <td style={{ padding: "11px 16px", color: "#475569" }}>{row.supervisorName || "-"}</td>
-                      <td style={{ padding: "11px 16px", color: "#94a3b8" }}>
-                        {row.reviewedAt ? new Date(row.reviewedAt).toLocaleDateString("th-TH") : "-"}
-                      </td>
-                      <td style={{ padding: "11px 16px" }}>
-                        {row.reviewNotes ? (
-                          <button
-                            onClick={() => openNoteModal(row)}
-                            style={{
-                              display: "flex", alignItems: "center", gap: 6,
-                              background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 7,
-                              padding: "6px 12px", cursor: "pointer", fontFamily: FONT,
-                              fontSize: 12, fontWeight: 600, color: "#475569", whiteSpace: "nowrap",
-                            }}
-                            onMouseEnter={e => e.currentTarget.style.background = "#eef2f6"}
-                            onMouseLeave={e => e.currentTarget.style.background = "#f8fafc"}
-                          >
-                            <Eye size={13} /> ดูหมายเหตุ
-                          </button>
-                        ) : (
-                          <span style={{ color: "#cbd5e1", fontSize: 12.5 }}>—</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                  {groupedHistory.map((group) => {
+                    const row = group.latest;
+                    const sessionId = row.sessionId;
+                    const hasPrior = group.prior.length > 0;
+                    const expanded = expandedSessions.has(sessionId);
+                    return (
+                      <Fragment key={sessionId}>
+                        <tr style={{ borderBottom: hasPrior && expanded ? "none" : "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "11px 16px", fontWeight: 600, color: "#0f172a" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              {hasPrior && (
+                                <button
+                                  onClick={() => toggleExpanded(sessionId)}
+                                  title="ดูประวัติก่อนหน้าของ session นี้"
+                                  style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex", color: "#64748b", flexShrink: 0 }}
+                                >
+                                  {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                </button>
+                              )}
+                              {row.supplierName}
+                            </div>
+                            {hasPrior && (
+                              <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3, marginLeft: 20, fontSize: 10.5, color: "#b45309", fontWeight: 600 }}>
+                                <HistoryIcon size={11} /> เคยถูกส่งคืนก่อนหน้า
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: "11px 16px", color: "#475569" }}>{EVAL_TYPE_LABEL[row.evalType] || row.evalType}</td>
+                          <td style={{ padding: "11px 16px", color: "#475569" }}>{row.finalScore ?? "-"}</td>
+                          <td style={{ padding: "11px 16px", fontWeight: 700, color: GRADE_COLOR[row.finalGrade] || "#0f172a" }}>{row.finalGrade ?? "-"}</td>
+                          <td style={{ padding: "11px 16px" }}>
+                            {row.reviewStatus === "approved" && hasPrior ? (
+                              <span style={{
+                                background: "#fff", color: "#15803d", border: "1px solid #a7f3d0",
+                                padding: "3px 10px", borderRadius: 6, fontSize: 11.5, fontWeight: 700,
+                                whiteSpace: "nowrap",
+                              }}>
+                                อนุมัติ
+                              </span>
+                            ) : (
+                              <span style={{
+                                background: row.reviewStatus === "approved" ? "#ecfdf5" : "#eff6ff",
+                                color: row.reviewStatus === "approved" ? "#047857" : "#1d4ed8",
+                                border: `1px solid ${row.reviewStatus === "approved" ? "#a7f3d0" : "#bfdbfe"}`,
+                                padding: "3px 10px", borderRadius: 6, fontSize: 11.5, fontWeight: 700,
+                              }}>
+                                {row.reviewStatus === "approved" ? "อนุมัติ" : "ส่งคืน"}
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: "11px 16px", color: "#475569" }}>{row.supervisorName || "-"}</td>
+                          <td style={{ padding: "11px 16px", color: "#94a3b8" }}>
+                            {row.reviewedAt ? new Date(row.reviewedAt).toLocaleDateString("th-TH") : "-"}
+                          </td>
+                          <td style={{ padding: "11px 16px" }}>
+                            {row.reviewNotes ? (
+                              <button
+                                onClick={() => openNoteModal(row)}
+                                style={{
+                                  display: "flex", alignItems: "center", gap: 6,
+                                  background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 7,
+                                  padding: "6px 12px", cursor: "pointer", fontFamily: FONT,
+                                  fontSize: 12, fontWeight: 600, color: "#475569", whiteSpace: "nowrap",
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.background = "#eef2f6"}
+                                onMouseLeave={e => e.currentTarget.style.background = "#f8fafc"}
+                              >
+                                <Eye size={13} /> ดูหมายเหตุ
+                              </button>
+                            ) : (
+                              <span style={{ color: "#cbd5e1", fontSize: 12.5 }}>—</span>
+                            )}
+                          </td>
+                          <td style={{ padding: "11px 16px" }}>
+                            <button
+                              onClick={() => openFullView(group)}
+                              style={{
+                                display: "flex", alignItems: "center", gap: 6,
+                                background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 7,
+                                padding: "6px 12px", cursor: "pointer", fontFamily: FONT,
+                                fontSize: 12, fontWeight: 600, color: "#1d4ed8", whiteSpace: "nowrap",
+                              }}
+                              onMouseEnter={e => e.currentTarget.style.background = "#dbeafe"}
+                              onMouseLeave={e => e.currentTarget.style.background = "#eff6ff"}
+                            >
+                              <Eye size={13} /> เปิดหน้าอนุมัติเต็ม
+                            </button>
+                          </td>
+                        </tr>
+                        {hasPrior && expanded && group.prior.map((p, pi) => (
+                          <tr key={p.reviewId ?? pi} style={{
+                            borderBottom: pi === group.prior.length - 1 ? "1px solid #f1f5f9" : "none",
+                            background: "#fbfbfd",
+                          }}>
+                            <td style={{ padding: "8px 16px 8px 44px", color: "#94a3b8", fontSize: 12 }}>↳ รอบก่อนหน้า</td>
+                            <td style={{ padding: "8px 16px", color: "#94a3b8", fontSize: 12 }}>{EVAL_TYPE_LABEL[p.evalType] || p.evalType}</td>
+                            <td style={{ padding: "8px 16px", color: "#94a3b8", fontSize: 12 }}>-</td>
+                            <td style={{ padding: "8px 16px", color: "#94a3b8", fontSize: 12 }}>-</td>
+                            <td style={{ padding: "8px 16px" }}>
+                              <span style={{
+                                background: p.reviewStatus === "approved" ? "#ecfdf5" : "#eff6ff",
+                                color: p.reviewStatus === "approved" ? "#047857" : "#1d4ed8",
+                                border: `1px solid ${p.reviewStatus === "approved" ? "#a7f3d0" : "#bfdbfe"}`,
+                                padding: "2px 8px", borderRadius: 6, fontSize: 10.5, fontWeight: 700,
+                              }}>
+                                {p.reviewStatus === "approved" ? "อนุมัติ" : "ส่งคืน"}
+                              </span>
+                            </td>
+                            <td style={{ padding: "8px 16px", color: "#94a3b8", fontSize: 12 }}>{p.supervisorName || "-"}</td>
+                            <td style={{ padding: "8px 16px", color: "#cbd5e1", fontSize: 12 }}>
+                              {p.reviewedAt ? new Date(p.reviewedAt).toLocaleDateString("th-TH") : "-"}
+                            </td>
+                            <td style={{ padding: "8px 16px" }}>
+                              {p.reviewNotes ? (
+                                <button
+                                  onClick={() => openNoteModal(p)}
+                                  style={{
+                                    display: "flex", alignItems: "center", gap: 5,
+                                    background: "none", border: "1px solid #e2e8f0", borderRadius: 6,
+                                    padding: "4px 10px", cursor: "pointer", fontFamily: FONT,
+                                    fontSize: 11, fontWeight: 600, color: "#94a3b8", whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  <Eye size={11} /> ดูหมายเหตุ
+                                </button>
+                              ) : (
+                                <span style={{ color: "#e2e8f0", fontSize: 12 }}>—</span>
+                              )}
+                            </td>
+                            <td style={{ padding: "8px 16px" }} />
+                          </tr>
+                        ))}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )
+        )}
+          </>
         )}
       </div>
     </div>
