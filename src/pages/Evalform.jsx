@@ -4,7 +4,9 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Header, GreenButton, useModal } from "../components";
-import { getCriteria, isPostEvalType, LEVEL_COLORS, GRADE_MAP, GRADE_GUIDE, getGrade, findEsgSectionIndex, splitEsgGroups, getDisplayCriteria, FUNCTION_MODULES, FUNCTION_SECTION_WEIGHT } from "../constants";
+import { getCriteria, isPostEvalType, LEVEL_COLORS, GRADE_MAP, GRADE_GUIDE, getGrade, findEsgSectionIndex, splitEsgGroups, getDisplayCriteriaFrom, FUNCTION_MODULES, FUNCTION_SECTION_WEIGHT } from "../constants";
+import { useCriteriaOverrides } from "../context/CriteriaContext";
+import { applyOverrides } from "../utils/criteriaOverlay";
 import { AlertTriangle, FileText, Plus, Trash2 } from "lucide-react";
 
 const LEVEL_LABELS       = ["ต้องปรับปรุง (Unsatisfactory)", "ต่ำกว่าเกณฑ์ (Below Standard)", "ผ่านเกณฑ์ (Satisfactory)", "ดี (Good)", "ดีเยี่ยม (Excellent)"];
@@ -24,9 +26,10 @@ function initWeights(criteria) {
     sections[si] = sw;
     const realItems = section.items.filter((i) => !i.divider);
 
-    // ถ้า item.weight ใน constants รวมกันได้ = section weight พอดี → ใช้โดยตรง (ได้จำนวนเต็ม)
+    // ถ้า item.weight รวมกันได้ ≈ section weight → ใช้โดยตรง (DB-overridden weights)
+    // ใช้ tolerance 0.1 เพื่อรองรับ floating-point จาก equal-split seed
     const constantSum = realItems.reduce((s, i) => s + (i.weight ?? 0), 0);
-    if (realItems.every(i => i.weight != null) && constantSum === sw) {
+    if (realItems.every(i => i.weight != null) && Math.abs(constantSum - sw) < 0.1) {
       realItems.forEach(item => { items[item.no] = item.weight; });
     } else {
       // fallback: แจกเท่ากัน (เช่น ESG ที่ item.weight ไม่รวมกันได้ = sw)
@@ -44,7 +47,8 @@ function initWeights(criteria) {
 // ---- main component ----------------------------------------
 
 export default function EvalForm({ formData, savedState, user, profilePic, onBack, onDone }) {
-  const RAW_CRITERIA   = getCriteria(formData.evalType);
+  const overrideMap    = useCriteriaOverrides(isPostEvalType(formData.evalType));
+  const RAW_CRITERIA   = applyOverrides(getCriteria(formData.evalType), overrideMap);
   const esgSectionIndex = findEsgSectionIndex(RAW_CRITERIA);
   const esgGroups       = esgSectionIndex !== -1 ? splitEsgGroups(RAW_CRITERIA[esgSectionIndex].items) : null;
   const esgHoCodes      = esgGroups ? esgGroups.ho.filter((i) => !i.divider).map((i) => i.no) : [];
@@ -77,11 +81,24 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
   const [moduleCode, setModuleCode] = useState(() => savedState?.moduleCode ?? null);
   const [customItems, setCustomItems] = useState(() => savedState?.customItems ?? []);
 
-  const CRITERIA = getDisplayCriteria(formData.evalType, esgTarget, moduleCode, customItems);
+  const CRITERIA = getDisplayCriteriaFrom(RAW_CRITERIA, esgTarget, moduleCode, customItems);
 
   const [ws, setWs] = useState(() => savedState?.ws ?? initWeights(CRITERIA));
   const sectionWeights = ws.sections;
   const itemWeights    = ws.items;
+
+  // Re-init weights whenever overrideMap loads or reloads (e.g. admin saves changes).
+  // Skipped if: user has already adjusted weights manually, or resuming a saved form.
+  const userAdjustedWeights = useRef(false);
+  useEffect(() => {
+    if (overrideMap === null || savedState?.ws || userAdjustedWeights.current) return;
+    const updatedCriteria = getDisplayCriteriaFrom(
+      applyOverrides(getCriteria(formData.evalType), overrideMap),
+      esgTarget, moduleCode, customItems
+    );
+    setWs(initWeights(updatedCriteria));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overrideMap]);
 
   // เมื่อเลือก/เปลี่ยน HO ↔ Factory: ล้างคะแนน/หมายเหตุ/น้ำหนักของกลุ่มที่ไม่ได้เลือก
   // ทิ้ง (ไม่ใช่แค่ซ่อน) ไม่งั้นค่าที่เหลือค้างจะหลุดไปรวมกับ payload ที่ส่ง backend
@@ -218,6 +235,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
   const evalLabel  = isPostEvalType(formData.evalType) ? "Post" : "Pre";
 
   const handleSectionWeightChange = (si, newVal) => {
+    userAdjustedWeights.current = true;
     const clamped = Math.max(0, Math.min(100, Number(newVal) || 0));
     setWs((prev) => {
       const lastSi = CRITERIA.length - 1;
@@ -261,6 +279,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
   };
 
   const handleItemWeightChange = (no, si, newVal) => {
+    userAdjustedWeights.current = true;
     setWs((prev) => {
       const secTotal  = prev.sections[si] ?? 0;
       const clamped   = Math.max(0, Math.min(secTotal, Number(newVal) || 0));

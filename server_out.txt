@@ -1,0 +1,4 @@
+✅ evaluation_criteria seeded from src/constants.js
+✅ PostgreSQL connected
+🚀 Server running on http://localhost:5000
+✅ Cron jobs started (daily 08:00 Bangkok)

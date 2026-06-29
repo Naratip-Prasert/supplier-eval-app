@@ -5,7 +5,9 @@
 import { useState, useRef, Fragment } from "react";
 import * as XLSX from "xlsx";
 import { Header, GreenButton, useModal } from "../components";
-import { isPostEvalType, GRADE_MAP, GRADE_GUIDE, getScoredCriteria } from "../constants";
+import { isPostEvalType, GRADE_MAP, GRADE_GUIDE, getCriteria, getScoredCriteriaFrom } from "../constants";
+import { useCriteriaOverrides } from "../context/CriteriaContext";
+import { applyOverrides } from "../utils/criteriaOverlay";
 import { authFetch } from "../utils/api";
 import { Download, Printer, CheckCircle2, XCircle } from "lucide-react";
 
@@ -35,7 +37,11 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
   const { totalScore, grade, scores = {} } = result;
   const gradeColor = GRADE_MAP[grade];
   const evalLabel  = isPostEvalType(formData.evalType) ? "Post" : "Pre";
-  const CRITERIA   = getScoredCriteria(formData.evalType, result.scores, result.moduleCode, result.customItems);
+  const overrideMap = useCriteriaOverrides(isPostEvalType(formData.evalType));
+  const CRITERIA    = getScoredCriteriaFrom(
+    applyOverrides(getCriteria(formData.evalType), overrideMap),
+    result.scores, result.moduleCode, result.customItems
+  );
 
   const now     = new Date();
   const dateStr = `${String(now.getDate()).padStart(2,"0")}/${String(now.getMonth()+1).padStart(2,"0")}/${now.getFullYear()}`;

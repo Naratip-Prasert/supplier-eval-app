@@ -1743,3 +1743,40 @@ export function getGrade(score) {
   if (s >= 60) return "D";
   return "F";
 }
+
+// ── Override-aware variants ───────────────────────────────────
+// Accept an already-overridden baseCriteria array instead of evalType,
+// so callers can apply DB overrides before calling these functions.
+
+export function getDisplayCriteriaFrom(baseCriteria, esgTarget, moduleCode, customItems) {
+  const esgIdx = findEsgSectionIndex(baseCriteria);
+  if (esgIdx === -1) return baseCriteria;
+  const core = baseCriteria.map((section, si) => {
+    if (si !== esgIdx) return section;
+    const groups = splitEsgGroups(section.items);
+    const chosen = esgTarget === "factory" ? groups.factory : esgTarget === "ho" ? groups.ho : [];
+    return { ...section, items: chosen };
+  });
+  const functionSection = buildFunctionSection(moduleCode, customItems)
+    ?? { section: "Part 2 · เลือกโมดูล (ยังไม่เลือก)", weight: FUNCTION_SECTION_WEIGHT, items: [] };
+  return [...core.slice(0, esgIdx), functionSection, ...core.slice(esgIdx)];
+}
+
+export function getScoredCriteriaFrom(baseCriteria, scores, moduleCode, customItems) {
+  const esgIdx = findEsgSectionIndex(baseCriteria);
+  if (esgIdx === -1 || !scores) return baseCriteria;
+  const core = baseCriteria.map((section, si) => {
+    if (si !== esgIdx) return section;
+    const groups     = splitEsgGroups(section.items);
+    const hoHit      = groups.ho.some((i) => !i.divider && scores[i.no] != null);
+    const factoryHit = groups.factory.some((i) => !i.divider && scores[i.no] != null);
+    const chosen = hoHit && factoryHit ? [...groups.ho, ...groups.factory]
+      : hoHit ? groups.ho
+      : factoryHit ? groups.factory
+      : [];
+    return { ...section, items: chosen };
+  });
+  const functionSection = buildFunctionSection(moduleCode, customItems);
+  if (!functionSection) return core;
+  return [...core.slice(0, esgIdx), functionSection, ...core.slice(esgIdx)];
+}

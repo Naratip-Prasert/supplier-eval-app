@@ -14,6 +14,7 @@ import {
   ArrowLeft, Search, RefreshCw, X,
   AlertCircle, SlidersHorizontal,
 } from "lucide-react";
+import AdminCriteriaEditor from "./AdminCriteriaEditor";
 
 // ── Constants ─────────────────────────────────────────────────
 const ROLE_COLORS = {
@@ -37,6 +38,10 @@ const TABS = [
   {
     key: "sessions", label: "ผลและประวัติการประเมิน", labelEn: "Results & History", icon: ClipboardList,
     color: "#6a1b9a", circleBg: "radial-gradient(circle at 38% 35%, #f3e8fd, #b39ddb 130%)",
+  },
+  {
+    key: "criteria", label: "เปลี่ยนเกณฑ์และ Parameter", labelEn: "Criteria Editor", icon: SlidersHorizontal,
+    color: "#bf360c", circleBg: "radial-gradient(circle at 38% 35%, #fbe9e7, #ffab91 130%)",
   },
 ];
 // Small count badges next to each tab label — only for counts already
@@ -178,6 +183,7 @@ export default function AdminPage({ authUser, onBack, onViewEvaluation, onViewUp
             setEntryDateFilter={setEntryDateFilter}
           />
         )}
+        {tab === "criteria"  && <AdminCriteriaEditor authUser={authUser} />}
       </div>
 
       <style>{`
