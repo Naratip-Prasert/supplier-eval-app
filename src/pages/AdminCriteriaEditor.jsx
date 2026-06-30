@@ -1,22 +1,22 @@
 // ============================================================
 //  pages/AdminCriteriaEditor.jsx
 //  Admin tab: เปลี่ยนเกณฑ์และ parameter
+//  Tabs: Core | Function (M1-M7) | ESG
 // ============================================================
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { authFetch } from "../utils/api";
 import { useCriteriaReload } from "../context/CriteriaContext";
-import { PRE_CRITERIA, POST_CRITERIA } from "../constants";
+import { PRE_CRITERIA, POST_CRITERIA, FUNCTION_MODULES, FUNCTION_SECTION_WEIGHT } from "../constants";
 import {
   ChevronDown, ChevronRight,
   Save, RefreshCw, AlertCircle, CheckCircle2, X, Download, Trash2,
 } from "lucide-react";
 
-// แปลง PRE_CRITERIA / POST_CRITERIA → format สำหรับ seed endpoint
-// ใช้ equal-distribution เหมือน initWeights ใน Evalform เพื่อให้ค่าตรงกัน
+// ── Seed payload builder ──────────────────────────────────────
+// Seeds PRE + POST + all M1-M7 modules in one shot.
 function buildSeedPayload() {
   const r2 = n => Math.round(n * 100) / 100;
 
-  // Replicate initWeights equal-split logic so seeded values match Evalform
   function computeEqualWeights(realItems, sw) {
     const n = realItems.length;
     if (n === 0) return {};
@@ -37,28 +37,80 @@ function buildSeedPayload() {
       const sw = section.weight ?? 0;
       const wMap = computeEqualWeights(realItems, sw);
       return {
-        code:        `${prefix}-CAT${si + 1}`,
-        nameTh:      section.section,
-        totalWeight: sw,
+        code:         `${prefix}-CAT${si + 1}`,
+        nameTh:       section.section,
+        totalWeight:  sw,
         criteriaSet,
         displayOrder: si + 1,
         items: realItems.map(item => ({
           code:          item.no,
           nameTh:        item.title,
           defaultWeight: wMap[item.no] ?? 0,
+          levelValues:   item.levelValues ?? null,
           levels:        item.levels ?? [],
         })),
       };
     });
+
+  const transformModules = () =>
+    Object.entries(FUNCTION_MODULES).map(([key, mod], ki) => {
+      const wMap = computeEqualWeights(mod.items, FUNCTION_SECTION_WEIGHT);
+      return {
+        code:         `${key.toUpperCase()}-CAT1`,
+        nameTh:       mod.label,
+        totalWeight:  FUNCTION_SECTION_WEIGHT,
+        criteriaSet:  key,
+        displayOrder: ki + 1,
+        items: mod.items.map(item => ({
+          code:          item.no,
+          nameTh:        item.title,
+          defaultWeight: wMap[item.no] ?? 0,
+          levelValues:   item.levelValues ?? null,
+          levels:        item.levels ?? [],
+        })),
+      };
+    });
+
   return [
     ...transform(PRE_CRITERIA,  'PRE',  'pre_eval'),
     ...transform(POST_CRITERIA, 'POST', 'post_eval'),
+    ...transformModules(),
   ];
 }
 
-// ── tiny helpers ──────────────────────────────────────────────
-const FONT = "Sarabun, sans-serif";
+// Derive DB criteria_set from category code
+function getCriteriaSetFromCode(code) {
+  if (!code) return 'pre_eval';
+  const m = code.match(/^M(\d+)-/i);
+  if (m) return `m${m[1]}`;
+  return code.startsWith('POST-') ? 'post_eval' : 'pre_eval';
+}
 
+const FONT = "Sarabun, sans-serif";
+const LEVEL_CIRCLE_COLORS = ["#ef5350", "#ff9800", "#fdd835", "#66bb6a", "#388e3c"];
+
+const r2adm = n => Math.round(n * 100) / 100;
+
+// Mirror of Evalform's initWeights logic — computes weight each item actually gets
+function computeEffectiveWeights(items, sectionWeight) {
+  const sw = sectionWeight ?? 0;
+  if (items.length === 0) return {};
+  const constantSum = items.reduce((s, it) => s + (it.defaultWeight ?? 0), 0);
+  if (items.every(it => it.defaultWeight != null) && Math.abs(constantSum - sw) < 0.1) {
+    return Object.fromEntries(items.map(it => [it.id, it.defaultWeight]));
+  }
+  // fallback: equal split with buffer on last item (same as Evalform)
+  const each = r2adm(sw / items.length);
+  let rem = sw;
+  const result = {};
+  items.forEach((it, ii) => {
+    if (ii === items.length - 1) result[it.id] = Math.max(0, r2adm(rem));
+    else { result[it.id] = each; rem -= each; }
+  });
+  return result;
+}
+
+// ── Toast ────────────────────────────────────────────────────
 function Toast({ toast, onClose }) {
   if (!toast) return null;
   const ok = toast.type === "success";
@@ -80,7 +132,7 @@ function Toast({ toast, onClose }) {
   );
 }
 
-// Inline editable number — click to focus, Enter/blur to confirm
+// ── WeightInput ───────────────────────────────────────────────
 function WeightInput({ value, onChange, onSave, disabled }) {
   const [editing, setEditing] = useState(false);
   const [local, setLocal]     = useState(String(value ?? ""));
@@ -92,36 +144,24 @@ function WeightInput({ value, onChange, onSave, disabled }) {
   const commit = () => {
     setEditing(false);
     const n = parseFloat(local);
-    if (!isNaN(n) && n !== value) {
-      onChange(n);
-      onSave?.(n);
-    }
+    if (!isNaN(n) && n !== value) { onChange(n); onSave?.(n); }
   };
 
   return editing ? (
-    <input
-      ref={inputRef}
-      value={local}
-      onChange={e => setLocal(e.target.value)}
+    <input ref={inputRef} value={local} onChange={e => setLocal(e.target.value)}
       onBlur={commit}
       onKeyDown={e => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEditing(false); }}
       disabled={disabled}
-      style={{
-        width: 56, textAlign: "center", border: "2px solid #1b5e20", borderRadius: 6,
-        padding: "2px 6px", fontFamily: FONT, fontSize: 13, fontWeight: 700,
-        outline: "none",
-      }}
+      style={{ width: 56, textAlign: "center", border: "2px solid #1b5e20", borderRadius: 6,
+        padding: "2px 6px", fontFamily: FONT, fontSize: 13, fontWeight: 700, outline: "none" }}
     />
   ) : (
-    <span
-      onClick={() => !disabled && setEditing(true)}
-      title="คลิกเพื่อแก้ไข"
+    <span onClick={() => !disabled && setEditing(true)} title="คลิกเพื่อแก้ไข"
       style={{
         display: "inline-flex", alignItems: "center", justifyContent: "center",
         minWidth: 42, padding: "2px 8px", borderRadius: 6,
         background: "#e8f5e9", color: "#1b5e20", fontWeight: 700, fontSize: 13,
-        cursor: disabled ? "default" : "pointer",
-        border: "2px solid transparent",
+        cursor: disabled ? "default" : "pointer", border: "2px solid transparent",
         transition: "border-color .15s",
       }}
       onMouseEnter={e => { if (!disabled) e.currentTarget.style.borderColor = "#81c784"; }}
@@ -130,7 +170,7 @@ function WeightInput({ value, onChange, onSave, disabled }) {
   );
 }
 
-// Editable textarea-like span
+// ── TextEdit ──────────────────────────────────────────────────
 function TextEdit({ value, onChange, onSave, disabled, multiline = true, style = {} }) {
   const [editing, setEditing] = useState(false);
   const [local, setLocal]     = useState(value ?? "");
@@ -147,8 +187,7 @@ function TextEdit({ value, onChange, onSave, disabled, multiline = true, style =
   const baseStyle = {
     width: "100%", fontFamily: FONT, fontSize: 13, lineHeight: 1.5,
     border: "2px solid #1b5e20", borderRadius: 6, padding: "4px 8px",
-    background: "#fff", outline: "none", resize: "vertical",
-    ...style,
+    background: "#fff", outline: "none", resize: "vertical", ...style,
   };
 
   if (editing) {
@@ -162,9 +201,7 @@ function TextEdit({ value, onChange, onSave, disabled, multiline = true, style =
   }
 
   return (
-    <span
-      onClick={() => !disabled && setEditing(true)}
-      title="คลิกเพื่อแก้ไข"
+    <span onClick={() => !disabled && setEditing(true)} title="คลิกเพื่อแก้ไข"
       style={{
         display: "block", whiteSpace: "pre-wrap", wordBreak: "break-word",
         cursor: disabled ? "default" : "text", padding: "3px 6px", borderRadius: 6,
@@ -177,13 +214,28 @@ function TextEdit({ value, onChange, onSave, disabled, multiline = true, style =
   );
 }
 
-// ── Levels modal ──────────────────────────────────────────────
+// ── LevelsModal — edit descriptions + levelValues ─────────────
 function LevelsModal({ item, onClose, onSave, saving }) {
   const [levels, setLevels] = useState([...item.levels]);
+  const [levelValues, setLevelValues] = useState(
+    Array.isArray(item.levelValues) && item.levelValues.length > 0
+      ? [...item.levelValues]
+      : [1, 2, 3, 4, 5]
+  );
 
   const updateLevel = (i, val) => setLevels(prev => prev.map((l, j) => j === i ? val : l));
   const deleteLevel = (i) => setLevels(prev => prev.filter((_, j) => j !== i));
   const addLevel    = () => setLevels(prev => [...prev, ""]);
+
+  const toggleLV = (v) => {
+    setLevelValues(prev => {
+      if (prev.includes(v)) {
+        if (prev.length <= 1) return prev;
+        return prev.filter(x => x !== v);
+      }
+      return [...prev, v].sort((a, b) => a - b);
+    });
+  };
 
   return (
     <div style={{
@@ -191,10 +243,11 @@ function LevelsModal({ item, onClose, onSave, saving }) {
       display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
     }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{
-        background: "#fff", borderRadius: 16, padding: 28, width: "100%", maxWidth: 640,
-        maxHeight: "88vh", overflowY: "auto", boxShadow: "0 8px 40px rgba(0,0,0,.2)",
+        background: "#fff", borderRadius: 16, padding: 28, width: "100%", maxWidth: 660,
+        maxHeight: "90vh", overflowY: "auto", boxShadow: "0 8px 40px rgba(0,0,0,.2)",
         fontFamily: FONT,
       }}>
+        {/* Header */}
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 18, gap: 12 }}>
           <div>
             <div style={{ fontWeight: 800, fontSize: 15, color: "#1a1a1a" }}>
@@ -207,18 +260,49 @@ function LevelsModal({ item, onClose, onSave, saving }) {
           </button>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {/* levelValues selector */}
+        <div style={{
+          background: "#f6faf6", border: "1.5px solid #c8e6c9", borderRadius: 10,
+          padding: "12px 14px", marginBottom: 18,
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#2e7d32", marginBottom: 8 }}>
+            ระดับคะแนนที่ใช้ได้ (levelValues)
+          </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+            {[1, 2, 3, 4, 5].map(v => {
+              const active = levelValues.includes(v);
+              return (
+                <button key={v} onClick={() => toggleLV(v)}
+                  title={active ? `ปิดใช้คะแนน ${v}` : `เปิดใช้คะแนน ${v}`}
+                  style={{
+                    width: 38, height: 38, borderRadius: "50%", fontWeight: 800, fontSize: 15,
+                    border: `2px solid ${active ? "#1b5e20" : "#ccc"}`,
+                    background: active ? "#1b5e20" : "#fff",
+                    color: active ? "#fff" : "#aaa",
+                    cursor: "pointer", transition: "all .15s",
+                  }}>{v}</button>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 11, color: "#777" }}>
+            ปุ่มที่เปิดใช้จะ clickable ในหน้าประเมิน — ค่าปัจจุบัน: [{levelValues.join(", ")}]
+          </div>
+        </div>
+
+        {/* Level descriptions */}
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#555", marginBottom: 8 }}>
+          คำอธิบายแต่ละระดับ
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {levels.map((lvl, i) => (
             <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
               <div style={{
-                minWidth: 28, height: 28, borderRadius: "50%", background: LEVEL_CIRCLE_COLORS[i] ?? "#9e9e9e",
+                minWidth: 28, height: 28, borderRadius: "50%",
+                background: LEVEL_CIRCLE_COLORS[i] ?? "#9e9e9e",
                 display: "flex", alignItems: "center", justifyContent: "center",
                 color: "#fff", fontWeight: 800, fontSize: 13, flexShrink: 0, marginTop: 2,
               }}>{i + 1}</div>
-              <textarea
-                value={lvl}
-                onChange={e => updateLevel(i, e.target.value)}
-                rows={2}
+              <textarea value={lvl} onChange={e => updateLevel(i, e.target.value)} rows={2}
                 style={{
                   flex: 1, fontFamily: FONT, fontSize: 13, lineHeight: 1.5, resize: "vertical",
                   border: "1.5px solid #ddd", borderRadius: 8, padding: "6px 10px", outline: "none",
@@ -226,9 +310,7 @@ function LevelsModal({ item, onClose, onSave, saving }) {
                 onFocus={e => (e.target.style.borderColor = "#1b5e20")}
                 onBlur={e => (e.target.style.borderColor = "#ddd")}
               />
-              <button
-                onClick={() => deleteLevel(i)}
-                disabled={levels.length <= 1}
+              <button onClick={() => deleteLevel(i)} disabled={levels.length <= 1}
                 title="ลบระดับนี้"
                 style={{
                   flexShrink: 0, marginTop: 2, padding: "5px 7px",
@@ -236,31 +318,23 @@ function LevelsModal({ item, onClose, onSave, saving }) {
                   cursor: levels.length <= 1 ? "not-allowed" : "pointer",
                   color: "#ef4444", opacity: levels.length <= 1 ? 0.3 : 1, lineHeight: 1,
                 }}
-              >
-                <Trash2 size={14} />
-              </button>
+              ><Trash2 size={14} /></button>
             </div>
           ))}
         </div>
 
-        <button
-          onClick={addLevel}
-          style={{
-            marginTop: 12, width: "100%", padding: "8px", borderRadius: 8,
-            border: "1.5px dashed #a5d6a7", background: "#f6faf6",
-            color: "#1b5e20", fontFamily: FONT, fontSize: 13, fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >+ เพิ่มระดับ</button>
+        <button onClick={addLevel} style={{
+          marginTop: 12, width: "100%", padding: "8px", borderRadius: 8,
+          border: "1.5px dashed #a5d6a7", background: "#f6faf6",
+          color: "#1b5e20", fontFamily: FONT, fontSize: 13, fontWeight: 600, cursor: "pointer",
+        }}>+ เพิ่มระดับ</button>
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
           <button onClick={onClose} style={{
             padding: "8px 20px", borderRadius: 8, border: "1.5px solid #ddd",
             background: "#fff", cursor: "pointer", fontFamily: FONT, fontSize: 14,
           }}>ยกเลิก</button>
-          <button
-            onClick={() => onSave(item, levels)}
-            disabled={saving}
+          <button onClick={() => onSave(item, levels, levelValues)} disabled={saving}
             style={{
               padding: "8px 22px", borderRadius: 8, border: "none",
               background: saving ? "#a5d6a7" : "#1b5e20", color: "#fff",
@@ -277,10 +351,8 @@ function LevelsModal({ item, onClose, onSave, saving }) {
   );
 }
 
-const LEVEL_CIRCLE_COLORS = ["#ef5350", "#ff9800", "#fdd835", "#66bb6a", "#388e3c"];
-
-// ── Add item inline row ───────────────────────────────────────
-function AddItemRow({ onSave, onCancel, saving }) {
+// ── AddItemRow ────────────────────────────────────────────────
+function AddItemRow({ onSave, onCancel, saving, hideWeights }) {
   const [code,   setCode]   = useState('');
   const [nameTh, setNameTh] = useState('');
   const [weight, setWeight] = useState('0');
@@ -305,11 +377,13 @@ function AddItemRow({ onSave, onCancel, saving }) {
         <input value={nameTh} onChange={e => setNameTh(e.target.value)} placeholder="ชื่อหัวข้อ"
           style={inputStyle} />
       </td>
-      <td style={{ padding: '6px 8px', textAlign: 'center' }}>
-        <input type="number" value={weight} onChange={e => setWeight(e.target.value)}
-          style={{ ...inputStyle, width: 60, textAlign: 'center' }} />
-      </td>
-      <td colSpan={3} style={{ padding: '6px 10px' }}>
+      {!hideWeights && (
+        <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+          <input type="number" value={weight} onChange={e => setWeight(e.target.value)}
+            style={{ ...inputStyle, width: 60, textAlign: 'center' }} />
+        </td>
+      )}
+      <td colSpan={hideWeights ? 4 : 3} style={{ padding: '6px 10px' }}>
         <div style={{ display: 'flex', gap: 6 }}>
           <button onClick={submit} disabled={saving || !code.trim() || !nameTh.trim()}
             style={{
@@ -329,50 +403,97 @@ function AddItemRow({ onSave, onCancel, saving }) {
   );
 }
 
-// ── Item row ──────────────────────────────────────────────────
-function ItemRow({ item, onUpdate, onOpenLevels, saving, disabled }) {
+// ── AddSectionRow ─────────────────────────────────────────────
+function AddSectionRow({ onSave, onCancel, saving }) {
+  const [nameTh, setNameTh] = useState('');
+  const [weight, setWeight] = useState('0');
+
+  const inputStyle = {
+    fontFamily: FONT, fontSize: 13, border: '1.5px solid #a5d6a7',
+    borderRadius: 8, padding: '6px 10px', outline: 'none', boxSizing: 'border-box',
+  };
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px',
+      background: '#f0fff4', borderRadius: 10, marginTop: 8,
+      border: '1.5px dashed #a5d6a7',
+    }}>
+      <input value={nameTh} onChange={e => setNameTh(e.target.value)}
+        placeholder="ชื่อหัวข้อใหม่" style={{ ...inputStyle, flex: 1 }} />
+      <input type="number" value={weight} onChange={e => setWeight(e.target.value)}
+        placeholder="น้ำหนัก" style={{ ...inputStyle, width: 80, textAlign: 'center' }} />
+      <button onClick={() => { if (nameTh.trim()) onSave({ nameTh: nameTh.trim(), totalWeight: parseFloat(weight) || 0 }); }}
+        disabled={saving || !nameTh.trim()}
+        style={{
+          padding: '6px 16px', borderRadius: 8, border: 'none',
+          background: '#1b5e20', color: '#fff', fontFamily: FONT, fontSize: 13,
+          fontWeight: 700, cursor: saving || !nameTh.trim() ? 'not-allowed' : 'pointer',
+        }}>
+        {saving ? <RefreshCw size={13} style={{ animation: 'spin 1s linear infinite' }} /> : 'บันทึก'}
+      </button>
+      <button onClick={onCancel} style={{
+        padding: '6px 12px', borderRadius: 8, border: '1.5px solid #ddd',
+        background: '#fff', fontFamily: FONT, fontSize: 13, cursor: 'pointer',
+      }}>ยกเลิก</button>
+    </div>
+  );
+}
+
+
+// ── ItemRow ───────────────────────────────────────────────────
+function ItemRow({ item, onUpdate, onOpenLevels, saving, disabled, effectiveWeight, hideWeight, editableEffective }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const isSaving = saving?.type === "item" && saving?.id === item.id;
 
-  const saveItem = useCallback(async (patch) => {
+  const saveItem = useCallback((patch) => {
     onUpdate("save-item", item.id, patch);
   }, [item.id, onUpdate]);
 
   return (
     <tr style={{ background: "#fff" }}>
       <td style={{ padding: "8px 10px", width: 66, whiteSpace: "nowrap" }}>
-        <TextEdit
-          value={item.code}
-          disabled={disabled}
-          multiline={false}
+        <TextEdit value={item.code} disabled={disabled} multiline={false}
           onChange={v => onUpdate("item-code", item.id, { code: v })}
           onSave={v => saveItem({ code: v })}
           style={{ fontFamily: "monospace", fontSize: 12, color: "#555" }}
         />
       </td>
       <td style={{ padding: "6px 10px" }}>
-        <TextEdit
-          value={item.nameTh}
-          disabled={disabled}
+        <TextEdit value={item.nameTh} disabled={disabled}
           onChange={v => onUpdate("item-name", item.id, { nameTh: v })}
           onSave={v => saveItem({ nameTh: v })}
         />
       </td>
-      <td style={{ padding: "6px 10px", textAlign: "center", width: 80 }}>
-        <WeightInput
-          value={item.defaultWeight}
-          disabled={disabled}
-          onChange={v => onUpdate("item-weight", item.id, { defaultWeight: v })}
-          onSave={v => saveItem({ defaultWeight: v })}
-        />
+      {!hideWeight && (
+        <td style={{ padding: "6px 10px", textAlign: "center", width: 80 }}>
+          {effectiveWeight != null && !editableEffective
+            ? /* ESG: read-only computed weight */
+              <span style={{
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                minWidth: 42, padding: "2px 8px", borderRadius: 6,
+                background: "#e3f2fd", color: "#1565c0", fontWeight: 700, fontSize: 13,
+                border: "1.5px solid #90caf9",
+              }}>{effectiveWeight}</span>
+            : /* Function/Core: editable — show effective weight when computed, defaultWeight otherwise */
+              <WeightInput
+                value={effectiveWeight != null && editableEffective ? effectiveWeight : item.defaultWeight}
+                disabled={disabled}
+                onChange={v => onUpdate("item-weight", item.id, { defaultWeight: v })}
+                onSave={v => saveItem({ defaultWeight: v })}
+              />}
+        </td>
+      )}
+      <td style={{ padding: "6px 10px", textAlign: "center", width: 90 }}>
+        <span style={{ fontSize: 11, color: "#aaa" }}>
+          {item.levels.length} ระดับ
+          {item.levelValues?.length > 0 && item.levelValues?.length < 5
+            ? <span style={{ marginLeft: 4, color: "#1b5e20" }}>[{item.levelValues.join(",")}]</span>
+            : null}
+        </span>
       </td>
       <td style={{ padding: "6px 10px", textAlign: "center", width: 90 }}>
-        <span style={{ fontSize: 12, color: "#aaa" }}>{item.levels.length} ระดับ</span>
-      </td>
-      <td style={{ padding: "6px 10px", textAlign: "center", width: 90 }}>
-        <button
-          onClick={() => onOpenLevels(item)}
-          disabled={disabled}
+        <button onClick={() => onOpenLevels(item)} disabled={disabled}
           style={{
             padding: "4px 10px", borderRadius: 6, border: "1.5px solid #1b5e20",
             background: "#fff", color: "#1b5e20", cursor: "pointer",
@@ -392,17 +513,14 @@ function ItemRow({ item, onUpdate, onOpenLevels, saving, disabled }) {
                 background: "#ef4444", color: "#fff", fontSize: 11, fontFamily: FONT,
                 fontWeight: 700, cursor: "pointer",
               }}>ยืนยัน</button>
-            <button
-              onClick={() => setConfirmDelete(false)}
+            <button onClick={() => setConfirmDelete(false)}
               style={{
                 padding: "2px 6px", borderRadius: 5, border: "1.5px solid #ddd",
                 background: "#fff", fontSize: 11, fontFamily: FONT, cursor: "pointer",
               }}>ยกเลิก</button>
           </div>
         ) : (
-          <button
-            onClick={() => setConfirmDelete(true)}
-            disabled={disabled}
+          <button onClick={() => setConfirmDelete(true)} disabled={disabled}
             title="ลบรายการนี้"
             style={{
               padding: "3px 6px", background: "none", border: "1.5px solid #fca5a5",
@@ -416,70 +534,97 @@ function ItemRow({ item, onUpdate, onOpenLevels, saving, disabled }) {
   );
 }
 
-// ── Section card ──────────────────────────────────────────────
-function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, evalType }) {
-  const [expanded,    setExpanded]    = useState(false);
-  const [showAddRow,  setShowAddRow]  = useState(false);
-  const isSavingSection  = saving?.type === "category" && saving?.id === section.id;
-  const isSavingNew      = saving?.type === "new-item";
-  const activeItems = section.items.filter(it => it.isActive !== false);
+const TH = {
+  padding: "9px 10px", fontSize: 11.5, fontWeight: 700, textAlign: "center",
+  color: "#4a6b4a", textTransform: "uppercase", letterSpacing: ".3px",
+  borderBottom: "1px solid #dce8dc",
+};
+
+// ── SectionCard ───────────────────────────────────────────────
+function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, esgFilter, hideWeights, effectiveEditable, onDelete }) {
+  const [expanded,      setExpanded]      = useState(false);
+  const [showAddRow,    setShowAddRow]    = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const isSavingSection = saving?.type === "category" && saving?.id === section.id;
+  const isSavingNew     = saving?.type === "new-item";
+  let activeItems = section.items.filter(it => it.isActive !== false);
+  if (esgFilter === "ho")      activeItems = activeItems.filter(it => !it.code?.startsWith("F"));
+  if (esgFilter === "factory") activeItems = activeItems.filter(it =>  it.code?.startsWith("F"));
+
+  // Compute effective weights (same as Evalform's initWeights) when:
+  //   - effectiveEditable → Function modules: editable effective weight display
+  const effectiveWeights = effectiveEditable
+    ? computeEffectiveWeights(activeItems, section.totalWeight)
+    : null;
+
+  const colCount = 6;
 
   return (
     <div style={{
       background: "#fff", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,.07)",
       marginBottom: 14, overflow: "hidden",
     }}>
-      {/* Section header */}
       <div style={{
         display: "flex", alignItems: "center", gap: 10, padding: "13px 18px",
         borderBottom: expanded ? "1px solid #e8f0e8" : "none",
-        background: expanded ? "#f6faf6" : "#fff",
-        cursor: "pointer",
+        background: expanded ? "#f6faf6" : "#fff", cursor: "pointer",
       }}>
-        <button
-          onClick={() => setExpanded(v => !v)}
-          style={{ background: "none", border: "none", cursor: "pointer", color: "#555", padding: 0, lineHeight: 1 }}
-        >
+        <button onClick={() => setExpanded(v => !v)}
+          style={{ background: "none", border: "none", cursor: "pointer", color: "#555", padding: 0, lineHeight: 1 }}>
           {expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
         </button>
-
-        {/* Section number badge */}
         <span style={{
           minWidth: 28, height: 28, borderRadius: "50%", background: "#1b5e20",
           display: "flex", alignItems: "center", justifyContent: "center",
           color: "#fff", fontWeight: 800, fontSize: 13, flexShrink: 0,
         }}>{idx + 1}</span>
-
-        {/* Section name (editable) */}
         <div style={{ flex: 1 }} onClick={e => e.stopPropagation()}>
-          <TextEdit
-            value={section.nameTh}
-            disabled={disabled}
-            multiline={false}
+          <TextEdit value={section.nameTh} disabled={disabled} multiline={false}
             onChange={v => onUpdate("cat-name", section.id, { nameTh: v })}
             onSave={v => onUpdate("save-cat", section.id, { nameTh: v })}
             style={{ fontWeight: 700, fontSize: 14 }}
           />
         </div>
-
-        {/* Weight */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
-          <span style={{ fontSize: 12, color: "#888", fontFamily: FONT }}>น้ำหนัก:</span>
-          <WeightInput
-            value={section.totalWeight}
-            disabled={disabled}
-            onChange={v => onUpdate("cat-weight", section.id, { totalWeight: v })}
-            onSave={v => onUpdate("save-cat", section.id, { totalWeight: v })}
-          />
-        </div>
-
-        {/* Saving indicator */}
+        {!hideWeights && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+            <span style={{ fontSize: 12, color: "#888", fontFamily: FONT }}>แก้ไขน้ำหนัก:</span>
+            <WeightInput value={section.totalWeight} disabled={disabled}
+              onChange={v => onUpdate("cat-weight", section.id, { totalWeight: v })}
+              onSave={v => onUpdate("save-cat", section.id, { totalWeight: v })}
+            />
+          </div>
+        )}
         {isSavingSection && (
           <RefreshCw size={14} style={{ animation: "spin 1s linear infinite", color: "#aaa", flexShrink: 0 }} />
         )}
+        {onDelete && !disabled && (
+          <div onClick={e => e.stopPropagation()} style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 4 }}>
+            {confirmDelete ? (
+              <>
+                <span style={{ fontSize: 11, color: "#b71c1c", fontFamily: FONT, whiteSpace: "nowrap" }}>ยืนยันลบ?</span>
+                <button onClick={() => { setConfirmDelete(false); onDelete(section.id); }}
+                  style={{ padding: "3px 10px", borderRadius: 6, border: "none", background: "#b71c1c", color: "#fff", fontFamily: FONT, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                  ลบ
+                </button>
+                <button onClick={() => setConfirmDelete(false)}
+                  style={{ padding: "3px 8px", borderRadius: 6, border: "1.5px solid #ddd", background: "#fff", fontFamily: FONT, fontSize: 12, cursor: "pointer" }}>
+                  ยกเลิก
+                </button>
+              </>
+            ) : (
+              <button onClick={() => setConfirmDelete(true)}
+                title="ลบหัวข้อนี้"
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#ccc", padding: 4, lineHeight: 1, borderRadius: 6, transition: "color .15s" }}
+                onMouseEnter={e => e.currentTarget.style.color = "#b71c1c"}
+                onMouseLeave={e => e.currentTarget.style.color = "#ccc"}
+              >
+                <Trash2 size={15} />
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Items table */}
       {expanded && (
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -487,7 +632,9 @@ function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, e
               <tr style={{ background: "#f0f7f0" }}>
                 <th style={TH}>รหัส</th>
                 <th style={{ ...TH, textAlign: "left" }}>ชื่อหัวข้อ (คลิกเพื่อแก้ไข)</th>
-                <th style={TH}>น้ำหนัก</th>
+                <th style={TH}>
+                  น้ำหนัก{effectiveWeights && !effectiveEditable ? " (คำนวณ)" : ""}
+                </th>
                 <th style={TH}>ระดับ</th>
                 <th style={TH}>แก้ระดับ</th>
                 <th style={TH}></th>
@@ -495,40 +642,32 @@ function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, e
             </thead>
             <tbody>
               {activeItems.length === 0 && !showAddRow
-                ? <tr><td colSpan={6} style={{ textAlign: "center", color: "#bbb", padding: 20, fontSize: 13 }}>ไม่มีรายการ — กด "+ เพิ่ม item" เพื่อเพิ่ม</td></tr>
+                ? <tr><td colSpan={colCount} style={{ textAlign: "center", color: "#bbb", padding: 20, fontSize: 13 }}>ไม่มีรายการ — กด "+ เพิ่ม item" เพื่อเพิ่ม</td></tr>
                 : activeItems.map(item => (
-                  <ItemRow
-                    key={item.id ?? item.code}
-                    item={item}
-                    onUpdate={onUpdate}
-                    onOpenLevels={onOpenLevels}
-                    saving={saving}
-                    disabled={disabled}
+                  <ItemRow key={item.id ?? item.code} item={item}
+                    onUpdate={onUpdate} onOpenLevels={onOpenLevels}
+                    saving={saving} disabled={disabled}
+                    effectiveWeight={effectiveWeights?.[item.id]}
+                    editableEffective={effectiveEditable}
                   />
                 ))
               }
               {showAddRow && (
-                <AddItemRow
-                  saving={isSavingNew}
-                  onCancel={() => setShowAddRow(false)}
+                <AddItemRow saving={isSavingNew} onCancel={() => setShowAddRow(false)}
                   onSave={data => {
                     setShowAddRow(false);
                     onUpdate("add-item", section.id, {
                       ...data,
                       categoryId:  section.id,
-                      criteriaSet: evalType,
+                      criteriaSet: getCriteriaSetFromCode(section.code),
                     });
                   }}
                 />
               )}
             </tbody>
           </table>
-
-          {/* Add item button */}
           <div style={{ padding: "8px 14px", borderTop: "1px solid #e8f0e8" }}>
-            <button
-              onClick={() => setShowAddRow(true)}
-              disabled={disabled || showAddRow}
+            <button onClick={() => setShowAddRow(true)} disabled={disabled || showAddRow}
               style={{
                 display: "flex", alignItems: "center", gap: 5,
                 padding: "5px 12px", borderRadius: 7, border: "1.5px dashed #a5d6a7",
@@ -538,9 +677,7 @@ function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, e
               }}
             >+ เพิ่ม item</button>
           </div>
-
-          {/* Items weight sum hint */}
-          {activeItems.length > 0 && (() => {
+          {!effectiveWeights && activeItems.length > 0 && (() => {
             const sum = activeItems.reduce((s, it) => s + (it.defaultWeight ?? 0), 0);
             const diff = Math.abs(sum - section.totalWeight);
             if (diff < 0.01) return null;
@@ -555,42 +692,116 @@ function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, e
               </div>
             );
           })()}
-
         </div>
       )}
     </div>
   );
 }
 
-const TH = {
-  padding: "9px 10px", fontSize: 11.5, fontWeight: 700, textAlign: "center",
-  color: "#4a6b4a", textTransform: "uppercase", letterSpacing: ".3px",
-  borderBottom: "1px solid #dce8dc",
-};
+// ── PartCard ──────────────────────────────────────────────────
+function PartCard({ label, weight, weightLabel, avgInfo, accent = "#1b5e20", onWeightSave, disabled, children }) {
+  return (
+    <div style={{
+      background: "#fff", borderRadius: 14,
+      boxShadow: "0 2px 10px rgba(0,0,0,.07)",
+      marginBottom: 20, overflow: "hidden",
+      border: `1.5px solid ${accent}22`,
+    }}>
+      <div style={{
+        background: `${accent}0d`, padding: "12px 18px",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        borderBottom: `1.5px solid ${accent}22`,
+      }}>
+        <span style={{ fontWeight: 800, fontSize: 15, color: accent }}>{label}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {avgInfo && (
+            <span style={{ fontSize: 12, color: "#888", fontFamily: "Sarabun, sans-serif" }}>
+              {avgInfo}
+            </span>
+          )}
+          {weight != null && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 11, color: "#888" }}>{weightLabel ?? "น้ำหนักรวม:"}</span>
+              {onWeightSave
+                ? <WeightInput value={weight} disabled={disabled}
+                    onChange={() => {}} onSave={onWeightSave} />
+                : <span style={{
+                    background: `${accent}18`, color: accent,
+                    fontWeight: 800, fontSize: 13,
+                    padding: "2px 10px", borderRadius: 6,
+                    border: `1.5px solid ${accent}30`,
+                  }}>{typeof weight === "number" ? weight.toFixed(1) : weight}</span>
+              }
+            </div>
+          )}
+        </div>
+      </div>
+      <div style={{ padding: "12px" }}>{children}</div>
+    </div>
+  );
+}
+
+// ── EsgFilterBtn ───────────────────────────────────────────────
+function EsgFilterBtn({ active, onClick, children }) {
+  return (
+    <button onClick={onClick} style={{
+      padding: "6px 18px", borderRadius: 20,
+      border: `1.5px solid ${active ? "#1b5e20" : "#ddd"}`,
+      background: active ? "#1b5e20" : "#fff",
+      color: active ? "#fff" : "#666",
+      fontFamily: FONT, fontSize: 13, fontWeight: active ? 700 : 400,
+      cursor: "pointer", transition: "all .15s",
+    }}>{children}</button>
+  );
+}
+
+// ── SegButton: reusable tab/toggle button ─────────────────────
+function SegButton({ active, onClick, children, style = {} }) {
+  return (
+    <button onClick={onClick}
+      style={{
+        padding: "6px 16px", borderRadius: 8, border: "none", cursor: "pointer",
+        fontFamily: FONT, fontSize: 13, fontWeight: active ? 700 : 400,
+        background: active ? "#1b5e20" : "transparent",
+        color: active ? "#fff" : "#555", transition: "all .15s", ...style,
+      }}
+    >{children}</button>
+  );
+}
 
 // ── Main component ────────────────────────────────────────────
 export default function AdminCriteriaEditor({ authUser }) {
-  const [evalType,     setEvalType]     = useState("pre_eval");
-  const [sections,     setSections]     = useState([]);
-  const [loading,      setLoading]      = useState(false);
-  const [saving,       setSaving]       = useState(null);
-  const [toast,        setToast]        = useState(null);
-  const [levelsModal,  setLevelsModal]  = useState(null);
-  const reloadContext  = useCriteriaReload();
-  const [seeding,      setSeeding]      = useState(false);
+  const [evalType,        setEvalType]        = useState("pre_eval");
+  const [coreEsgSections, setCoreEsgSections] = useState([]);
+  const [funcSections,    setFuncSections]    = useState([]);
+  const [esgFilter,       setEsgFilter]       = useState("ho"); // "ho" | "factory"
+  const [loading,         setLoading]         = useState(false);
+  const [saving,          setSaving]          = useState(null);
+  const [toast,           setToast]           = useState(null);
+  const [levelsModal,     setLevelsModal]     = useState(null);
+  const [seeding,         setSeeding]         = useState(false);
+  const [addingSection,   setAddingSection]   = useState(null); // null | "core" | "esg"
+  const [addingFuncMod,   setAddingFuncMod]   = useState(false); // false | true
+  const [savingSection,   setSavingSection]   = useState(false);
+  const esgNormalized = useRef({ ho: false, factory: false });
+  const reloadContext = useCriteriaReload();
 
   const showToast = useCallback((msg, type = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
   }, []);
 
-  const loadCriteria = useCallback(async (et) => {
+  const loadAll = useCallback(async (et) => {
     setLoading(true);
     try {
-      const r = await authFetch(`/api/criteria?evalType=${et}`);
-      if (!r.ok) throw new Error();
-      const data = await r.json();
-      setSections(data);
+      const [r1, r2] = await Promise.all([
+        authFetch(`/api/criteria?evalType=${et}`),
+        authFetch(`/api/criteria?evalType=function`),
+      ]);
+      if (!r1.ok || !r2.ok) throw new Error();
+      const [d1, d2] = await Promise.all([r1.json(), r2.json()]);
+      setCoreEsgSections(d1);
+      setFuncSections(d2);
     } catch {
       showToast("โหลดข้อมูลไม่สำเร็จ — ตรวจสอบว่า server กำลังทำงานอยู่", "error");
     } finally {
@@ -598,62 +809,262 @@ export default function AdminCriteriaEditor({ authUser }) {
     }
   }, [showToast]);
 
-  const handleSeed = useCallback(async () => {
+  useEffect(() => { loadAll(evalType); esgNormalized.current = { ho: false, factory: false }; }, [evalType, loadAll]);
+
+  // Auto-normalize ESG item weights when filter or data changes
+  useEffect(() => {
+    if (esgNormalized.current[esgFilter]) return;
+    const isEsg = s => !!(s.nameTh?.includes('ESG') || s.code?.match(/ESG/i));
+    const esgSecs = coreEsgSections.filter(isEsg);
+    if (!esgSecs.length) return;
+    let needsNorm = false;
+    esgSecs.forEach(sec => {
+      const pool = sec.items.filter(it => {
+        if (it.isActive === false) return false;
+        return esgFilter === "factory" ? it.code?.startsWith("F") : !it.code?.startsWith("F");
+      });
+      if (pool.length === 0) return;
+      const sum = pool.reduce((s, it) => s + (it.defaultWeight ?? 0), 0);
+      if (Math.abs(sum - sec.totalWeight) > 0.01) needsNorm = true;
+    });
+    esgNormalized.current[esgFilter] = true;
+    if (needsNorm) esgSecs.forEach(sec => handleUpdate("normalize-esg", sec.id, {}));
+  }, [esgFilter, coreEsgSections, handleUpdate]);
+
+  const isESGSection = s => s.nameTh?.includes('ESG') || s.code?.match(/ESG/i);
+  const coreSections = useMemo(() => coreEsgSections.filter(s => !isESGSection(s)), [coreEsgSections]);
+  const esgSections  = useMemo(() => coreEsgSections.filter(s => isESGSection(s)),  [coreEsgSections]);
+
+  // ── Seed ────────────────────────────────────────────────────
+  const callSeed = useCallback(async (reset = false) => {
     setSeeding(true);
     try {
       const payload = buildSeedPayload();
       const r = await authFetch('/api/criteria/seed', {
         method: 'POST',
-        body: JSON.stringify({ sections: payload }),
+        body: JSON.stringify({ sections: payload, reset }),
       });
       const contentType = r.headers.get('content-type') ?? '';
-      if (!contentType.includes('application/json')) {
+      if (!contentType.includes('application/json'))
         throw new Error(`Server ไม่ตอบสนอง (${r.status}) — รีสตาร์ท server แล้วลองใหม่`);
-      }
       const data = await r.json();
       if (!r.ok) throw new Error(data.message);
       showToast(data.message ?? 'นำเข้าข้อมูลสำเร็จ');
-      await loadCriteria(evalType);
+      await loadAll(evalType);
       reloadContext();
     } catch (err) {
       showToast(err.message || 'นำเข้าข้อมูลไม่สำเร็จ', 'error');
     } finally {
       setSeeding(false);
     }
-  }, [evalType, loadCriteria, showToast, reloadContext]);
+  }, [evalType, loadAll, showToast, reloadContext]);
 
-  useEffect(() => { loadCriteria(evalType); }, [evalType, loadCriteria]);
+  const handleSeed = useCallback(() => callSeed(false), [callSeed]);
 
-  // ── update local state + optionally call API ─────────────────
+  // ── Function total weight: patch all M1-M7 sections at once ──
+  const handleFuncWeightSave = useCallback(async (newWeight) => {
+    setFuncSections(prev => prev.map(s => ({ ...s, totalWeight: newWeight })));
+    try {
+      await Promise.all(funcSections.map(s =>
+        authFetch(`/api/criteria/categories/${s.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ nameTh: s.nameTh, totalWeight: newWeight }),
+        })
+      ));
+      showToast("บันทึกน้ำหนัก Function สำเร็จ");
+      reloadContext();
+    } catch {
+      showToast("บันทึกน้ำหนัก Function ไม่สำเร็จ", "error");
+      loadAll(evalType);
+    }
+  }, [funcSections, evalType, showToast, loadAll, reloadContext]);
+
+  // ── Add section ──────────────────────────────────────────────
+  const handleAddSection = useCallback(async (codePrefix, nameTh, totalWeight, isFunc = false) => {
+    setSavingSection(true);
+    try {
+      const body = isFunc
+        ? { nameTh, totalWeight, type: 'function' }
+        : { codePrefix, nameTh, totalWeight };
+      const r = await authFetch('/api/criteria/categories', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error((await r.json()).message ?? '');
+      const raw = await r.json();
+      // Normalize numeric fields (pg returns numerics as strings)
+      const newSec = { ...raw, totalWeight: parseFloat(raw.totalWeight) || 0, displayOrder: Number(raw.displayOrder) || 0, items: [] };
+      if (isFunc) setFuncSections(prev => [...prev, newSec]);
+      else setCoreEsgSections(prev => [...prev, newSec]);
+      setAddingSection(null);
+      setAddingFuncMod(false);
+      showToast('เพิ่มหัวข้อสำเร็จ');
+      reloadContext();
+    } catch (err) {
+      showToast(err.message || 'เพิ่มหัวข้อไม่สำเร็จ', 'error');
+    } finally {
+      setSavingSection(false);
+    }
+  }, [showToast, reloadContext]);
+
+  // ── Delete section ───────────────────────────────────────────
+  const handleDeleteSection = useCallback(async (id) => {
+    setSaving({ type: "category", id });
+    try {
+      const r = await authFetch(`/api/criteria/categories/${id}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error((await r.json()).message ?? '');
+      setCoreEsgSections(prev => prev.filter(s => s.id !== id));
+      setFuncSections(prev => prev.filter(s => s.id !== id));
+      showToast('ลบหัวข้อสำเร็จ');
+      reloadContext();
+    } catch (err) {
+      showToast(err.message || 'ลบหัวข้อไม่สำเร็จ', 'error');
+    } finally {
+      setSaving(null);
+    }
+  }, [showToast, reloadContext]);
+
+  // ── Buffer helpers (same pattern as Evalform) ─────────────────
+  const getCatBuffer = useCallback((pool, editedId, newVal) => {
+    const poolTotal = pool.reduce((s, c) => s + (c.totalWeight ?? 0), 0);
+    const last = pool[pool.length - 1];
+    const bufId = (last?.id === editedId && pool.length > 1) ? pool[pool.length - 2].id : last?.id;
+    if (!bufId || bufId === editedId) return null;
+    const clamped = Math.max(0, Number(newVal) || 0);
+    const othersSum = pool
+      .filter(s => s.id !== bufId)
+      .reduce((s, sec) => s + (sec.id === editedId ? clamped : (sec.totalWeight ?? 0)), 0);
+    return { bufId, bufVal: Math.max(0, r2adm(poolTotal - othersSum)) };
+  }, []);
+
+  const getItemBuffer = useCallback((sec, editedId, newVal) => {
+    const realItems = sec.items.filter(it => it.isActive !== false);
+    if (realItems.length <= 1) return null;
+    const secTotal = sec.totalWeight ?? 0;
+    const last = realItems[realItems.length - 1];
+    const bufItem = last?.id === editedId ? realItems[realItems.length - 2] : last;
+    if (!bufItem || bufItem.id === editedId) return null;
+    const clamped = Math.max(0, Number(newVal) || 0);
+    const othersSum = realItems
+      .filter(it => it.id !== bufItem.id)
+      .reduce((s, it) => s + (it.id === editedId ? clamped : (it.defaultWeight ?? 0)), 0);
+    return { bufItem, bufVal: Math.max(0, r2adm(secTotal - othersSum)) };
+  }, []);
+
+  // Scale items proportionally to match a new section totalWeight (same logic as Evalform's scaleItems)
+  const scaleItemsToTotal = useCallback((secItems, newTotal) => {
+    const real = secItems.filter(it => it.isActive !== false);
+    if (real.length === 0) return {};
+    const oldSum = real.reduce((s, it) => s + (it.defaultWeight ?? 0), 0);
+    const result = {};
+    if (oldSum > 0) {
+      let rem = newTotal;
+      real.forEach((it, i) => {
+        if (i === real.length - 1) { result[it.id] = Math.max(0, r2adm(rem)); }
+        else { const w = r2adm((it.defaultWeight / oldSum) * newTotal); result[it.id] = w; rem -= w; }
+      });
+    } else {
+      const each = r2adm(newTotal / real.length);
+      let rem = newTotal;
+      real.forEach((it, i) => {
+        if (i === real.length - 1) { result[it.id] = Math.max(0, r2adm(rem)); }
+        else { result[it.id] = each; rem -= each; }
+      });
+    }
+    return result; // { itemId: newWeight }
+  }, []);
+
+  // ── handleUpdate (unified across both datasets) ──────────────
   const handleUpdate = useCallback(async (action, id, payload) => {
+    const inFunc = (
+      funcSections.some(s => s.id === id) ||
+      funcSections.some(s => s.items?.some(it => it.id === id))
+    );
+    const setSecs = inFunc ? setFuncSections : setCoreEsgSections;
+    const isEsgSec = s => !!(s.nameTh?.includes('ESG') || s.code?.match(/ESG/i));
+
     if (action === "cat-name") {
-      setSections(prev => prev.map(s => s.id === id ? { ...s, nameTh: payload.nameTh } : s));
+      setSecs(prev => prev.map(s => s.id === id ? { ...s, nameTh: payload.nameTh } : s));
       return;
     }
+
     if (action === "cat-weight") {
-      setSections(prev => prev.map(s => s.id === id ? { ...s, totalWeight: payload.totalWeight } : s));
+      if (!inFunc) {
+        const current = coreEsgSections.find(s => s.id === id);
+        const isEsg = isEsgSec(current ?? {});
+        const pool = coreEsgSections.filter(s => isEsgSec(s) === isEsg);
+        const clamped = Math.max(0, Number(payload.totalWeight) || 0);
+        const buf = getCatBuffer(pool, id, clamped);
+        setSecs(prev => prev.map(s => {
+          if (s.id === id) {
+            const scales = scaleItemsToTotal(s.items, clamped);
+            return {
+              ...s,
+              totalWeight: clamped,
+              items: s.items.map(it => scales[it.id] !== undefined ? { ...it, defaultWeight: scales[it.id] } : it),
+            };
+          }
+          if (buf && s.id === buf.bufId) {
+            const scales = scaleItemsToTotal(s.items, buf.bufVal);
+            return {
+              ...s,
+              totalWeight: buf.bufVal,
+              items: s.items.map(it => scales[it.id] !== undefined ? { ...it, defaultWeight: scales[it.id] } : it),
+            };
+          }
+          return s;
+        }));
+      } else {
+        setSecs(prev => prev.map(s => s.id === id ? { ...s, totalWeight: payload.totalWeight } : s));
+      }
       return;
     }
+
     if (action === "item-name") {
-      setSections(prev => prev.map(s => ({
+      setSecs(prev => prev.map(s => ({
         ...s, items: s.items.map(it => it.id === id ? { ...it, nameTh: payload.nameTh } : it),
       })));
       return;
     }
     if (action === "item-code") {
-      setSections(prev => prev.map(s => ({
+      setSecs(prev => prev.map(s => ({
         ...s, items: s.items.map(it => it.id === id ? { ...it, code: payload.code } : it),
       })));
       return;
     }
+
     if (action === "item-weight") {
-      setSections(prev => prev.map(s => ({
-        ...s, items: s.items.map(it => it.id === id ? { ...it, defaultWeight: payload.defaultWeight } : it),
+      const allSecs = inFunc ? funcSections : coreEsgSections;
+      const sec = allSecs.find(s => s.items?.some(it => it.id === id));
+      if (!sec) {
+        setSecs(prev => prev.map(s => ({
+          ...s, items: s.items.map(it => it.id === id ? { ...it, defaultWeight: payload.defaultWeight } : it),
+        })));
+        return;
+      }
+      // For ESG sections: buffer only within the currently-filtered subset (HO or Factory)
+      const esgPool = (!inFunc && isEsgSec(sec))
+        ? sec.items.filter(it => {
+            if (it.isActive === false) return false;
+            if (esgFilter === "ho") return !it.code?.startsWith("F");
+            if (esgFilter === "factory") return it.code?.startsWith("F");
+            return true;
+          })
+        : null;
+      const bufSec = esgPool
+        ? { ...sec, items: esgPool, totalWeight: sec.totalWeight }
+        : sec;
+      const buf = getItemBuffer(bufSec, id, payload.defaultWeight);
+      setSecs(prev => prev.map(s => ({
+        ...s, items: s.items.map(it => {
+          if (it.id === id) return { ...it, defaultWeight: Math.max(0, Number(payload.defaultWeight) || 0) };
+          if (buf && it.id === buf.bufItem.id) return { ...it, defaultWeight: buf.bufVal };
+          return it;
+        }),
       })));
       return;
     }
 
-    // ── ADD item ─────────────────────────────────────────────────
     if (action === "add-item") {
       setSaving({ type: "new-item" });
       try {
@@ -663,7 +1074,7 @@ export default function AdminCriteriaEditor({ authUser }) {
         });
         if (!r.ok) throw new Error((await r.json()).message ?? '');
         showToast('เพิ่มรายการสำเร็จ');
-        await loadCriteria(evalType);
+        await loadAll(evalType);
         reloadContext();
       } catch (err) {
         showToast(err.message || 'เพิ่มรายการไม่สำเร็จ', 'error');
@@ -673,13 +1084,12 @@ export default function AdminCriteriaEditor({ authUser }) {
       return;
     }
 
-    // ── DELETE item (soft) ────────────────────────────────────────
     if (action === "delete-item") {
       setSaving({ type: "item", id });
       try {
         const r = await authFetch(`/api/criteria/items/${id}`, { method: 'DELETE' });
         if (!r.ok) throw new Error();
-        setSections(prev => prev.map(s => ({
+        setSecs(prev => prev.map(s => ({
           ...s, items: s.items.filter(it => it.id !== id),
         })));
         showToast('ลบรายการสำเร็จ');
@@ -692,17 +1102,53 @@ export default function AdminCriteriaEditor({ authUser }) {
       return;
     }
 
-    // API calls
     if (action === "save-cat") {
       setSaving({ type: "category", id });
       try {
-        const current = sections.find(s => s.id === id);
+        const allSecs = inFunc ? funcSections : coreEsgSections;
+        const current = allSecs.find(s => s.id === id);
         const body = { ...current, ...payload };
         const r = await authFetch(`/api/criteria/categories/${id}`, {
           method: "PATCH",
           body: JSON.stringify({ nameTh: body.nameTh, totalWeight: body.totalWeight }),
         });
         if (!r.ok) throw new Error();
+        // Persist buffer section + scaled items when a Core/ESG weight changed
+        if (!inFunc && payload.totalWeight != null) {
+          const clamped = Math.max(0, Number(payload.totalWeight) || 0);
+          const isEsg = isEsgSec(current ?? {});
+          const pool = coreEsgSections.filter(s => isEsgSec(s) === isEsg);
+          const buf = getCatBuffer(pool, id, clamped);
+
+          // Save items in main section (scaled to new weight)
+          const mainScales = scaleItemsToTotal(current?.items ?? [], clamped);
+          await Promise.all(Object.entries(mainScales).map(([itemId, w]) => {
+            const it = current?.items?.find(x => x.id === Number(itemId));
+            if (!it) return Promise.resolve();
+            return authFetch(`/api/criteria/items/${itemId}`, {
+              method: "PATCH",
+              body: JSON.stringify({ nameTh: it.nameTh, defaultWeight: w }),
+            });
+          }));
+
+          // Save buffer section + its items
+          if (buf) {
+            const bufSec = pool.find(s => s.id === buf.bufId);
+            await authFetch(`/api/criteria/categories/${buf.bufId}`, {
+              method: "PATCH",
+              body: JSON.stringify({ nameTh: bufSec?.nameTh, totalWeight: buf.bufVal }),
+            });
+            const bufScales = scaleItemsToTotal(bufSec?.items ?? [], buf.bufVal);
+            await Promise.all(Object.entries(bufScales).map(([itemId, w]) => {
+              const it = bufSec?.items?.find(x => x.id === Number(itemId));
+              if (!it) return Promise.resolve();
+              return authFetch(`/api/criteria/items/${itemId}`, {
+                method: "PATCH",
+                body: JSON.stringify({ nameTh: it.nameTh, defaultWeight: w }),
+              });
+            }));
+          }
+        }
         showToast("บันทึกหัวข้อสำเร็จ");
         reloadContext();
       } catch {
@@ -710,12 +1156,50 @@ export default function AdminCriteriaEditor({ authUser }) {
       } finally {
         setSaving(null);
       }
+      return;
+    }
+
+    if (action === "normalize-esg") {
+      const allSecs = inFunc ? funcSections : coreEsgSections;
+      const sec = allSecs.find(s => s.id === id);
+      if (!sec) return;
+      const pool = sec.items.filter(it => {
+        if (it.isActive === false) return false;
+        if (esgFilter === "ho")      return !it.code?.startsWith("F");
+        if (esgFilter === "factory") return  it.code?.startsWith("F");
+        return true;
+      });
+      const scales = scaleItemsToTotal(pool, sec.totalWeight);
+      setSecs(prev => prev.map(s => s.id !== id ? s : {
+        ...s,
+        items: s.items.map(it => scales[it.id] !== undefined ? { ...it, defaultWeight: scales[it.id] } : it),
+      }));
+      setSaving({ type: "category", id });
+      try {
+        await Promise.all(Object.entries(scales).map(([itemId, w]) => {
+          const it = sec.items.find(x => x.id === Number(itemId));
+          if (!it) return Promise.resolve();
+          return authFetch(`/api/criteria/items/${itemId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ nameTh: it.nameTh, defaultWeight: w }),
+          });
+        }));
+        showToast("ปรับน้ำหนักสำเร็จ");
+        reloadContext();
+      } catch {
+        showToast("ปรับน้ำหนักไม่สำเร็จ", "error");
+      } finally {
+        setSaving(null);
+      }
+      return;
     }
 
     if (action === "save-item") {
       setSaving({ type: "item", id });
+      const allSecs = inFunc ? funcSections : coreEsgSections;
       let item = null;
-      sections.forEach(s => s.items.forEach(it => { if (it.id === id) item = it; }));
+      let itemSec = null;
+      allSecs.forEach(s => s.items?.forEach(it => { if (it.id === id) { item = it; itemSec = s; } }));
       if (!item) return;
       const body = { ...item, ...payload };
       try {
@@ -724,6 +1208,27 @@ export default function AdminCriteriaEditor({ authUser }) {
           body: JSON.stringify({ nameTh: body.nameTh, detailTh: body.detailTh, defaultWeight: body.defaultWeight, code: body.code }),
         });
         if (!r.ok) throw new Error();
+        // Persist the buffer item when weight changed (ESG: respect filter)
+        if (payload.defaultWeight != null && itemSec) {
+          const esgPool = (!inFunc && isEsgSec(itemSec))
+            ? itemSec.items.filter(it => {
+                if (it.isActive === false) return false;
+                if (esgFilter === "ho") return !it.code?.startsWith("F");
+                if (esgFilter === "factory") return it.code?.startsWith("F");
+                return true;
+              })
+            : null;
+          const bufSec = esgPool
+            ? { ...itemSec, items: esgPool, totalWeight: itemSec.totalWeight }
+            : itemSec;
+          const buf = getItemBuffer(bufSec, id, payload.defaultWeight);
+          if (buf) {
+            await authFetch(`/api/criteria/items/${buf.bufItem.id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ nameTh: buf.bufItem.nameTh, defaultWeight: buf.bufVal }),
+            });
+          }
+        }
         showToast("บันทึกรายการสำเร็จ");
         reloadContext();
       } catch {
@@ -732,22 +1237,22 @@ export default function AdminCriteriaEditor({ authUser }) {
         setSaving(null);
       }
     }
-  }, [sections, showToast, evalType, loadCriteria, reloadContext]);
+  }, [coreEsgSections, funcSections, esgFilter, evalType, showToast, loadAll, reloadContext, getCatBuffer, getItemBuffer, scaleItemsToTotal]);
 
-  // ── save levels ───────────────────────────────────────────────
-  const handleSaveLevels = useCallback(async (item, levels) => {
+  // ── Save levels + levelValues ────────────────────────────────
+  const handleSaveLevels = useCallback(async (item, levels, levelValues) => {
     setSaving({ type: "levels", id: item.id });
     try {
       const r = await authFetch(`/api/criteria/items/${item.id}/levels`, {
         method: "PATCH",
-        body: JSON.stringify({ levels }),
+        body: JSON.stringify({ levels, levelValues }),
       });
       if (!r.ok) throw new Error();
-      // Update local state
-      setSections(prev => prev.map(s => ({
-        ...s,
-        items: s.items.map(it => it.id === item.id ? { ...it, levels } : it),
-      })));
+      const updater = prev => prev.map(s => ({
+        ...s, items: s.items.map(it => it.id === item.id ? { ...it, levels, levelValues } : it),
+      }));
+      setCoreEsgSections(updater);
+      setFuncSections(updater);
       showToast("บันทึกระดับคะแนนสำเร็จ");
       reloadContext();
       setLevelsModal(null);
@@ -756,95 +1261,81 @@ export default function AdminCriteriaEditor({ authUser }) {
     } finally {
       setSaving(null);
     }
-  }, [showToast]);
+  }, [showToast, reloadContext]);
 
-  // ── total weight sum ──────────────────────────────────────────
-  const totalWeight = sections.reduce((s, c) => s + (c.totalWeight ?? 0), 0);
+  const coreWeight  = coreSections.reduce((s, c) => s + (c.totalWeight ?? 0), 0);
+  const esgWeight   = esgSections.reduce((s, c) => s + (c.totalWeight ?? 0), 0);
+  const funcWeight  = funcSections[0]?.totalWeight ?? FUNCTION_SECTION_WEIGHT;
+  const totalWeight = coreWeight + funcWeight + esgWeight;
   const weightOk    = Math.abs(totalWeight - 100) < 0.1;
+  const allEmpty    = !loading && coreEsgSections.length === 0 && funcSections.length === 0;
+
+  // Function: each M1-M7 module = 25% (evaluator picks one module only)
+  const funcAvgInfo = "สำหรับ Function ให้แก้ไขที่น้ำหนักรวม";
 
   return (
     <div style={{ fontFamily: FONT }}>
 
       {/* ── Top bar ─── */}
       <div style={{
-        background: "#fff", borderRadius: 14, padding: "16px 20px", marginBottom: 20,
-        boxShadow: "0 2px 10px rgba(0,0,0,.06)", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap",
+        background: "#fff", borderRadius: 14, padding: "16px 20px", marginBottom: 16,
+        boxShadow: "0 2px 10px rgba(0,0,0,.06)",
       }}>
-        <div style={{ fontWeight: 800, fontSize: 16, color: "#1a1a1a", marginRight: 4 }}>
-          เปลี่ยนเกณฑ์และ Parameter
-        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+          <div style={{ fontWeight: 800, fontSize: 16, color: "#1a1a1a" }}>
+            เปลี่ยนเกณฑ์และ Parameter
+          </div>
 
-        {/* PRE/POST toggle */}
-        <div style={{ display: "flex", background: "#f0f4f0", borderRadius: 10, padding: 3, gap: 2 }}>
-          {[
-            { key: "pre_eval",  label: "PRE — ผู้ขายใหม่" },
-            { key: "post_eval", label: "POST — ประเมินประจำ" },
-          ].map(opt => (
-            <button
-              key={opt.key}
-              onClick={() => setEvalType(opt.key)}
+          {/* PRE / POST toggle */}
+          <div style={{ display: "flex", background: "#f0f4f0", borderRadius: 10, padding: 3, gap: 2 }}>
+            {[
+              { key: "pre_eval",  label: "Pre — ผู้ขายใหม่" },
+              { key: "post_eval", label: "Post — ประเมินประจำ" },
+            ].map(opt => (
+              <SegButton key={opt.key} active={evalType === opt.key} onClick={() => setEvalType(opt.key)}>
+                {opt.label}
+              </SegButton>
+            ))}
+          </div>
+
+          {/* Weight badge */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 5, padding: "5px 12px",
+            borderRadius: 8, background: weightOk ? "#e8f5e9" : "#fff8e1",
+            border: `1.5px solid ${weightOk ? "#a5d6a7" : "#ffe082"}`,
+            fontSize: 12, fontWeight: 700,
+            color: weightOk ? "#1b5e20" : "#e65100",
+          }}>
+            {weightOk ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}
+            รวมน้ำหนักทั้งหมด: {totalWeight.toFixed(1)} / 100
+          </div>
+
+          <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+            <button onClick={handleSeed} disabled={loading || seeding}
+              title="เพิ่มเฉพาะรายการที่ขาดหาย — ไม่ทับข้อมูลที่แก้ไขไว้"
               style={{
-                padding: "6px 16px", borderRadius: 8, border: "none", cursor: "pointer",
-                fontFamily: FONT, fontSize: 13, fontWeight: evalType === opt.key ? 700 : 400,
-                background: evalType === opt.key ? "#1b5e20" : "transparent",
-                color: evalType === opt.key ? "#fff" : "#555",
-                transition: "all .15s",
+                display: "flex", alignItems: "center", gap: 5,
+                background: "#e8f5e9", border: "1.5px solid #a5d6a7", borderRadius: 8,
+                padding: "7px 14px", cursor: (loading || seeding) ? "not-allowed" : "pointer",
+                fontSize: 12, fontFamily: FONT, color: "#1b5e20", fontWeight: 600,
               }}
-            >{opt.label}</button>
-          ))}
+            >
+              <Download size={13} style={{ animation: seeding ? "spin 1s linear infinite" : "none" }} />
+              เพิ่มรายการที่ขาดหาย
+            </button>
+            <button onClick={() => loadAll(evalType)} disabled={loading}
+              style={{
+                display: "flex", alignItems: "center", gap: 5,
+                background: "#fff", border: "1.5px solid #ddd", borderRadius: 8,
+                padding: "7px 14px", cursor: loading ? "not-allowed" : "pointer",
+                fontSize: 12, fontFamily: FONT, color: "#555",
+              }}
+            >
+              <RefreshCw size={13} style={{ animation: loading ? "spin 1s linear infinite" : "none" }} />
+              โหลดใหม่
+            </button>
+          </div>
         </div>
-
-        {/* Total weight badge */}
-        <div style={{
-          display: "flex", alignItems: "center", gap: 5, padding: "5px 12px",
-          borderRadius: 8, background: weightOk ? "#e8f5e9" : "#fff8e1",
-          border: `1.5px solid ${weightOk ? "#a5d6a7" : "#ffe082"}`,
-          fontSize: 12, fontWeight: 700,
-          color: weightOk ? "#1b5e20" : "#e65100",
-        }}>
-          {weightOk ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}
-          รวมน้ำหนักทั้งหมด: {totalWeight.toFixed(1)} / 100
-        </div>
-
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          <button
-            onClick={handleSeed}
-            disabled={loading || seeding}
-            title="นำเข้าข้อมูลจาก constants.js เพื่อเริ่มต้นใช้งาน"
-            style={{
-              display: "flex", alignItems: "center", gap: 5,
-              background: "#fff3e0", border: "1.5px solid #ffcc80", borderRadius: 8,
-              padding: "7px 14px", cursor: (loading || seeding) ? "not-allowed" : "pointer",
-              fontSize: 12, fontFamily: FONT, color: "#e65100", fontWeight: 600,
-            }}
-          >
-            <Download size={13} style={{ animation: seeding ? "spin 1s linear infinite" : "none" }} />
-            นำเข้าข้อมูลเริ่มต้น
-          </button>
-          <button
-            onClick={() => loadCriteria(evalType)}
-            disabled={loading}
-            style={{
-              display: "flex", alignItems: "center", gap: 5,
-              background: "#fff", border: "1.5px solid #ddd", borderRadius: 8,
-              padding: "7px 14px", cursor: loading ? "not-allowed" : "pointer",
-              fontSize: 12, fontFamily: FONT, color: "#555",
-            }}
-          >
-            <RefreshCw size={13} style={{ animation: loading ? "spin 1s linear infinite" : "none" }} />
-            โหลดใหม่
-          </button>
-        </div>
-      </div>
-
-      {/* ── Info tip ─── */}
-      <div style={{
-        background: "#e3f2fd", border: "1px solid #90caf9", borderRadius: 10,
-        padding: "10px 16px", marginBottom: 20, fontSize: 12.5, color: "#1565c0",
-        fontFamily: FONT,
-      }}>
-        <b>วิธีใช้:</b> คลิกที่ชื่อหัวข้อหรือน้ำหนักเพื่อแก้ไขทันที — กด Enter หรือคลิกออกเพื่อบันทึกอัตโนมัติ &nbsp;|&nbsp;
-        กด "แก้ระดับ" เพื่อแก้ไขข้อความระดับคะแนน 1–5
       </div>
 
       {/* ── Loading ─── */}
@@ -856,7 +1347,7 @@ export default function AdminCriteriaEditor({ authUser }) {
       )}
 
       {/* ── Empty state ─── */}
-      {!loading && sections.length === 0 && (
+      {allEmpty && (
         <div style={{
           textAlign: "center", padding: "60px 20px", background: "#fff",
           borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,.06)",
@@ -865,9 +1356,7 @@ export default function AdminCriteriaEditor({ authUser }) {
           <AlertCircle size={32} style={{ marginBottom: 10, opacity: .5 }} />
           <div style={{ fontWeight: 600 }}>ไม่พบข้อมูลเกณฑ์ในฐานข้อมูล</div>
           <div style={{ fontSize: 12, marginTop: 6, color: "#aaa" }}>กดปุ่มด้านล่างเพื่อนำเข้าข้อมูลจาก constants.js</div>
-          <button
-            onClick={handleSeed}
-            disabled={seeding}
+          <button onClick={handleSeed} disabled={seeding}
             style={{
               marginTop: 18, display: "inline-flex", alignItems: "center", gap: 7,
               background: "#e65100", color: "#fff", border: "none", borderRadius: 10,
@@ -876,30 +1365,113 @@ export default function AdminCriteriaEditor({ authUser }) {
             }}
           >
             <Download size={15} style={{ animation: seeding ? "spin 1s linear infinite" : "none" }} />
-            {seeding ? "กำลังนำเข้า…" : "นำเข้าข้อมูลเริ่มต้น"}
+            {seeding ? "กำลังนำเข้า…" : "เพิ่มรายการที่ขาดหาย"}
           </button>
         </div>
       )}
 
-      {/* ── Sections ─── */}
-      {!loading && sections.map((section, idx) => (
-        <SectionCard
-          key={section.id ?? idx}
-          section={section}
-          idx={idx}
-          evalType={evalType}
-          onUpdate={handleUpdate}
-          onOpenLevels={setLevelsModal}
-          saving={saving}
-          disabled={!!saving}
-        />
-      ))}
+      {/* ── Three Part Cards ─── */}
+      {!loading && !allEmpty && (
+        <>
+          {/* Core */}
+          <PartCard label="Core" weight={coreWeight}>
+            {coreSections.length === 0 && addingSection !== 'core'
+              ? <div style={{ textAlign: "center", padding: "30px", color: "#bbb", fontSize: 13 }}>ไม่พบข้อมูล Core — กด "เพิ่มรายการที่ขาดหาย"</div>
+              : coreSections.map((section, idx) => (
+                  <SectionCard key={section.id ?? idx} section={section} idx={idx}
+                    onUpdate={handleUpdate} onOpenLevels={setLevelsModal}
+                    saving={saving} disabled={!!saving}
+                    onDelete={handleDeleteSection}
+                  />
+                ))
+            }
+            {addingSection === 'core'
+              ? <AddSectionRow saving={savingSection} onCancel={() => setAddingSection(null)}
+                  onSave={({ nameTh, totalWeight: tw }) => handleAddSection(
+                    evalType === 'post_eval' ? 'POST-CAT' : 'PRE-CAT', nameTh, tw
+                  )}
+                />
+              : <button onClick={() => setAddingSection('core')} disabled={!!saving}
+                  style={{
+                    marginTop: 8, display: "flex", alignItems: "center", gap: 5,
+                    padding: "6px 14px", borderRadius: 8, border: "1.5px dashed #a5d6a7",
+                    background: "#f6faf6", color: "#1b5e20", fontFamily: FONT,
+                    fontSize: 12, fontWeight: 600, cursor: !!saving ? "not-allowed" : "pointer",
+                  }}>+ เพิ่มหัวข้อ</button>
+            }
+          </PartCard>
+
+          {/* Function */}
+          <PartCard label="Function"
+            weight={funcSections[0]?.totalWeight ?? FUNCTION_SECTION_WEIGHT}
+            weightLabel="น้ำหนักรวม:" avgInfo={funcAvgInfo} accent="#2e7d32"
+            onWeightSave={handleFuncWeightSave} disabled={!!saving || seeding}
+          >
+            {funcSections.length === 0 && !addingFuncMod
+              ? <div style={{ textAlign: "center", padding: "30px", color: "#bbb", fontSize: 13 }}>ไม่พบข้อมูล Function — กด "เพิ่มรายการที่ขาดหาย"</div>
+              : funcSections.map((section, idx) => (
+                  <SectionCard key={section.id ?? idx} section={section} idx={idx}
+                    onUpdate={handleUpdate} onOpenLevels={setLevelsModal}
+                    saving={saving} disabled={!!saving}
+                    effectiveEditable={true}
+                    hideWeights={true}
+                    onDelete={handleDeleteSection}
+                  />
+                ))
+            }
+            {addingFuncMod
+              ? <AddSectionRow saving={savingSection} onCancel={() => setAddingFuncMod(false)}
+                  onSave={({ nameTh, totalWeight: tw }) => handleAddSection(null, nameTh, tw, true)}
+                />
+              : <button onClick={() => setAddingFuncMod(true)} disabled={!!saving}
+                  style={{
+                    marginTop: 8, display: "flex", alignItems: "center", gap: 5,
+                    padding: "6px 14px", borderRadius: 8, border: "1.5px dashed #a5d6a7",
+                    background: "#f6faf6", color: "#2e7d32", fontFamily: FONT,
+                    fontSize: 12, fontWeight: 600, cursor: !!saving ? "not-allowed" : "pointer",
+                  }}>+ เพิ่มหัวข้อ</button>
+            }
+          </PartCard>
+
+          {/* ESG */}
+          <PartCard label="ESG" weight={esgWeight} accent="#1565c0">
+            {/* HO/Store | Factory filter */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <EsgFilterBtn active={esgFilter === "ho"}      onClick={() => setEsgFilter("ho")}>HO / Store</EsgFilterBtn>
+              <EsgFilterBtn active={esgFilter === "factory"} onClick={() => setEsgFilter("factory")}>Factory</EsgFilterBtn>
+            </div>
+            {esgSections.length === 0 && addingSection !== 'esg'
+              ? <div style={{ textAlign: "center", padding: "30px", color: "#bbb", fontSize: 13 }}>ไม่พบข้อมูล ESG — กด "เพิ่มรายการที่ขาดหาย"</div>
+              : esgSections.map((section, idx) => (
+                  <SectionCard key={section.id ?? idx} section={section} idx={idx}
+                    onUpdate={handleUpdate} onOpenLevels={setLevelsModal}
+                    saving={saving} disabled={!!saving}
+                    esgFilter={esgFilter}
+                    onDelete={handleDeleteSection}
+                  />
+                ))
+            }
+            {addingSection === 'esg'
+              ? <AddSectionRow saving={savingSection} onCancel={() => setAddingSection(null)}
+                  onSave={({ nameTh, totalWeight: tw }) => handleAddSection(
+                    evalType === 'post_eval' ? 'POST-ESG' : 'PRE-ESG', nameTh, tw
+                  )}
+                />
+              : <button onClick={() => setAddingSection('esg')} disabled={!!saving}
+                  style={{
+                    marginTop: 8, display: "flex", alignItems: "center", gap: 5,
+                    padding: "6px 14px", borderRadius: 8, border: "1.5px dashed #90caf9",
+                    background: "#f0f4ff", color: "#1565c0", fontFamily: FONT,
+                    fontSize: 12, fontWeight: 600, cursor: !!saving ? "not-allowed" : "pointer",
+                  }}>+ เพิ่มหัวข้อ</button>
+            }
+          </PartCard>
+        </>
+      )}
 
       {/* ── Levels modal ─── */}
       {levelsModal && (
-        <LevelsModal
-          item={levelsModal}
-          onClose={() => setLevelsModal(null)}
+        <LevelsModal item={levelsModal} onClose={() => setLevelsModal(null)}
           onSave={handleSaveLevels}
           saving={saving?.type === "levels" && saving?.id === levelsModal.id}
         />
@@ -908,7 +1480,7 @@ export default function AdminCriteriaEditor({ authUser }) {
       <Toast toast={toast} onClose={() => setToast(null)} />
 
       <style>{`
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes spin    { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         @keyframes slideUp { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
       `}</style>
     </div>

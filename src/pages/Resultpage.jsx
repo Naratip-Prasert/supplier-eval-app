@@ -6,7 +6,7 @@ import { useState, useRef, Fragment } from "react";
 import * as XLSX from "xlsx";
 import { Header, GreenButton, useModal } from "../components";
 import { isPostEvalType, GRADE_MAP, GRADE_GUIDE, getCriteria, getScoredCriteriaFrom } from "../constants";
-import { useCriteriaOverrides } from "../context/CriteriaContext";
+import { useCriteriaOverrides, useFunctionOverrides } from "../context/CriteriaContext";
 import { applyOverrides } from "../utils/criteriaOverlay";
 import { authFetch } from "../utils/api";
 import { Download, Printer, CheckCircle2, XCircle } from "lucide-react";
@@ -38,9 +38,13 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
   const gradeColor = GRADE_MAP[grade];
   const evalLabel  = isPostEvalType(formData.evalType) ? "Post" : "Pre";
   const overrideMap = useCriteriaOverrides(isPostEvalType(formData.evalType));
+  const funcMap     = useFunctionOverrides();
+  const funcOverrideItems = (funcMap && result.moduleCode && result.moduleCode !== "custom")
+    ? (funcMap[result.moduleCode] ?? null)
+    : null;
   const CRITERIA    = getScoredCriteriaFrom(
     applyOverrides(getCriteria(formData.evalType), overrideMap),
-    result.scores, result.moduleCode, result.customItems
+    result.scores, result.moduleCode, result.customItems, funcOverrideItems
   );
 
   const now     = new Date();

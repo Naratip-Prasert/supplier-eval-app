@@ -1705,14 +1705,17 @@ export function getScoredCriteria(evalType, scores, moduleCode, customItems) {
 
 // Returns CRITERIA with the ESG section's items narrowed down to just the
 // chosen facility type (`esgTarget`: "ho" | "factory" | null/undefined),
-// plus a Function-module section spliced in right before ESG. Unlike
-// getScoredCriteria (read-only display, which omits the Function section
-// entirely when nothing was ever chosen), this editing-path builder always
-// inserts a placeholder section even before a module is picked — same
-// reason the ESG section itself always exists with possibly-empty items:
-// Evalform needs a stable `si` slot to attach <ModuleSelector> to, and the
-// section's weight is 0 until chosen, naturally blocking submit via the
-// existing "totalItemWeight must equal 100%" gate.
+// Combined function section — all M1-M7 items in one flat section with
+// module dividers between groups. Used when no specific moduleCode is set
+// (the new "คะแนนร่วม" mode) and as fallback for backward-compat displays.
+export function buildCombinedFunctionSection() {
+  const items = Object.entries(FUNCTION_MODULES).flatMap(([key, mod]) => [
+    { divider: true, label: `${key.toUpperCase()} · ${mod.label.split(' · ').slice(1).join(' · ')}`, level: 1 },
+    ...mod.items,
+  ]);
+  return { section: "Part 2 · Function (คะแนนร่วม)", weight: FUNCTION_SECTION_WEIGHT, items };
+}
+
 export function getDisplayCriteria(evalType, esgTarget, moduleCode, customItems) {
   const criteria = getCriteria(evalType);
   const esgIdx   = findEsgSectionIndex(criteria);
@@ -1724,14 +1727,7 @@ export function getDisplayCriteria(evalType, esgTarget, moduleCode, customItems)
     return { ...section, items: chosen };
   });
   const functionSection = buildFunctionSection(moduleCode, customItems)
-    // weight stays at the full FUNCTION_SECTION_WEIGHT target even before a
-    // module is chosen — same as the ESG section's weight always being 15
-    // regardless of esgTarget. Only the *items* list is empty until chosen;
-    // zeroing the section weight here (instead of just the items) was the
-    // actual bug — initWeights bakes section weight in once at mount and
-    // nothing later re-raises it, so the 25% never appeared even after a
-    // module was picked.
-    ?? { section: "Part 2 · เลือกโมดูล (ยังไม่เลือก)", weight: FUNCTION_SECTION_WEIGHT, items: [] };
+    ?? { section: "Part 2 · Function", weight: FUNCTION_SECTION_WEIGHT, items: [] };
   return [...core.slice(0, esgIdx), functionSection, ...core.slice(esgIdx)];
 }
 
@@ -1748,7 +1744,7 @@ export function getGrade(score) {
 // Accept an already-overridden baseCriteria array instead of evalType,
 // so callers can apply DB overrides before calling these functions.
 
-export function getDisplayCriteriaFrom(baseCriteria, esgTarget, moduleCode, customItems) {
+export function getDisplayCriteriaFrom(baseCriteria, esgTarget, moduleCode, customItems, funcOverrideItems) {
   const esgIdx = findEsgSectionIndex(baseCriteria);
   if (esgIdx === -1) return baseCriteria;
   const core = baseCriteria.map((section, si) => {
@@ -1757,12 +1753,18 @@ export function getDisplayCriteriaFrom(baseCriteria, esgTarget, moduleCode, cust
     const chosen = esgTarget === "factory" ? groups.factory : esgTarget === "ho" ? groups.ho : [];
     return { ...section, items: chosen };
   });
-  const functionSection = buildFunctionSection(moduleCode, customItems)
-    ?? { section: "Part 2 · เลือกโมดูล (ยังไม่เลือก)", weight: FUNCTION_SECTION_WEIGHT, items: [] };
+  let functionSection;
+  if (funcOverrideItems && moduleCode && moduleCode !== "custom") {
+    const mod = FUNCTION_MODULES[moduleCode];
+    functionSection = { section: `Part 2 · ${mod?.label ?? moduleCode.toUpperCase()}`, weight: FUNCTION_SECTION_WEIGHT, items: funcOverrideItems };
+  } else {
+    functionSection = buildFunctionSection(moduleCode, customItems)
+      ?? { section: "Part 2 · Function", weight: FUNCTION_SECTION_WEIGHT, items: [] };
+  }
   return [...core.slice(0, esgIdx), functionSection, ...core.slice(esgIdx)];
 }
 
-export function getScoredCriteriaFrom(baseCriteria, scores, moduleCode, customItems) {
+export function getScoredCriteriaFrom(baseCriteria, scores, moduleCode, customItems, funcOverrideItems) {
   const esgIdx = findEsgSectionIndex(baseCriteria);
   if (esgIdx === -1 || !scores) return baseCriteria;
   const core = baseCriteria.map((section, si) => {
@@ -1776,7 +1778,14 @@ export function getScoredCriteriaFrom(baseCriteria, scores, moduleCode, customIt
       : [];
     return { ...section, items: chosen };
   });
-  const functionSection = buildFunctionSection(moduleCode, customItems);
-  if (!functionSection) return core;
+  let functionSection;
+  if (funcOverrideItems && moduleCode && moduleCode !== "custom") {
+    const mod = FUNCTION_MODULES[moduleCode];
+    functionSection = { section: `Part 2 · ${mod?.label ?? moduleCode.toUpperCase()}`, weight: FUNCTION_SECTION_WEIGHT, items: funcOverrideItems };
+  } else {
+    // Prefer module-specific section (old saved results); fall back to combined
+    functionSection = buildFunctionSection(moduleCode, customItems)
+      ?? buildCombinedFunctionSection();
+  }
   return [...core.slice(0, esgIdx), functionSection, ...core.slice(esgIdx)];
 }

@@ -427,6 +427,10 @@ pool.connect()
       console.log(`✅ Admin account created  →  ID: ADMIN-001  |  Password: ${tempPassword}  (save this now — it is not recoverable, there is no self-service reset)`);
     }
 
+    await client.query(`
+      ALTER TABLE evaluation_criteria ADD COLUMN IF NOT EXISTS level_values JSONB;
+    `).catch(err => console.warn('level_values column migration warning:', err.message));
+
     client.release();
     console.log('✅ PostgreSQL connected');
     app.listen(PORT, () => {

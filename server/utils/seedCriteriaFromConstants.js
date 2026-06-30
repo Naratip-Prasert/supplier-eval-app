@@ -4,7 +4,9 @@
 //  Mirrors src/constants.js (PRE_CRITERIA / POST_CRITERIA) into
 //  evaluation_categories / evaluation_criteria / score_level_descriptions
 //  so server-side scoring (routes/evaluations.js) has every criterion
-//  the frontend form actually renders. Idempotent — safe to re-run.
+//  the frontend form actually renders.
+//  Uses DO NOTHING — only inserts rows that don't exist yet, never
+//  overwrites admin customisations (name/weight/levels edited via UI).
 // ============================================================
 const fs = require('fs');
 const path = require('path');
@@ -29,11 +31,15 @@ async function seedSet(client, sections, criteriaSet, codePrefix) {
     const catResult = await client.query(
       `INSERT INTO evaluation_categories (code, name_th, name_en, total_weight, display_order)
        VALUES ($1, $2, NULL, $3, $4)
-       ON CONFLICT (code) DO UPDATE SET name_th = EXCLUDED.name_th, total_weight = EXCLUDED.total_weight
+       ON CONFLICT (code) DO NOTHING
        RETURNING id`,
       [catCode, sectionTitle, section.weight, sectionIndex]
     );
-    const categoryId = catResult.rows[0].id;
+    // Row already existed — fetch its id separately
+    const resolvedCat = catResult.rows[0]
+      ? catResult
+      : await client.query('SELECT id FROM evaluation_categories WHERE code = $1', [catCode]);
+    const categoryId = resolvedCat.rows[0].id;
 
     let displayOrder = 0;
     for (const item of section.items) {
@@ -44,16 +50,18 @@ async function seedSet(client, sections, criteriaSet, codePrefix) {
         `INSERT INTO evaluation_criteria
            (category_id, code, name_th, name_en, detail_th, default_weight, display_order, is_active, criteria_set)
          VALUES ($1, $2, $3, NULL, $7, $4, $5, TRUE, $6)
-         ON CONFLICT (criteria_set, code) DO UPDATE SET
-           category_id = EXCLUDED.category_id,
-           name_th = EXCLUDED.name_th,
-           detail_th = EXCLUDED.detail_th,
-           default_weight = EXCLUDED.default_weight,
-           display_order = EXCLUDED.display_order
+         ON CONFLICT (criteria_set, code) DO NOTHING
          RETURNING id`,
         [categoryId, item.no, item.title.slice(0, 400), item.weight, displayOrder, criteriaSet, item.title]
       );
-      const criterionId = critResult.rows[0].id;
+      // Item already existed — fetch its id to insert any missing level descriptions
+      const resolvedCrit = critResult.rows[0]
+        ? critResult
+        : await client.query(
+            'SELECT id FROM evaluation_criteria WHERE criteria_set = $1 AND code = $2',
+            [criteriaSet, item.no]
+          );
+      const criterionId = resolvedCrit.rows[0].id;
 
       const levels = item.levels || [];
       const levelValues = item.levelValues || levels.map((_, i) => i + 1);
@@ -61,7 +69,7 @@ async function seedSet(client, sections, criteriaSet, codePrefix) {
         await client.query(
           `INSERT INTO score_level_descriptions (criterion_id, level, description)
            VALUES ($1, $2, $3)
-           ON CONFLICT (criterion_id, level) DO UPDATE SET description = EXCLUDED.description`,
+           ON CONFLICT (criterion_id, level) DO NOTHING`,
           [criterionId, levelValues[i], levels[i]]
         );
       }

@@ -5,7 +5,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Header, GreenButton, useModal } from "../components";
 import { getCriteria, isPostEvalType, LEVEL_COLORS, GRADE_MAP, GRADE_GUIDE, getGrade, findEsgSectionIndex, splitEsgGroups, getDisplayCriteriaFrom, FUNCTION_MODULES, FUNCTION_SECTION_WEIGHT } from "../constants";
-import { useCriteriaOverrides } from "../context/CriteriaContext";
+import { useCriteriaOverrides, useFunctionOverrides } from "../context/CriteriaContext";
 import { applyOverrides } from "../utils/criteriaOverlay";
 import { AlertTriangle, FileText, Plus, Trash2 } from "lucide-react";
 
@@ -48,6 +48,7 @@ function initWeights(criteria) {
 
 export default function EvalForm({ formData, savedState, user, profilePic, onBack, onDone }) {
   const overrideMap    = useCriteriaOverrides(isPostEvalType(formData.evalType));
+  const funcMap        = useFunctionOverrides();
   const RAW_CRITERIA   = applyOverrides(getCriteria(formData.evalType), overrideMap);
   const esgSectionIndex = findEsgSectionIndex(RAW_CRITERIA);
   const esgGroups       = esgSectionIndex !== -1 ? splitEsgGroups(RAW_CRITERIA[esgSectionIndex].items) : null;
@@ -81,24 +82,30 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
   const [moduleCode, setModuleCode] = useState(() => savedState?.moduleCode ?? null);
   const [customItems, setCustomItems] = useState(() => savedState?.customItems ?? []);
 
-  const CRITERIA = getDisplayCriteriaFrom(RAW_CRITERIA, esgTarget, moduleCode, customItems);
+  const funcOverrideItems = (funcMap && moduleCode && moduleCode !== "custom")
+    ? (funcMap[moduleCode] ?? null)
+    : null;
+  const CRITERIA = getDisplayCriteriaFrom(RAW_CRITERIA, esgTarget, moduleCode, customItems, funcOverrideItems);
 
   const [ws, setWs] = useState(() => savedState?.ws ?? initWeights(CRITERIA));
   const sectionWeights = ws.sections;
   const itemWeights    = ws.items;
 
-  // Re-init weights whenever overrideMap loads or reloads (e.g. admin saves changes).
+  // Re-init weights whenever overrideMap or funcMap loads/reloads (e.g. admin saves changes).
   // Skipped if: user has already adjusted weights manually, or resuming a saved form.
   const userAdjustedWeights = useRef(false);
   useEffect(() => {
     if (overrideMap === null || savedState?.ws || userAdjustedWeights.current) return;
+    const resolvedFuncItems = (funcMap && moduleCode && moduleCode !== "custom")
+      ? (funcMap[moduleCode] ?? null)
+      : null;
     const updatedCriteria = getDisplayCriteriaFrom(
       applyOverrides(getCriteria(formData.evalType), overrideMap),
-      esgTarget, moduleCode, customItems
+      esgTarget, moduleCode, customItems, resolvedFuncItems
     );
     setWs(initWeights(updatedCriteria));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overrideMap]);
+  }, [overrideMap, funcMap]);
 
   // เมื่อเลือก/เปลี่ยน HO ↔ Factory: ล้างคะแนน/หมายเหตุ/น้ำหนักของกลุ่มที่ไม่ได้เลือก
   // ทิ้ง (ไม่ใช่แค่ซ่อน) ไม่งั้นค่าที่เหลือค้างจะหลุดไปรวมกับ payload ที่ส่ง backend

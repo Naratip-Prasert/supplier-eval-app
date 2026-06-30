@@ -28,6 +28,7 @@ export function buildOverrideMap(dbSections) {
         nameTh:        it.nameTh,
         defaultWeight: it.defaultWeight,
         levels:        Array.isArray(it.levels) && it.levels.length > 0 ? it.levels : null,
+        levelValues:   Array.isArray(it.levelValues) && it.levelValues.length > 0 ? it.levelValues : null,
       };
     });
     map[codeNum] = {
@@ -37,6 +38,31 @@ export function buildOverrideMap(dbSections) {
       items:         itemMap,
       inactiveCodes,
     };
+  });
+  return map;
+}
+
+// Build a lookup map for function module overrides from the DB response.
+// Key = module key lowercase (e.g. "m1", "m2").
+// Value = patched items array ready to replace FUNCTION_MODULES[key].items.
+export function buildFunctionOverrideMap(dbSections) {
+  const map = {};
+  if (!Array.isArray(dbSections)) return map;
+  dbSections.forEach(sec => {
+    const m = sec.code?.match(/^(M\d+)-CAT/i);
+    if (!m) return;
+    const key = m[1].toLowerCase(); // "m1", "m2", …
+    map[key] = (sec.items ?? [])
+      .filter(it => it.isActive !== false)
+      .map(it => ({
+        no:          it.code,
+        title:       it.nameTh        ?? it.code,
+        weight:      it.defaultWeight ?? 0,
+        levels:      Array.isArray(it.levels) ? it.levels : [],
+        levelValues: Array.isArray(it.levelValues) && it.levelValues.length > 0
+          ? it.levelValues
+          : null,
+      }));
   });
   return map;
 }
@@ -70,9 +96,10 @@ export function applyOverrides(baseCriteria, overrideMap) {
         if (!ovItem) return item;
         return {
           ...item,
-          title:  ovItem.nameTh        ?? item.title,
-          weight: ovItem.defaultWeight ?? item.weight,
-          levels: ovItem.levels        ?? item.levels,
+          title:       ovItem.nameTh        ?? item.title,
+          weight:      ovItem.defaultWeight ?? item.weight,
+          levels:      ovItem.levels        ?? item.levels,
+          levelValues: ovItem.levelValues   ?? item.levelValues,
         };
       });
 
@@ -80,10 +107,11 @@ export function applyOverrides(baseCriteria, overrideMap) {
     const extraItems = Object.entries(ov.items)
       .filter(([code]) => !matchedCodes.has(code))
       .map(([code, ovItem]) => ({
-        no:     code,
-        title:  ovItem.nameTh        ?? code,
-        weight: ovItem.defaultWeight ?? 0,
-        levels: ovItem.levels        ?? [],
+        no:          code,
+        title:       ovItem.nameTh        ?? code,
+        weight:      ovItem.defaultWeight ?? 0,
+        levels:      ovItem.levels        ?? [],
+        levelValues: ovItem.levelValues   ?? undefined,
       }));
 
     return {
