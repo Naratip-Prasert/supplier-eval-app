@@ -486,7 +486,7 @@ function ItemRow({ item, onUpdate, onOpenLevels, saving, disabled, effectiveWeig
       )}
       <td style={{ padding: "6px 10px", textAlign: "center", width: 90 }}>
         <span style={{ fontSize: 11, color: "#aaa" }}>
-          {item.levels.length} ระดับ
+          {item.levelValues?.length > 0 ? item.levelValues.length : item.levels.length} ระดับ
           {item.levelValues?.length > 0 && item.levelValues?.length < 5
             ? <span style={{ marginLeft: 4, color: "#1b5e20" }}>[{item.levelValues.join(",")}]</span>
             : null}
@@ -541,7 +541,7 @@ const TH = {
 };
 
 // ── SectionCard ───────────────────────────────────────────────
-function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, esgFilter, hideWeights, effectiveEditable, onDelete }) {
+function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, esgFilter, hideWeights, effectiveEditable, onDelete, isBuffer }) {
   const [expanded,      setExpanded]      = useState(false);
   const [showAddRow,    setShowAddRow]    = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -699,7 +699,7 @@ function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, e
 }
 
 // ── PartCard ──────────────────────────────────────────────────
-function PartCard({ label, weight, weightLabel, avgInfo, accent = "#1b5e20", onWeightSave, disabled, children }) {
+function PartCard({ label, weight, weightLabel, avgInfo, accent = "#1b5e20", onWeightSave, disabled, warning, warningMsg, children }) {
   return (
     <div style={{
       background: "#fff", borderRadius: 14,
@@ -718,6 +718,16 @@ function PartCard({ label, weight, weightLabel, avgInfo, accent = "#1b5e20", onW
             <span style={{ fontSize: 12, color: "#888", fontFamily: "Sarabun, sans-serif" }}>
               {avgInfo}
             </span>
+          )}
+          {warning && (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 4,
+              background: "#fff3e0", border: "1.5px solid #ffb74d",
+              borderRadius: 6, padding: "2px 8px", fontSize: 11, color: "#e65100",
+            }}>
+              <AlertCircle size={11} />
+              {warningMsg ?? "ผลรวมหัวข้อเพี้ยน — กดแก้น้ำหนักรวม"}
+            </div>
           )}
           {weight != null && (
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -783,7 +793,13 @@ export default function AdminCriteriaEditor({ authUser }) {
   const [addingSection,   setAddingSection]   = useState(null); // null | "core" | "esg"
   const [addingFuncMod,   setAddingFuncMod]   = useState(false); // false | true
   const [savingSection,   setSavingSection]   = useState(false);
-  const esgNormalized = useRef({ ho: false, factory: false });
+  const [coreTarget,      setCoreTarget]      = useState(null); // authorized Core total
+  const esgNormalized  = useRef({ ho: false, factory: false });
+  const coreNormalized = useRef(false);
+  // Ground-truth mirror of what's actually in DB for coreEsgSections.
+  // ALL buffer/scale calculations use this instead of React state, so unsaved
+  // cat-weight cascades never corrupt handleCoreWeightSave or cross-section edits.
+  const savedSections = useRef(null);
   const reloadContext = useCriteriaReload();
 
   const showToast = useCallback((msg, type = "success") => {
@@ -793,6 +809,9 @@ export default function AdminCriteriaEditor({ authUser }) {
 
   const loadAll = useCallback(async (et) => {
     setLoading(true);
+    esgNormalized.current  = { ho: false, factory: false };
+    coreNormalized.current = false;
+    savedSections.current  = null;
     try {
       const [r1, r2] = await Promise.all([
         authFetch(`/api/criteria?evalType=${et}`),
@@ -802,6 +821,9 @@ export default function AdminCriteriaEditor({ authUser }) {
       const [d1, d2] = await Promise.all([r1.json(), r2.json()]);
       setCoreEsgSections(d1);
       setFuncSections(d2);
+      savedSections.current = d1;
+      const isEsg = s => !!(s.nameTh?.includes('ESG') || s.code?.match(/ESG/i));
+      setCoreTarget(d1.filter(s => !isEsg(s)).reduce((s, c) => s + (parseFloat(c.totalWeight) || 0), 0));
     } catch {
       showToast("โหลดข้อมูลไม่สำเร็จ — ตรวจสอบว่า server กำลังทำงานอยู่", "error");
     } finally {
@@ -876,7 +898,10 @@ export default function AdminCriteriaEditor({ authUser }) {
       // Normalize numeric fields (pg returns numerics as strings)
       const newSec = { ...raw, totalWeight: parseFloat(raw.totalWeight) || 0, displayOrder: Number(raw.displayOrder) || 0, items: [] };
       if (isFunc) setFuncSections(prev => [...prev, newSec]);
-      else setCoreEsgSections(prev => [...prev, newSec]);
+      else {
+        setCoreEsgSections(prev => [...prev, newSec]);
+        savedSections.current = [...(savedSections.current ?? []), newSec];
+      }
       setAddingSection(null);
       setAddingFuncMod(false);
       showToast('เพิ่มหัวข้อสำเร็จ');
@@ -896,6 +921,7 @@ export default function AdminCriteriaEditor({ authUser }) {
       if (!r.ok) throw new Error((await r.json()).message ?? '');
       setCoreEsgSections(prev => prev.filter(s => s.id !== id));
       setFuncSections(prev => prev.filter(s => s.id !== id));
+      if (savedSections.current) savedSections.current = savedSections.current.filter(s => s.id !== id);
       showToast('ลบหัวข้อสำเร็จ');
       reloadContext();
     } catch (err) {
@@ -905,54 +931,115 @@ export default function AdminCriteriaEditor({ authUser }) {
     }
   }, [showToast, reloadContext]);
 
-  // ── Buffer helpers (same pattern as Evalform) ─────────────────
+  // ── Buffer helpers ─────────────────────────────────────────────
+  // Returns { adjustments: {id: newWeight, ...} } or { tooLarge: true }
+  // Rule: only items AFTER the edited one (index > editedIdx) buffer the change,
+  // cascading from the last item backward. Editing the last item always fails
+  // (nothing after it) → tooLarge → toast error.
   const getCatBuffer = useCallback((pool, editedId, newVal) => {
-    const poolTotal = pool.reduce((s, c) => s + (c.totalWeight ?? 0), 0);
-    const last = pool[pool.length - 1];
-    const bufId = (last?.id === editedId && pool.length > 1) ? pool[pool.length - 2].id : last?.id;
-    if (!bufId || bufId === editedId) return null;
+    const n = pool.length;
+    if (n < 2) return { adjustments: {} };
+    const editedIdx = pool.findIndex(s => s.id === editedId);
+    if (editedIdx === -1) return { adjustments: {} };
     const clamped = Math.max(0, Number(newVal) || 0);
-    const othersSum = pool
-      .filter(s => s.id !== bufId)
-      .reduce((s, sec) => s + (sec.id === editedId ? clamped : (sec.totalWeight ?? 0)), 0);
-    return { bufId, bufVal: Math.max(0, r2adm(poolTotal - othersSum)) };
+    const delta = r2adm(clamped - (pool[editedIdx].totalWeight ?? 0));
+    if (Math.abs(delta) < 0.005) return { adjustments: {} };
+
+    // Candidates: items after the edited one, from last toward editedIdx
+    const candidates = [];
+    for (let i = n - 1; i > editedIdx; i--) candidates.push(pool[i]);
+
+    const adjustments = {};
+    let remaining = delta;
+    for (const sec of candidates) {
+      if (Math.abs(remaining) < 0.005) break;
+      const cur = sec.totalWeight ?? 0;
+      if (remaining > 0) {
+        const absorb = Math.min(cur, remaining);
+        if (absorb > 0.005) {
+          adjustments[sec.id] = r2adm(cur - absorb);
+          remaining = r2adm(remaining - absorb);
+        }
+      } else {
+        adjustments[sec.id] = r2adm(cur + Math.abs(remaining));
+        remaining = 0;
+      }
+    }
+
+    if (remaining > 0.005) return { tooLarge: true };
+    return { adjustments };
   }, []);
 
+  // Same rule for items within a section
   const getItemBuffer = useCallback((sec, editedId, newVal) => {
-    const realItems = sec.items.filter(it => it.isActive !== false);
-    if (realItems.length <= 1) return null;
-    const secTotal = sec.totalWeight ?? 0;
-    const last = realItems[realItems.length - 1];
-    const bufItem = last?.id === editedId ? realItems[realItems.length - 2] : last;
-    if (!bufItem || bufItem.id === editedId) return null;
+    const items = sec.items.filter(it => it.isActive !== false);
+    const n = items.length;
+    if (n < 2) return { adjustments: {} };
+    const editedIdx = items.findIndex(it => it.id === editedId);
+    if (editedIdx === -1) return { adjustments: {} };
     const clamped = Math.max(0, Number(newVal) || 0);
-    const othersSum = realItems
-      .filter(it => it.id !== bufItem.id)
-      .reduce((s, it) => s + (it.id === editedId ? clamped : (it.defaultWeight ?? 0)), 0);
-    return { bufItem, bufVal: Math.max(0, r2adm(secTotal - othersSum)) };
+    const delta = r2adm(clamped - (items[editedIdx].defaultWeight ?? 0));
+    if (Math.abs(delta) < 0.005) return { adjustments: {} };
+
+    // Candidates: items after the edited one, from last toward editedIdx
+    const candidates = [];
+    for (let i = n - 1; i > editedIdx; i--) candidates.push(items[i]);
+
+    const adjustments = {};
+    let remaining = delta;
+    for (const it of candidates) {
+      if (Math.abs(remaining) < 0.005) break;
+      const cur = it.defaultWeight ?? 0;
+      if (remaining > 0) {
+        const absorb = Math.min(cur, remaining);
+        if (absorb > 0.005) {
+          adjustments[it.id] = r2adm(cur - absorb);
+          remaining = r2adm(remaining - absorb);
+        }
+      } else {
+        adjustments[it.id] = r2adm(cur + Math.abs(remaining));
+        remaining = 0;
+      }
+    }
+
+    if (remaining > 0.005) return { tooLarge: true };
+    return { adjustments };
   }, []);
 
-  // Scale items proportionally to match a new section totalWeight (same logic as Evalform's scaleItems)
-  const scaleItemsToTotal = useCallback((secItems, newTotal) => {
+  // Scale items to match newTotal.
+  // If items have existing weights → proportional (preserves user's custom ratios).
+  // If all items are 0 → equal: integer first → equal 2-dp → buffer last.
+  // forceEqual=true → always distribute equally (used for normalize-esg)
+  // forceEqual=false → proportional when items have weights (used for save-cat, handleCoreWeightSave)
+  const scaleItemsToTotal = useCallback((secItems, newTotal, forceEqual = false) => {
     const real = secItems.filter(it => it.isActive !== false);
     if (real.length === 0) return {};
+    const n = real.length;
     const oldSum = real.reduce((s, it) => s + (it.defaultWeight ?? 0), 0);
     const result = {};
-    if (oldSum > 0) {
+    const equalDist = () => {
+      const each = r2adm(newTotal / n);
+      if (each === Math.round(each)) {
+        real.forEach(it => { result[it.id] = each; });
+      } else {
+        let rem = newTotal;
+        real.forEach((it, i) => {
+          if (i === n - 1) { result[it.id] = Math.max(0, r2adm(rem)); }
+          else { result[it.id] = each; rem -= each; }
+        });
+      }
+    };
+    if (!forceEqual && oldSum > 0) {
+      // Proportional — preserves custom item weight ratios
       let rem = newTotal;
       real.forEach((it, i) => {
-        if (i === real.length - 1) { result[it.id] = Math.max(0, r2adm(rem)); }
+        if (i === n - 1) { result[it.id] = Math.max(0, r2adm(rem)); }
         else { const w = r2adm((it.defaultWeight / oldSum) * newTotal); result[it.id] = w; rem -= w; }
       });
     } else {
-      const each = r2adm(newTotal / real.length);
-      let rem = newTotal;
-      real.forEach((it, i) => {
-        if (i === real.length - 1) { result[it.id] = Math.max(0, r2adm(rem)); }
-        else { result[it.id] = each; rem -= each; }
-      });
+      equalDist();
     }
-    return result; // { itemId: newWeight }
+    return result;
   }, []);
 
   // ── handleUpdate (unified across both datasets) ──────────────
@@ -975,23 +1062,30 @@ export default function AdminCriteriaEditor({ authUser }) {
         const isEsg = isEsgSec(current ?? {});
         const pool = coreEsgSections.filter(s => isEsgSec(s) === isEsg);
         const clamped = Math.max(0, Number(payload.totalWeight) || 0);
-        const buf = getCatBuffer(pool, id, clamped);
+        const oldSum = pool.reduce((s, c) => s + (c.totalWeight ?? 0), 0);
+        if (oldSum < 0.005) {
+          // First time: all sections in pool start at 0 → set all equal to clamped
+          setSecs(prev => prev.map(s => {
+            if (!pool.some(p => p.id === s.id)) return s;
+            const scales = scaleItemsToTotal(s.items, clamped);
+            return { ...s, totalWeight: clamped, items: s.items.map(it => scales[it.id] !== undefined ? { ...it, defaultWeight: scales[it.id] } : it) };
+          }));
+          return;
+        }
+        const bufResult = getCatBuffer(pool, id, clamped);
+        if (bufResult.tooLarge) {
+          showToast("น้ำหนักเกิน — แก้ตัวก่อนหน้าก่อน", "error");
+          return;
+        }
         setSecs(prev => prev.map(s => {
           if (s.id === id) {
             const scales = scaleItemsToTotal(s.items, clamped);
-            return {
-              ...s,
-              totalWeight: clamped,
-              items: s.items.map(it => scales[it.id] !== undefined ? { ...it, defaultWeight: scales[it.id] } : it),
-            };
+            return { ...s, totalWeight: clamped, items: s.items.map(it => scales[it.id] !== undefined ? { ...it, defaultWeight: scales[it.id] } : it) };
           }
-          if (buf && s.id === buf.bufId) {
-            const scales = scaleItemsToTotal(s.items, buf.bufVal);
-            return {
-              ...s,
-              totalWeight: buf.bufVal,
-              items: s.items.map(it => scales[it.id] !== undefined ? { ...it, defaultWeight: scales[it.id] } : it),
-            };
+          const adjW = bufResult.adjustments?.[s.id];
+          if (adjW !== undefined) {
+            const scales = scaleItemsToTotal(s.items, adjW);
+            return { ...s, totalWeight: adjW, items: s.items.map(it => scales[it.id] !== undefined ? { ...it, defaultWeight: scales[it.id] } : it) };
           }
           return s;
         }));
@@ -1023,15 +1117,27 @@ export default function AdminCriteriaEditor({ authUser }) {
         })));
         return;
       }
+      // Use saved (DB) state for the section, not the live React state
+      const snapSec = (savedSections.current ?? coreEsgSections).find(s => s.items?.some(it => it.id === id)) ?? sec;
       // For ESG sections: buffer only within the currently-filtered subset (HO or Factory)
-      const esgPool = (!inFunc && isEsgSec(sec))
-        ? sec.items.filter(it => {
+      const esgPool = (!inFunc && isEsgSec(snapSec))
+        ? snapSec.items.filter(it => {
             if (it.isActive === false) return false;
             if (esgFilter === "ho") return !it.code?.startsWith("F");
             if (esgFilter === "factory") return it.code?.startsWith("F");
             return true;
           })
         : null;
+      const activeItems = esgPool ?? snapSec.items.filter(it => it.isActive !== false);
+      const itemOldSum = activeItems.reduce((s, it) => s + (it.defaultWeight ?? 0), 0);
+      const itemClamped = Math.max(0, Number(payload.defaultWeight) || 0);
+      if (itemOldSum < 0.005) {
+        // First time: all items start at 0 → set all equal to clamped
+        setSecs(prev => prev.map(s => ({
+          ...s, items: s.items.map(it => activeItems.some(x => x.id === it.id) ? { ...it, defaultWeight: itemClamped } : it),
+        })));
+        return;
+      }
       const bufSec = esgPool
         ? { ...sec, items: esgPool, totalWeight: sec.totalWeight }
         : sec;
@@ -1073,6 +1179,7 @@ export default function AdminCriteriaEditor({ authUser }) {
         setSecs(prev => prev.map(s => ({
           ...s, items: s.items.filter(it => it.id !== id),
         })));
+        esgNormalized.current = { ho: false, factory: false };
         showToast('ลบรายการสำเร็จ');
         reloadContext();
       } catch {
@@ -1101,7 +1208,7 @@ export default function AdminCriteriaEditor({ authUser }) {
           const pool = coreEsgSections.filter(s => isEsgSec(s) === isEsg);
           const buf = getCatBuffer(pool, id, clamped);
 
-          // Save items in main section (scaled to new weight)
+          // Save items in main section (proportional — preserves custom ratios)
           const mainScales = scaleItemsToTotal(current?.items ?? [], clamped);
           await Promise.all(Object.entries(mainScales).map(([itemId, w]) => {
             const it = current?.items?.find(x => x.id === Number(itemId));
@@ -1150,7 +1257,7 @@ export default function AdminCriteriaEditor({ authUser }) {
         if (esgFilter === "factory") return  it.code?.startsWith("F");
         return true;
       });
-      const scales = scaleItemsToTotal(pool, sec.totalWeight);
+      const scales = scaleItemsToTotal(pool, sec.totalWeight, true); // force equal
       setSecs(prev => prev.map(s => s.id !== id ? s : {
         ...s,
         items: s.items.map(it => scales[it.id] !== undefined ? { ...it, defaultWeight: scales[it.id] } : it),
@@ -1172,6 +1279,31 @@ export default function AdminCriteriaEditor({ authUser }) {
       } finally {
         setSaving(null);
       }
+      return;
+    }
+
+    // Normalize all active items in a section to equal distribution (silent, no toast)
+    if (action === "normalize-sec") {
+      const allSecs = inFunc ? funcSections : coreEsgSections;
+      const sec = allSecs.find(s => s.id === id);
+      if (!sec) return;
+      const pool = sec.items.filter(it => it.isActive !== false);
+      const scales = scaleItemsToTotal(pool, sec.totalWeight, true);
+      setSecs(prev => prev.map(s => s.id !== id ? s : {
+        ...s,
+        items: s.items.map(it => scales[it.id] !== undefined ? { ...it, defaultWeight: scales[it.id] } : it),
+      }));
+      try {
+        await Promise.all(Object.entries(scales).map(([itemId, w]) => {
+          const it = sec.items.find(x => x.id === Number(itemId));
+          if (!it) return Promise.resolve();
+          return authFetch(`/api/criteria/items/${itemId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ nameTh: it.nameTh, defaultWeight: w }),
+          });
+        }));
+        reloadContext();
+      } catch { /* silent — background cleanup */ }
       return;
     }
 
@@ -1240,6 +1372,24 @@ export default function AdminCriteriaEditor({ authUser }) {
     if (needsNorm) esgSecs.forEach(sec => handleUpdate("normalize-esg", sec.id, {}));
   }, [esgFilter, coreEsgSections, handleUpdate]);
 
+  // Auto-normalize CORE item weights on load (fixes rounding artifacts like [5.01,5.01,4.98])
+  // Only normalizes when items are "approximately equal" (max−min < 0.5) but not yet exact
+  useEffect(() => {
+    if (coreNormalized.current) return;
+    if (coreSections.length === 0) return;
+    coreNormalized.current = true;
+    coreSections.forEach(sec => {
+      const real = sec.items.filter(it => it.isActive !== false);
+      if (real.length < 2) return;
+      const weights = real.map(it => it.defaultWeight ?? 0);
+      const max = Math.max(...weights);
+      const min = Math.min(...weights);
+      if (max - min < 0.005) return; // already clean
+      if (max - min >= 0.05) return; // custom weights — don't overwrite
+      handleUpdate("normalize-sec", sec.id, {});
+    });
+  }, [coreSections, handleUpdate]);
+
   // ── Save levels + levelValues ────────────────────────────────
   const handleSaveLevels = useCallback(async (item, levels, levelValues) => {
     setSaving({ type: "levels", id: item.id });
@@ -1264,10 +1414,61 @@ export default function AdminCriteriaEditor({ authUser }) {
     }
   }, [showToast, reloadContext]);
 
-  const coreWeight  = coreSections.reduce((s, c) => s + (c.totalWeight ?? 0), 0);
-  const esgWeight   = esgSections.reduce((s, c) => s + (c.totalWeight ?? 0), 0);
-  const funcWeight  = funcSections[0]?.totalWeight ?? FUNCTION_SECTION_WEIGHT;
-  const totalWeight = coreWeight + funcWeight + esgWeight;
+  // ── Core total weight: scale all Core sections proportionally (preserves ratios) ──
+  const handleCoreWeightSave = useCallback(async (newTotal) => {
+    const clamped = Math.max(0, Number(newTotal) || 0);
+    const isESGSec = s => !!(s.nameTh?.includes('ESG') || s.code?.match(/ESG/i));
+    const savedCore = (savedSections.current ?? coreEsgSections).filter(s => !isESGSec(s));
+    const n = savedCore.length || 1;
+    const newWeights = {};
+    // Always equal distribution across all CORE sections
+    const each = r2adm(clamped / n);
+    let rem = clamped;
+    savedCore.forEach((sec, i) => {
+      if (i === n - 1) { newWeights[sec.id] = Math.max(0, r2adm(rem)); }
+      else { newWeights[sec.id] = each; rem -= each; }
+    });
+    const syncCore = prev => prev.map(s => {
+      const newW = newWeights[s.id];
+      if (newW === undefined) return s;
+      const scales = scaleItemsToTotal(s.items, newW);
+      return { ...s, totalWeight: newW, items: s.items.map(it => scales[it.id] !== undefined ? { ...it, defaultWeight: scales[it.id] } : it) };
+    });
+    setCoreEsgSections(syncCore);
+    setSaving({ type: "core-total" });
+    try {
+      await Promise.all(savedCore.map(async sec => {
+        const newW = newWeights[sec.id];
+        if (newW === undefined) return;
+        const cr = await authFetch(`/api/criteria/categories/${sec.id}`, {
+          method: "PATCH", body: JSON.stringify({ nameTh: sec.nameTh, totalWeight: newW }),
+        });
+        if (!cr.ok) throw new Error(`PATCH category ${sec.id} failed`);
+        const scales = scaleItemsToTotal(sec.items, newW);
+        await Promise.all(Object.entries(scales).map(([itemId, w]) => {
+          const it = sec.items.find(x => x.id === Number(itemId));
+          if (!it) return Promise.resolve();
+          return authFetch(`/api/criteria/items/${itemId}`, {
+            method: "PATCH", body: JSON.stringify({ nameTh: it.nameTh, defaultWeight: w }),
+          });
+        }));
+      }));
+      savedSections.current = syncCore(savedSections.current ?? coreEsgSections);
+      setCoreTarget(clamped);
+      showToast("บันทึกน้ำหนัก Core สำเร็จ");
+      reloadContext();
+    } catch {
+      showToast("บันทึกน้ำหนัก Core ไม่สำเร็จ", "error");
+      loadAll(evalType);
+    } finally {
+      setSaving(null);
+    }
+  }, [coreEsgSections, scaleItemsToTotal, showToast, reloadContext, loadAll, evalType, setCoreTarget]);
+
+  const coreWeight  = r2adm(coreSections.reduce((s, c) => s + (c.totalWeight ?? 0), 0));
+  const esgWeight   = r2adm(esgSections.reduce((s, c) => s + (c.totalWeight ?? 0), 0));
+  const funcWeight  = r2adm(funcSections[0]?.totalWeight ?? FUNCTION_SECTION_WEIGHT);
+  const totalWeight = r2adm(coreWeight + funcWeight + esgWeight);
   const weightOk    = Math.abs(totalWeight - 100) < 0.1;
   const allEmpty    = !loading && coreEsgSections.length === 0 && funcSections.length === 0;
 
@@ -1378,7 +1579,9 @@ export default function AdminCriteriaEditor({ authUser }) {
       {!loading && !allEmpty && (
         <>
           {/* Core */}
-          <PartCard label="Core" weight={coreWeight}>
+          <PartCard label="Core" weight={coreWeight} onWeightSave={handleCoreWeightSave} disabled={!!saving}
+            warning={coreTarget !== null && Math.abs(coreWeight - coreTarget) > 0.05}
+            warningMsg={coreTarget !== null ? `น้ำหนักรวม ${coreWeight} เกินเป้า ${coreTarget} — กดแก้น้ำหนักรวม` : undefined}>
             {coreSections.length === 0 && addingSection !== 'core'
               ? <div style={{ textAlign: "center", padding: "30px", color: "#bbb", fontSize: 13 }}>ไม่พบข้อมูล Core — กด "เพิ่มรายการที่ขาดหาย"</div>
               : coreSections.map((section, idx) => (
