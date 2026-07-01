@@ -811,26 +811,6 @@ export default function AdminCriteriaEditor({ authUser }) {
 
   useEffect(() => { loadAll(evalType); esgNormalized.current = { ho: false, factory: false }; }, [evalType, loadAll]);
 
-  // Auto-normalize ESG item weights when filter or data changes
-  useEffect(() => {
-    if (esgNormalized.current[esgFilter]) return;
-    const isEsg = s => !!(s.nameTh?.includes('ESG') || s.code?.match(/ESG/i));
-    const esgSecs = coreEsgSections.filter(isEsg);
-    if (!esgSecs.length) return;
-    let needsNorm = false;
-    esgSecs.forEach(sec => {
-      const pool = sec.items.filter(it => {
-        if (it.isActive === false) return false;
-        return esgFilter === "factory" ? it.code?.startsWith("F") : !it.code?.startsWith("F");
-      });
-      if (pool.length === 0) return;
-      const sum = pool.reduce((s, it) => s + (it.defaultWeight ?? 0), 0);
-      if (Math.abs(sum - sec.totalWeight) > 0.01) needsNorm = true;
-    });
-    esgNormalized.current[esgFilter] = true;
-    if (needsNorm) esgSecs.forEach(sec => handleUpdate("normalize-esg", sec.id, {}));
-  }, [esgFilter, coreEsgSections, handleUpdate]);
-
   const isESGSection = s => s.nameTh?.includes('ESG') || s.code?.match(/ESG/i);
   const coreSections = useMemo(() => coreEsgSections.filter(s => !isESGSection(s)), [coreEsgSections]);
   const esgSections  = useMemo(() => coreEsgSections.filter(s => isESGSection(s)),  [coreEsgSections]);
@@ -859,7 +839,8 @@ export default function AdminCriteriaEditor({ authUser }) {
     }
   }, [evalType, loadAll, showToast, reloadContext]);
 
-  const handleSeed = useCallback(() => callSeed(false), [callSeed]);
+  const handleSeed      = useCallback(() => callSeed(false), [callSeed]);
+  const handleResetWeights = useCallback(() => callSeed(true),  [callSeed]);
 
   // ── Function total weight: patch all M1-M7 sections at once ──
   const handleFuncWeightSave = useCallback(async (newWeight) => {
@@ -1239,6 +1220,26 @@ export default function AdminCriteriaEditor({ authUser }) {
     }
   }, [coreEsgSections, funcSections, esgFilter, evalType, showToast, loadAll, reloadContext, getCatBuffer, getItemBuffer, scaleItemsToTotal]);
 
+  // Auto-normalize ESG item weights when filter or data changes
+  useEffect(() => {
+    if (esgNormalized.current[esgFilter]) return;
+    const isEsg = s => !!(s.nameTh?.includes('ESG') || s.code?.match(/ESG/i));
+    const esgSecs = coreEsgSections.filter(isEsg);
+    if (!esgSecs.length) return;
+    let needsNorm = false;
+    esgSecs.forEach(sec => {
+      const pool = sec.items.filter(it => {
+        if (it.isActive === false) return false;
+        return esgFilter === "factory" ? it.code?.startsWith("F") : !it.code?.startsWith("F");
+      });
+      if (pool.length === 0) return;
+      const sum = pool.reduce((s, it) => s + (it.defaultWeight ?? 0), 0);
+      if (Math.abs(sum - sec.totalWeight) > 0.01) needsNorm = true;
+    });
+    esgNormalized.current[esgFilter] = true;
+    if (needsNorm) esgSecs.forEach(sec => handleUpdate("normalize-esg", sec.id, {}));
+  }, [esgFilter, coreEsgSections, handleUpdate]);
+
   // ── Save levels + levelValues ────────────────────────────────
   const handleSaveLevels = useCallback(async (item, levels, levelValues) => {
     setSaving({ type: "levels", id: item.id });
@@ -1300,14 +1301,17 @@ export default function AdminCriteriaEditor({ authUser }) {
 
           {/* Weight badge */}
           <div style={{
-            display: "flex", alignItems: "center", gap: 5, padding: "5px 12px",
+            display: "flex", alignItems: "center", gap: 6, padding: "5px 12px",
             borderRadius: 8, background: weightOk ? "#e8f5e9" : "#fff8e1",
             border: `1.5px solid ${weightOk ? "#a5d6a7" : "#ffe082"}`,
             fontSize: 12, fontWeight: 700,
             color: weightOk ? "#1b5e20" : "#e65100",
           }}>
             {weightOk ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}
-            รวมน้ำหนักทั้งหมด: {totalWeight.toFixed(1)} / 100
+            รวม: {totalWeight.toFixed(1)} / 100
+            <span style={{ fontWeight: 400, color: "#888", fontSize: 11 }}>
+              (Core {coreWeight.toFixed(1)} + Func {funcWeight.toFixed(1)} + ESG {esgWeight.toFixed(1)})
+            </span>
           </div>
 
           <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
