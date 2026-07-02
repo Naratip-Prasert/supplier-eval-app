@@ -1009,8 +1009,8 @@ export default function AdminCriteriaEditor({ authUser }) {
   // Scale items to match newTotal.
   // If items have existing weights → proportional (preserves user's custom ratios).
   // If all items are 0 → equal: integer first → equal 2-dp → buffer last.
-  // forceEqual=true → always distribute equally (used for normalize-esg)
-  // forceEqual=false → proportional when items have weights (used for save-cat, handleCoreWeightSave)
+  // forceEqual=true → always distribute equally (used for normalize-esg, handleCoreWeightSave)
+  // forceEqual=false → proportional when items have weights (used for save-cat)
   const scaleItemsToTotal = useCallback((secItems, newTotal, forceEqual = false) => {
     const real = secItems.filter(it => it.isActive !== false);
     if (real.length === 0) return {};
@@ -1041,6 +1041,21 @@ export default function AdminCriteriaEditor({ authUser }) {
     }
     return result;
   }, []);
+
+  // ESG sections hold both HO/Store items and Factory items (code starts with "F")
+  // together, but they're alternate evaluation tracks, not one shared pool — each
+  // subset must independently sum to the section's totalWeight. Non-ESG sections
+  // scale normally as a single pool.
+  const scaleSectionItemsToTotal = useCallback((sec, newTotal, forceEqual = false) => {
+    const isEsg = !!(sec.nameTh?.includes('ESG') || sec.code?.match(/ESG/i));
+    if (!isEsg) return scaleItemsToTotal(sec.items, newTotal, forceEqual);
+    const ho  = sec.items.filter(it => !it.code?.startsWith('F'));
+    const fac = sec.items.filter(it =>  it.code?.startsWith('F'));
+    return {
+      ...scaleItemsToTotal(ho, newTotal, forceEqual),
+      ...scaleItemsToTotal(fac, newTotal, forceEqual),
+    };
+  }, [scaleItemsToTotal]);
 
   // ── handleUpdate (unified across both datasets) ──────────────
   const handleUpdate = useCallback(async (action, id, payload) => {
@@ -1142,10 +1157,15 @@ export default function AdminCriteriaEditor({ authUser }) {
         ? { ...sec, items: esgPool, totalWeight: sec.totalWeight }
         : sec;
       const buf = getItemBuffer(bufSec, id, payload.defaultWeight);
+      if (buf.tooLarge) {
+        showToast("น้ำหนักเกิน — แก้ตัวก่อนหน้าก่อน", "error");
+        return;
+      }
       setSecs(prev => prev.map(s => ({
         ...s, items: s.items.map(it => {
           if (it.id === id) return { ...it, defaultWeight: Math.max(0, Number(payload.defaultWeight) || 0) };
-          if (buf && it.id === buf.bufItem.id) return { ...it, defaultWeight: buf.bufVal };
+          const adjW = buf.adjustments?.[it.id];
+          if (adjW !== undefined) return { ...it, defaultWeight: adjW };
           return it;
         }),
       })));
@@ -1211,7 +1231,7 @@ export default function AdminCriteriaEditor({ authUser }) {
           // Save items in main section (proportional — preserves custom ratios)
           const mainScales = scaleItemsToTotal(current?.items ?? [], clamped);
           await Promise.all(Object.entries(mainScales).map(([itemId, w]) => {
-            const it = current?.items?.find(x => x.id === Number(itemId));
+            const it = current?.items?.find(x => x.id === itemId);
             if (!it) return Promise.resolve();
             return authFetch(`/api/criteria/items/${itemId}`, {
               method: "PATCH",
@@ -1219,21 +1239,24 @@ export default function AdminCriteriaEditor({ authUser }) {
             });
           }));
 
-          // Save buffer section + its items
-          if (buf) {
-            const bufSec = pool.find(s => s.id === buf.bufId);
-            await authFetch(`/api/criteria/categories/${buf.bufId}`, {
-              method: "PATCH",
-              body: JSON.stringify({ nameTh: bufSec?.nameTh, totalWeight: buf.bufVal }),
-            });
-            const bufScales = scaleItemsToTotal(bufSec?.items ?? [], buf.bufVal);
-            await Promise.all(Object.entries(bufScales).map(([itemId, w]) => {
-              const it = bufSec?.items?.find(x => x.id === Number(itemId));
-              if (!it) return Promise.resolve();
-              return authFetch(`/api/criteria/items/${itemId}`, {
+          // Save buffer sections + their items
+          if (buf.adjustments) {
+            await Promise.all(Object.entries(buf.adjustments).map(async ([secId, w]) => {
+              const bufSec = pool.find(s => s.id === secId);
+              if (!bufSec) return;
+              await authFetch(`/api/criteria/categories/${secId}`, {
                 method: "PATCH",
-                body: JSON.stringify({ nameTh: it.nameTh, defaultWeight: w }),
+                body: JSON.stringify({ nameTh: bufSec.nameTh, totalWeight: w }),
               });
+              const bufScales = scaleItemsToTotal(bufSec.items, w);
+              await Promise.all(Object.entries(bufScales).map(([itemId, iw]) => {
+                const it = bufSec.items.find(x => x.id === itemId);
+                if (!it) return Promise.resolve();
+                return authFetch(`/api/criteria/items/${itemId}`, {
+                  method: "PATCH",
+                  body: JSON.stringify({ nameTh: it.nameTh, defaultWeight: iw }),
+                });
+              }));
             }));
           }
         }
@@ -1265,7 +1288,7 @@ export default function AdminCriteriaEditor({ authUser }) {
       setSaving({ type: "category", id });
       try {
         await Promise.all(Object.entries(scales).map(([itemId, w]) => {
-          const it = sec.items.find(x => x.id === Number(itemId));
+          const it = sec.items.find(x => x.id === itemId);
           if (!it) return Promise.resolve();
           return authFetch(`/api/criteria/items/${itemId}`, {
             method: "PATCH",
@@ -1295,7 +1318,7 @@ export default function AdminCriteriaEditor({ authUser }) {
       }));
       try {
         await Promise.all(Object.entries(scales).map(([itemId, w]) => {
-          const it = sec.items.find(x => x.id === Number(itemId));
+          const it = sec.items.find(x => x.id === itemId);
           if (!it) return Promise.resolve();
           return authFetch(`/api/criteria/items/${itemId}`, {
             method: "PATCH",
@@ -1335,11 +1358,15 @@ export default function AdminCriteriaEditor({ authUser }) {
             ? { ...itemSec, items: esgPool, totalWeight: itemSec.totalWeight }
             : itemSec;
           const buf = getItemBuffer(bufSec, id, payload.defaultWeight);
-          if (buf) {
-            await authFetch(`/api/criteria/items/${buf.bufItem.id}`, {
-              method: "PATCH",
-              body: JSON.stringify({ nameTh: buf.bufItem.nameTh, defaultWeight: buf.bufVal }),
-            });
+          if (buf.adjustments) {
+            await Promise.all(Object.entries(buf.adjustments).map(([itemId, w]) => {
+              const it = itemSec.items.find(x => x.id === itemId);
+              if (!it) return Promise.resolve();
+              return authFetch(`/api/criteria/items/${itemId}`, {
+                method: "PATCH",
+                body: JSON.stringify({ nameTh: it.nameTh, defaultWeight: w }),
+              });
+            }));
           }
         }
         showToast("บันทึกรายการสำเร็จ");
@@ -1431,7 +1458,7 @@ export default function AdminCriteriaEditor({ authUser }) {
     const syncCore = prev => prev.map(s => {
       const newW = newWeights[s.id];
       if (newW === undefined) return s;
-      const scales = scaleItemsToTotal(s.items, newW);
+      const scales = scaleItemsToTotal(s.items, newW, true);
       return { ...s, totalWeight: newW, items: s.items.map(it => scales[it.id] !== undefined ? { ...it, defaultWeight: scales[it.id] } : it) };
     });
     setCoreEsgSections(syncCore);
@@ -1444,9 +1471,9 @@ export default function AdminCriteriaEditor({ authUser }) {
           method: "PATCH", body: JSON.stringify({ nameTh: sec.nameTh, totalWeight: newW }),
         });
         if (!cr.ok) throw new Error(`PATCH category ${sec.id} failed`);
-        const scales = scaleItemsToTotal(sec.items, newW);
+        const scales = scaleItemsToTotal(sec.items, newW, true);
         await Promise.all(Object.entries(scales).map(([itemId, w]) => {
-          const it = sec.items.find(x => x.id === Number(itemId));
+          const it = sec.items.find(x => x.id === itemId);
           if (!it) return Promise.resolve();
           return authFetch(`/api/criteria/items/${itemId}`, {
             method: "PATCH", body: JSON.stringify({ nameTh: it.nameTh, defaultWeight: w }),
