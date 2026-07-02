@@ -7,6 +7,13 @@
 //  the frontend form actually renders.
 //  Uses DO NOTHING — only inserts rows that don't exist yet, never
 //  overwrites admin customisations (name/weight/levels edited via UI).
+//
+//  Category code naming convention:
+//    PRE-CORE{n}   — PRE eval CORE sections  (non-ESG)
+//    PRE-ESG       — PRE eval ESG section
+//    POST-CORE{n}  — POST/half-year/yearly CORE sections
+//    POST-ESG      — POST/half-year/yearly ESG section
+//    FUNC-M{n}     — Function modules (M1–M7+)
 // ============================================================
 const fs = require('fs');
 const path = require('path');
@@ -23,28 +30,38 @@ function loadConstants() {
 }
 
 async function seedSet(client, sections, criteriaSet, codePrefix) {
+  let coreIndex = 0;
   let sectionIndex = 0;
   for (const section of sections) {
-    sectionIndex += 1;
-    const catCode = `${codePrefix}-CAT${sectionIndex}`;
-    const sectionTitle = section.section.replace(/^\d+\.\s*/, '');
-    const catResult = await client.query(
-      `INSERT INTO evaluation_categories (code, name_th, name_en, total_weight, display_order)
-       VALUES ($1, $2, NULL, $3, $4)
-       ON CONFLICT (code) DO NOTHING
-       RETURNING id`,
-      [catCode, sectionTitle, section.weight, sectionIndex]
-    );
-    // Row already existed — fetch its id separately
-    const resolvedCat = catResult.rows[0]
-      ? catResult
-      : await client.query('SELECT id FROM evaluation_categories WHERE code = $1', [catCode]);
-    const categoryId = resolvedCat.rows[0].id;
+    sectionIndex++;
+    // Identify ESG sections by name; everything else is a CORE section.
+    const isEsg = /ESG/i.test(section.section);
+    let catCode;
+    if (codePrefix.startsWith('FUNC-')) {
+      // Function modules: codePrefix IS the full code (e.g. 'FUNC-M1')
+      catCode = codePrefix;
+    } else if (isEsg) {
+      catCode = `${codePrefix}-ESG`;
+    } else {
+      coreIndex += 1;
+      catCode = `${codePrefix}-CORE${coreIndex}`;
+    }
 
-    let displayOrder = 0;
+    const sectionTitle = section.section.replace(/^\d+\.\s*/, '');
+    const displayOrder = codePrefix.startsWith('FUNC-') ? 1 : sectionIndex;
+    const catResult = await client.query(
+      `INSERT INTO evaluation_categories (code, name_th, name_en, total_weight, display_order, is_active)
+       VALUES ($1, $2, NULL, $3, $4, TRUE)
+       ON CONFLICT (code) DO UPDATE SET is_active = TRUE
+       RETURNING id`,
+      [catCode, sectionTitle, section.weight, displayOrder]
+    );
+    const categoryId = catResult.rows[0].id;
+
+    let itemOrder = 0;
     for (const item of section.items) {
       if (item.divider) continue;
-      displayOrder += 1;
+      itemOrder += 1;
 
       const critResult = await client.query(
         `INSERT INTO evaluation_criteria
@@ -52,7 +69,7 @@ async function seedSet(client, sections, criteriaSet, codePrefix) {
          VALUES ($1, $2, $3, NULL, $7, $4, $5, TRUE, $6)
          ON CONFLICT (criteria_set, code) DO NOTHING
          RETURNING id`,
-        [categoryId, item.no, item.title.slice(0, 400), item.weight, displayOrder, criteriaSet, item.title]
+        [categoryId, item.no, item.title.slice(0, 400), item.weight, itemOrder, criteriaSet, item.title]
       );
       // Item already existed — fetch its id to insert any missing level descriptions
       const resolvedCrit = critResult.rows[0]
@@ -88,7 +105,9 @@ async function seedCriteriaFromConstants(client) {
   await seedSet(client, POST_CRITERIA, 'post_eval', 'POST');
   for (const [code, mod] of Object.entries(FUNCTION_MODULES)) {
     const sections = [{ section: mod.label, weight: FUNCTION_SECTION_WEIGHT, items: mod.items }];
-    await seedSet(client, sections, `module_${code}`, code.toUpperCase());
+    // criteriaSet = code ('m1','m2',...) — matches criteria.js query `WHERE criteria_set = $1`
+    // codePrefix  = 'FUNC-M1','FUNC-M2',... — becomes the category code directly
+    await seedSet(client, sections, code, `FUNC-${code.toUpperCase()}`);
   }
 }
 

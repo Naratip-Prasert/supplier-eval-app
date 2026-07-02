@@ -313,26 +313,10 @@ CREATE TABLE evaluation_scores (
 CREATE INDEX idx_scores_evaluation ON evaluation_scores(evaluation_id);
 CREATE INDEX idx_scores_criterion  ON evaluation_scores(criterion_id);
 
--- ============================================================
--- 15. EVALUATION_CATEGORY_WEIGHTS — per-evaluation category weight
---     overrides, mirroring how evaluation_scores.weight overrides
---     evaluation_criteria.default_weight for sub-criteria.
--- ============================================================
-CREATE TABLE evaluation_category_weights (
-  id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  evaluation_id  UUID        NOT NULL REFERENCES evaluations(id) ON DELETE CASCADE,
-  category_id    UUID        NOT NULL REFERENCES evaluation_categories(id),
-  weight         DECIMAL(5,2) NOT NULL,
-  created_at     TIMESTAMPTZ DEFAULT NOW(),
-  updated_at     TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE (evaluation_id, category_id)
-);
-
-CREATE INDEX idx_cat_weights_evaluation ON evaluation_category_weights(evaluation_id);
-CREATE INDEX idx_cat_weights_category   ON evaluation_category_weights(category_id);
+-- (evaluation_category_weights was removed — never queried by any route)
 
 -- ============================================================
--- 16. SUPERVISOR_REVIEWS — one row per approve/return decision
+-- 15. SUPERVISOR_REVIEWS — one row per approve/return decision
 --     A session can accumulate several rows over multiple
 --     return -> resubmit -> review cycles (status 'pending' while
 --     awaiting decision, then 'approved' or 'returned').
@@ -354,7 +338,7 @@ CREATE INDEX idx_supervisor_reviews_session ON supervisor_reviews(session_id);
 CREATE INDEX idx_supervisor_reviews_status  ON supervisor_reviews(status);
 
 -- ============================================================
--- 17. EMAIL_LOGS — record of every email sent by the app
+-- 16. EMAIL_LOGS — record of every email sent by the app
 --     (invitation / reminder / overdue / thank-you / result)
 -- ============================================================
 CREATE TABLE email_logs (

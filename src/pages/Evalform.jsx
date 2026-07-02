@@ -17,6 +17,54 @@ const COLS = "52px 2.8fr 76px 1.1fr 1.1fr 1.1fr 1.1fr 1.1fr 84px 116px";
 
 const r2 = (n) => Math.round(n * 100) / 100;
 
+// ── AHP reference weights (from AHP_supplier.xlsx, display-only) ──
+const AHP_MAIN_W  = { '1': 38.65, '2': 21.21, '3': 21.21, '4': 11.98, '5': 6.94 };
+const AHP_LOCAL_W = {
+  '1.1': 53.90, '1.2': 29.73, '1.3': 16.38,
+  '2.1': 42.54, '2.2': 23.06, '2.3': 14.92, '2.4': 19.48,
+  '3.1': 33.33, '3.2': 33.33, '3.3': 16.67, '3.4': 16.67,
+  '4.1': 32.50, '4.2': 35.62, '4.3': 19.37, '4.4': 12.51,
+  'ESG1 สิ่งแวดล้อม / Environment': 33.33, 'ESG2 สังคม — แรงงานและสิทธิมนุษยชน / Social': 33.33, 'ESG3 ธรรมาภิบาล / Governance': 33.33,
+};
+function getAhpMain(section) {
+  const first = section.items.find(i => !i.divider);
+  if (!first) return null;
+  return AHP_MAIN_W[first.no.charAt(0)] ?? null;
+}
+function getAhpLocal(itemNo) {
+  if (!itemNo) return null;
+  if (AHP_LOCAL_W[itemNo] !== undefined) return AHP_LOCAL_W[itemNo];
+  const parts = itemNo.split('.');
+  if (parts.length >= 2) return AHP_LOCAL_W[parts[0] + '.' + parts[1]] ?? null;
+  return null;
+}
+
+
+// Distribute ESG section weight using per-sub-group groupWeight values on level-2 dividers.
+function assignEsgSubGroupWeights(sectionItems, sw, items) {
+  let curGroupWeight = null;
+  let curGroupItems  = [];
+  const flush = () => {
+    if (!curGroupItems.length) return;
+    const pct = curGroupWeight ?? (100 / 3);
+    const absW = (pct / 100) * sw;
+    const each = r2(absW / curGroupItems.length);
+    let rem = absW;
+    curGroupItems.forEach((it, i) => {
+      if (i === curGroupItems.length - 1) items[it.no] = r2(Math.max(0, rem));
+      else { items[it.no] = each; rem -= each; }
+    });
+    curGroupItems = [];
+  };
+  sectionItems.forEach(item => {
+    if (item.divider) {
+      if (item.level === 2) { flush(); curGroupWeight = item.groupWeight ?? null; }
+      return;
+    }
+    curGroupItems.push(item);
+  });
+  flush();
+}
 
 function initWeights(criteria) {
   const sections = {};
@@ -26,13 +74,38 @@ function initWeights(criteria) {
     sections[si] = sw;
     const realItems = section.items.filter((i) => !i.divider);
 
-    // ถ้า item.weight รวมกันได้ ≈ section weight → ใช้โดยตรง (DB-overridden weights)
-    // ใช้ tolerance 0.1 เพื่อรองรับ floating-point จาก equal-split seed
+    // ESG section: has level-2 sub-group dividers → distribute by groupWeight
+    const hasSubGroups = section.items.some(i => i.divider && i.level === 2 && i.groupWeight != null);
+    if (hasSubGroups) {
+      assignEsgSubGroupWeights(section.items, sw, items);
+      return;
+    }
+
     const constantSum = realItems.reduce((s, i) => s + (i.weight ?? 0), 0);
+
+    // 1. DB weights: items sum ≈ section weight → use directly (parameter page overrides)
     if (realItems.every(i => i.weight != null) && Math.abs(constantSum - sw) < 0.1) {
       realItems.forEach(item => { items[item.no] = item.weight; });
+
+    // 2. AHP proportions: use AHP_LOCAL_W percentages when available for all items
+    } else if (realItems.length > 0 && realItems.every(i => getAhpLocal(i.no) != null)) {
+      const ahpSum = realItems.reduce((s, i) => s + getAhpLocal(i.no), 0);
+      let iRem = sw;
+      realItems.forEach((item, ii) => {
+        if (ii === realItems.length - 1) { items[item.no] = Math.max(0, r2(iRem)); }
+        else { const w = r2(sw * getAhpLocal(item.no) / ahpSum); items[item.no] = w; iRem -= w; }
+      });
+
+    // 3. Proportional from item.weight (handles constants.js weights on different scale)
+    } else if (constantSum > 0) {
+      let iRem = sw;
+      realItems.forEach((item, ii) => {
+        if (ii === realItems.length - 1) { items[item.no] = Math.max(0, r2(iRem)); }
+        else { const w = r2((item.weight / constantSum) * sw); items[item.no] = w; iRem -= w; }
+      });
+
+    // 4. Equal distribution fallback
     } else {
-      // fallback: แจกเท่ากัน (เช่น ESG ที่ item.weight ไม่รวมกันได้ = sw)
       const itemEach = realItems.length > 0 ? r2(sw / realItems.length) : 0;
       let iRem = sw;
       realItems.forEach((item, ii) => {
@@ -490,7 +563,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
               <SectionHeaderRow
                 section={section}
                 secWeight={sectionWeights[si] ?? 0}
-                onSectionWeightChange={(val) => handleSectionWeightChange(si, val)}
+                ahpW={si === functionSectionIndex ? null : si === esgSectionIndexInCriteria ? 6.94 : getAhpMain(section)}
               />
               {si === functionSectionIndex && (
                 <ModuleSelector value={moduleCode} onChange={setModuleCode} />
@@ -513,8 +586,8 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
                       note={notes[item.no] || ""}
                       onSelect={(lv) => setScores((s) => ({ ...s, [item.no]: lv }))}
                       onNote={(v)   => setNotes((n)  => ({ ...n, [item.no]: v }))}
-                      onWeightChange={(v) => handleItemWeightChange(item.no, si, v)}
                       shaded={ii % 2 !== 0}
+                      ahpW={getAhpLocal(item.no)}
                     />
                   )
               )}
@@ -531,7 +604,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
               <SectionHeaderMobile
                 section={section}
                 secWeight={sectionWeights[si] ?? 0}
-                onSectionWeightChange={(val) => handleSectionWeightChange(si, val)}
+                ahpW={si === functionSectionIndex ? null : si === esgSectionIndexInCriteria ? 6.94 : getAhpMain(section)}
               />
               {si === functionSectionIndex && (
                 <ModuleSelector value={moduleCode} onChange={setModuleCode} />
@@ -554,8 +627,8 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
                       note={notes[item.no] || ""}
                       onSelect={(lv) => setScores((s) => ({ ...s, [item.no]: lv }))}
                       onNote={(v)   => setNotes((n)  => ({ ...n, [item.no]: v }))}
-                      onWeightChange={(v) => handleItemWeightChange(item.no, si, v)}
                       shaded={ii % 2 !== 0}
+                      ahpW={getAhpLocal(item.no)}
                     />
                   )
               )}
@@ -1068,16 +1141,7 @@ function DividerRow({ label, level }) {
   );
 }
 
-function SectionHeaderRow({ section, secWeight, onSectionWeightChange }) {
-  const [editing, setEditing] = useState(false);
-  const [draft,   setDraft]   = useState(String(secWeight));
-
-  useEffect(() => {
-    if (!editing) setDraft(String(secWeight));
-  }, [secWeight, editing]);
-
-  const commit = () => { setEditing(false); onSectionWeightChange(draft); };
-
+function SectionHeaderRow({ section, secWeight, ahpW }) {
   return (
     <div style={{
       display: "grid", gridTemplateColumns: COLS, gap: 4,
@@ -1089,34 +1153,10 @@ function SectionHeaderRow({ section, secWeight, onSectionWeightChange }) {
       </div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "6px 4px" }}>
-        {editing ? (
-          <input
-            type="number" value={draft} min={0} max={100} autoFocus
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => e.key === "Enter" && commit()}
-            style={{
-              width: 54, textAlign: "center", fontSize: 13, fontWeight: 700,
-              border: "2px solid #fff", borderRadius: 6, padding: "4px 2px",
-              outline: "none", background: "rgba(255,255,255,0.2)", color: "#fff",
-            }}
-          />
-        ) : (
-          <div
-            onClick={() => { setDraft(String(secWeight)); setEditing(true); }}
-            title="คลิกเพื่อแก้ไข — section อื่นจะปรับให้รวม 100%"
-            style={{
-              fontSize: 13, fontWeight: 700, color: "#fff",
-              border: "1.5px dashed rgba(255,255,255,0.6)", borderRadius: 6,
-              padding: "4px 10px", cursor: "pointer",
-              display: "flex", alignItems: "center", gap: 4,
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.15)")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-          >
-            {secWeight}%
-          </div>
-        )}
+        <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", padding: "4px 10px" }}>
+          {secWeight}%
+          {ahpW != null && <span style={{ fontSize: 12, fontWeight: 400, opacity: 0.75, marginLeft: 3 }}>({ahpW}%)</span>}
+        </span>
       </div>
 
       <div style={{ gridColumn: "4 / 11" }} />
@@ -1124,15 +1164,10 @@ function SectionHeaderRow({ section, secWeight, onSectionWeightChange }) {
   );
 }
 
-function ScoreRow({ item, weight, selected, note, onSelect, onNote, onWeightChange, shaded }) {
+function ScoreRow({ item, weight, selected, note, onSelect, onNote, shaded, ahpW }) {
   const levelValues = item.levelValues || [1, 2, 3, 4, 5];
   const maxLv       = Math.max(...levelValues);
   const rowScore    = selected ? ((selected / maxLv) * weight).toFixed(2) : "—";
-  const [editing, setEditing] = useState(false);
-  const [draft,   setDraft]   = useState(String(weight));
-
-  useEffect(() => { if (!editing) setDraft(String(weight)); }, [weight, editing]);
-  const commit = () => { setEditing(false); onWeightChange(draft); };
 
   return (
     <div style={{
@@ -1184,35 +1219,11 @@ function ScoreRow({ item, weight, selected, note, onSelect, onNote, onWeightChan
         )}
       </div>
 
-      <div style={{ padding: "8px 4px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        {editing ? (
-          <input
-            type="number" value={draft} min={0} max={100} autoFocus
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => e.key === "Enter" && commit()}
-            style={{
-              width: 54, textAlign: "center", fontSize: 13, fontWeight: 700,
-              border: "2px solid #2e7d32", borderRadius: 6,
-              padding: "4px 2px", outline: "none", color: "#1a6b1a",
-            }}
-          />
-        ) : (
-          <div
-            onClick={() => { setDraft(String(weight)); setEditing(true); }}
-            title="คลิกเพื่อแก้ไข"
-            style={{
-              fontSize: 13, fontWeight: 700, color: "#1a6b1a",
-              border: "1.5px dashed #a5d6a7", borderRadius: 6,
-              padding: "4px 10px", cursor: "pointer",
-              display: "flex", alignItems: "center", gap: 4,
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "#e8f5e9")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-          >
-            {weight}%
-          </div>
-        )}
+      <div style={{ padding: "8px 4px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2 }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: "#1a6b1a", padding: "4px 10px" }}>
+          {weight}%
+          {ahpW != null && <span style={{ fontSize: 11, fontWeight: 400, color: "#888", marginLeft: 2 }}>({ahpW}%)</span>}
+        </span>
       </div>
 
       {item.calcType === "capital-ratio"
@@ -1240,7 +1251,6 @@ function ScoreRow({ item, weight, selected, note, onSelect, onNote, onWeightChan
           })
         : [1, 2, 3, 4, 5].map((lv) => {
             const available  = levelValues.includes(lv);
-            const descIdx    = levelValues.indexOf(lv);
             const isSelected = selected === lv;
             return (
               <div
@@ -1267,7 +1277,7 @@ function ScoreRow({ item, weight, selected, note, onSelect, onNote, onWeightChan
                     whiteSpace: "pre-line", wordBreak: "break-word",
                     fontWeight: isSelected ? 700 : 400,
                   }}>
-                    {item.levels[descIdx]}
+                    {item.levels[lv - 1]}
                   </div>
                 )}
               </div>
@@ -1297,12 +1307,7 @@ function ScoreRow({ item, weight, selected, note, onSelect, onNote, onWeightChan
 // These reuse the exact same props/handlers, just render as stacked
 // cards/lists instead of grid columns, and show level descriptions as a
 // vertical selectable list instead of 5 side-by-side slivers.
-function SectionHeaderMobile({ section, secWeight, onSectionWeightChange }) {
-  const [editing, setEditing] = useState(false);
-  const [draft,   setDraft]   = useState(String(secWeight));
-  useEffect(() => { if (!editing) setDraft(String(secWeight)); }, [secWeight, editing]);
-  const commit = () => { setEditing(false); onSectionWeightChange(draft); };
-
+function SectionHeaderMobile({ section, secWeight, ahpW }) {
   return (
     <div style={{
       display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
@@ -1310,30 +1315,10 @@ function SectionHeaderMobile({ section, secWeight, onSectionWeightChange }) {
       padding: "10px 14px",
     }}>
       <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: 0.3 }}>{section.section}</div>
-      {editing ? (
-        <input
-          type="number" value={draft} min={0} max={100} autoFocus
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => e.key === "Enter" && commit()}
-          style={{
-            width: 54, textAlign: "center", fontSize: 13, fontWeight: 700,
-            border: "2px solid #fff", borderRadius: 6, padding: "4px 2px",
-            outline: "none", background: "rgba(255,255,255,0.2)", color: "#fff", flexShrink: 0,
-          }}
-        />
-      ) : (
-        <div
-          onClick={() => { setDraft(String(secWeight)); setEditing(true); }}
-          style={{
-            fontSize: 13, fontWeight: 700, color: "#fff", flexShrink: 0,
-            border: "1.5px dashed rgba(255,255,255,0.6)", borderRadius: 6,
-            padding: "4px 10px", cursor: "pointer",
-          }}
-        >
-          {secWeight}%
-        </div>
-      )}
+      <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", flexShrink: 0, padding: "4px 10px" }}>
+        {secWeight}%
+        {ahpW != null && <span style={{ fontSize: 12, fontWeight: 400, opacity: 0.75, marginLeft: 3 }}>({ahpW}%)</span>}
+      </span>
     </div>
   );
 }
@@ -1356,15 +1341,11 @@ function DividerMobile({ label, level }) {
   );
 }
 
-function ScoreCardMobile({ item, weight, selected, note, onSelect, onNote, onWeightChange, shaded }) {
+function ScoreCardMobile({ item, weight, selected, note, onSelect, onNote, shaded, ahpW }) {
   const levelValues = item.levelValues || [1, 2, 3, 4, 5];
   const maxLv       = Math.max(...levelValues);
   const rowScore    = selected ? ((selected / maxLv) * weight).toFixed(2) : "—";
   const isCalc      = item.calcType === "capital-ratio";
-  const [editing, setEditing] = useState(false);
-  const [draft,   setDraft]   = useState(String(weight));
-  useEffect(() => { if (!editing) setDraft(String(weight)); }, [weight, editing]);
-  const commit = () => { setEditing(false); onWeightChange(draft); };
 
   const titleLines = isCalc ? item.title.split("\n") : null;
   const calcInstr   = isCalc ? titleLines.pop() : null;
@@ -1376,29 +1357,10 @@ function ScoreCardMobile({ item, weight, selected, note, onSelect, onNote, onWei
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8 }}>
         <span style={{ fontSize: 12, fontWeight: 800, color: "#1a6b1a" }}>ข้อ {item.no}</span>
-        {editing ? (
-          <input
-            type="number" value={draft} min={0} max={100} autoFocus
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => e.key === "Enter" && commit()}
-            style={{
-              width: 54, textAlign: "center", fontSize: 13, fontWeight: 700,
-              border: "2px solid #2e7d32", borderRadius: 6, padding: "4px 2px",
-              outline: "none", color: "#1a6b1a", flexShrink: 0,
-            }}
-          />
-        ) : (
-          <div
-            onClick={() => { setDraft(String(weight)); setEditing(true); }}
-            style={{
-              fontSize: 12.5, fontWeight: 700, color: "#1a6b1a", flexShrink: 0,
-              border: "1.5px dashed #a5d6a7", borderRadius: 6, padding: "3px 9px", cursor: "pointer",
-            }}
-          >
-            {weight}%
-          </div>
-        )}
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: "#1a6b1a", flexShrink: 0 }}>
+          {weight}%
+          {ahpW != null && <span style={{ fontSize: 11, fontWeight: 400, color: "#aaa", marginLeft: 2 }}>({ahpW}%)</span>}
+        </span>
       </div>
 
       <div style={{ fontSize: 13.5, lineHeight: 1.7, color: "#1a1a1a", marginBottom: 10, whiteSpace: "pre-line" }}>
@@ -1418,7 +1380,6 @@ function ScoreCardMobile({ item, weight, selected, note, onSelect, onNote, onWei
         {[1, 2, 3, 4, 5].map((lv) => {
           const available  = levelValues.includes(lv);
           if (!available) return null;
-          const descIdx    = levelValues.indexOf(lv);
           const isSelected  = selected === lv;
           const clickable   = !isCalc && available;
           return (
@@ -1444,7 +1405,7 @@ function ScoreCardMobile({ item, weight, selected, note, onSelect, onNote, onWei
                 fontSize: 12.5, lineHeight: 1.5, color: isSelected ? "#1a1a1a" : "#555",
                 fontWeight: isSelected ? 700 : 400, whiteSpace: "pre-line", wordBreak: "break-word",
               }}>
-                {item.levels[descIdx]}
+                {item.levels[lv - 1]}
               </span>
             </div>
           );

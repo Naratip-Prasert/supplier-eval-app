@@ -56,7 +56,7 @@ function buildSeedPayload() {
     Object.entries(FUNCTION_MODULES).map(([key, mod], ki) => {
       const wMap = computeEqualWeights(mod.items, FUNCTION_SECTION_WEIGHT);
       return {
-        code:         `${key.toUpperCase()}-CAT1`,
+        code:         `FUNC-${key.toUpperCase()}`,
         nameTh:       mod.label,
         totalWeight:  FUNCTION_SECTION_WEIGHT,
         criteriaSet:  key,
@@ -81,9 +81,59 @@ function buildSeedPayload() {
 // Derive DB criteria_set from category code
 function getCriteriaSetFromCode(code) {
   if (!code) return 'pre_eval';
-  const m = code.match(/^M(\d+)-/i);
+  const m = code.match(/^FUNC-M(\d+)$/i);
   if (m) return `m${m[1]}`;
   return code.startsWith('POST-') ? 'post_eval' : 'pre_eval';
+}
+
+// Factory item detection: supports both old F-prefix (F5.1.1) and new ESGF-prefix (ESGF1.1)
+const isEsgFactory = (code) => code?.startsWith('ESGF') || /^F\d/.test(code ?? '');
+
+// Auto-suggest next item code based on section code and existing items
+function nextItemCode(sectionCode, allItems, esgFilter) {
+  if (!sectionCode) return '';
+  const activeItems = allItems.filter(it => it.isActive !== false);
+
+  const coreMatch = sectionCode.match(/^(?:PRE|POST)-CORE(\d+)$/i);
+  if (coreMatch) {
+    const sn = coreMatch[1];
+    let maxN = 0;
+    activeItems.forEach(it => {
+      const m = it.code?.match(new RegExp(`^${sn}\\.(\\d+)$`));
+      if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+    });
+    return `${sn}.${maxN + 1}`;
+  }
+
+  const funcMatch = sectionCode.match(/^FUNC-M(\d+)$/i);
+  if (funcMatch) {
+    const mn = funcMatch[1];
+    let maxN = 0;
+    activeItems.forEach(it => {
+      const m = it.code?.match(new RegExp(`^M${mn}\\.(\\d+)$`));
+      if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+    });
+    return `M${mn}.${maxN + 1}`;
+  }
+
+  if (sectionCode.match(/^(?:PRE|POST)-ESG$/i)) {
+    const factory = esgFilter === 'factory';
+    const prefix = factory ? 'ESGF' : 'ESG';
+    const pool = activeItems.filter(it => factory ? isEsgFactory(it.code) : (!isEsgFactory(it.code)));
+    let maxSub = 0, maxItem = 0;
+    const re = new RegExp(`^${prefix}(\\d+)\\.(\\d+)$`);
+    pool.forEach(it => {
+      const m = it.code?.match(re);
+      if (m) {
+        const s = parseInt(m[1], 10), i = parseInt(m[2], 10);
+        if (s > maxSub || (s === maxSub && i > maxItem)) { maxSub = s; maxItem = i; }
+      }
+    });
+    if (maxSub === 0) return `${prefix}1.1`;
+    return `${prefix}${maxSub}.${maxItem + 1}`;
+  }
+
+  return '';
 }
 
 const FONT = "Sarabun, sans-serif";
@@ -106,6 +156,38 @@ function computeEffectiveWeights(items, sectionWeight) {
   items.forEach((it, ii) => {
     if (ii === items.length - 1) result[it.id] = Math.max(0, r2adm(rem));
     else { result[it.id] = each; rem -= each; }
+  });
+  return result;
+}
+
+// Mirror of Evalform's assignEsgSubGroupWeights — live effective weight per ESG item.
+// Derives sub-group from item code (ESG1.x → group 1, ESGF2.x → group 2, etc.)
+// groupWeights: { "1": %, "2": %, "3": % } — from SectionCard local state (live preview)
+function computeEsgEffectiveWeights(sectionItems, totalWeight, groupWeights, esgFilter) {
+  const sw = totalWeight ?? 0;
+  if (!sw || !sectionItems?.length) return {};
+  const r2 = v => Math.round(v * 100) / 100;
+  const byGroup = {};
+  sectionItems.forEach(item => {
+    if (item.isActive === false || item.divider) return;
+    const code = item.code ?? '';
+    if (esgFilter === 'ho'      &&  isEsgFactory(code)) return;
+    if (esgFilter === 'factory' && !isEsgFactory(code)) return;
+    const m = code.match(/^ESGF?(\d+)\./i);
+    if (!m) return;
+    const grp = m[1];
+    (byGroup[grp] = byGroup[grp] ?? []).push(item);
+  });
+  const result = {};
+  Object.entries(byGroup).forEach(([grp, items]) => {
+    const pct  = groupWeights?.[grp] != null ? Number(groupWeights[grp]) : (100 / 3);
+    const absW = (pct / 100) * sw;
+    const n    = items.length;
+    let rem = absW;
+    items.forEach((it, i) => {
+      if (i === n - 1) result[it.id] = r2(Math.max(0, rem));
+      else { const w = r2(absW / n); result[it.id] = w; rem -= w; }
+    });
   });
   return result;
 }
@@ -216,7 +298,13 @@ function TextEdit({ value, onChange, onSave, disabled, multiline = true, style =
 
 // ── LevelsModal — edit descriptions + levelValues ─────────────
 function LevelsModal({ item, onClose, onSave, saving }) {
-  const [levels, setLevels] = useState([...item.levels]);
+  // Always keep exactly 5 slots: levels[i] = description for level i+1.
+  // Pad with "" if the stored array is shorter.
+  const [levels, setLevels] = useState(() => {
+    const arr = Array.isArray(item.levels) ? [...item.levels] : [];
+    while (arr.length < 5) arr.push("");
+    return arr.slice(0, 5);
+  });
   const [levelValues, setLevelValues] = useState(
     Array.isArray(item.levelValues) && item.levelValues.length > 0
       ? [...item.levelValues]
@@ -224,8 +312,6 @@ function LevelsModal({ item, onClose, onSave, saving }) {
   );
 
   const updateLevel = (i, val) => setLevels(prev => prev.map((l, j) => j === i ? val : l));
-  const deleteLevel = (i) => setLevels(prev => prev.filter((_, j) => j !== i));
-  const addLevel    = () => setLevels(prev => [...prev, ""]);
 
   const toggleLV = (v) => {
     setLevelValues(prev => {
@@ -261,73 +347,100 @@ function LevelsModal({ item, onClose, onSave, saving }) {
         </div>
 
         {/* levelValues selector */}
-        <div style={{
-          background: "#f6faf6", border: "1.5px solid #c8e6c9", borderRadius: 10,
-          padding: "12px 14px", marginBottom: 18,
-        }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#2e7d32", marginBottom: 8 }}>
-            ระดับคะแนนที่ใช้ได้ (levelValues)
-          </div>
-          <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-            {[1, 2, 3, 4, 5].map(v => {
-              const active = levelValues.includes(v);
-              return (
-                <button key={v} onClick={() => toggleLV(v)}
-                  title={active ? `ปิดใช้คะแนน ${v}` : `เปิดใช้คะแนน ${v}`}
-                  style={{
-                    width: 38, height: 38, borderRadius: "50%", fontWeight: 800, fontSize: 15,
-                    border: `2px solid ${active ? "#1b5e20" : "#ccc"}`,
-                    background: active ? "#1b5e20" : "#fff",
-                    color: active ? "#fff" : "#aaa",
-                    cursor: "pointer", transition: "all .15s",
-                  }}>{v}</button>
-              );
-            })}
-          </div>
-          <div style={{ fontSize: 11, color: "#777" }}>
-            ปุ่มที่เปิดใช้จะ clickable ในหน้าประเมิน — ค่าปัจจุบัน: [{levelValues.join(", ")}]
-          </div>
-        </div>
+        {(() => {
+          const LV_LABELS = ["ต้องปรับปรุง", "ต่ำกว่าเกณฑ์", "ผ่านเกณฑ์", "ดี", "ดีเยี่ยม"];
+          const LV_EN     = ["Unsatisfactory", "Below Standard", "Satisfactory", "Good", "Excellent"];
+          return (
+            <div style={{
+              border: "1.5px solid #e0e0e0", borderRadius: 12,
+              padding: "14px 16px", marginBottom: 18, background: "#fafafa",
+            }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#333", marginBottom: 12 }}>
+                ระดับคะแนนที่ใช้ได้
+                <span style={{ fontWeight: 400, color: "#999", marginLeft: 6 }}>คลิกเพื่อเปิด/ปิดแต่ละระดับ</span>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {[1, 2, 3, 4, 5].map(v => {
+                  const active = levelValues.includes(v);
+                  const color  = LEVEL_CIRCLE_COLORS[v - 1];
+                  return (
+                    <button key={v} onClick={() => toggleLV(v)}
+                      title={`${v} — ${LV_LABELS[v - 1]}\n${active ? "คลิกเพื่อปิด" : "คลิกเพื่อเปิด"}`}
+                      style={{
+                        flex: 1, padding: "10px 4px 8px",
+                        borderRadius: 10,
+                        border: `2px solid ${active ? color : "#e0e0e0"}`,
+                        background: active ? color + "18" : "#f5f5f5",
+                        cursor: "pointer", transition: "all .15s",
+                        display: "flex", flexDirection: "column", alignItems: "center", gap: 5,
+                        outline: "none",
+                      }}
+                    >
+                      <div style={{
+                        width: 34, height: 34, borderRadius: "50%",
+                        background: active ? color : "#ddd",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        color: "#fff", fontWeight: 900, fontSize: 15,
+                        transition: "background .15s",
+                        boxShadow: active ? `0 2px 6px ${color}55` : "none",
+                      }}>{v}</div>
+                      <div style={{
+                        fontSize: 10.5, fontWeight: 700,
+                        color: active ? color : "#bbb",
+                        transition: "color .15s", lineHeight: 1.25, textAlign: "center",
+                      }}>{LV_LABELS[v - 1]}</div>
+                      <div style={{
+                        fontSize: 9.5, color: active ? "#888" : "#ccc",
+                        transition: "color .15s", lineHeight: 1.2, textAlign: "center",
+                      }}>{LV_EN[v - 1]}</div>
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 10.5, color: "#aaa", marginTop: 10, textAlign: "right" }}>
+                ระดับที่เปิด: [{levelValues.join(", ")}]
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Level descriptions */}
         <div style={{ fontSize: 12, fontWeight: 700, color: "#555", marginBottom: 8 }}>
           คำอธิบายแต่ละระดับ
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {levels.map((lvl, i) => (
-            <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-              <div style={{
-                minWidth: 28, height: 28, borderRadius: "50%",
-                background: LEVEL_CIRCLE_COLORS[i] ?? "#9e9e9e",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                color: "#fff", fontWeight: 800, fontSize: 13, flexShrink: 0, marginTop: 2,
-              }}>{i + 1}</div>
-              <textarea value={lvl} onChange={e => updateLevel(i, e.target.value)} rows={2}
-                style={{
-                  flex: 1, fontFamily: FONT, fontSize: 13, lineHeight: 1.5, resize: "vertical",
-                  border: "1.5px solid #ddd", borderRadius: 8, padding: "6px 10px", outline: "none",
-                }}
-                onFocus={e => (e.target.style.borderColor = "#1b5e20")}
-                onBlur={e => (e.target.style.borderColor = "#ddd")}
-              />
-              <button onClick={() => deleteLevel(i)} disabled={levels.length <= 1}
-                title="ลบระดับนี้"
-                style={{
-                  flexShrink: 0, marginTop: 2, padding: "5px 7px",
-                  background: "none", border: "1.5px solid #fca5a5", borderRadius: 6,
-                  cursor: levels.length <= 1 ? "not-allowed" : "pointer",
-                  color: "#ef4444", opacity: levels.length <= 1 ? 0.3 : 1, lineHeight: 1,
-                }}
-              ><Trash2 size={14} /></button>
-            </div>
-          ))}
+          {levels.map((lvl, i) => {
+            const levelNum = i + 1;
+            const isActive = levelValues.includes(levelNum);
+            return (
+              <div key={i} style={{
+                display: "flex", gap: 10, alignItems: "flex-start",
+                opacity: isActive ? 1 : 0.35,
+                transition: "opacity .15s",
+              }}>
+                <div style={{
+                  minWidth: 28, height: 28, borderRadius: "50%",
+                  background: isActive ? (LEVEL_CIRCLE_COLORS[i] ?? "#9e9e9e") : "#bdbdbd",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  color: "#fff", fontWeight: 800, fontSize: 13, flexShrink: 0, marginTop: 2,
+                  transition: "background .15s",
+                }}>{levelNum}</div>
+                <textarea value={lvl} onChange={e => updateLevel(i, e.target.value)} rows={2}
+                  disabled={!isActive}
+                  style={{
+                    flex: 1, fontFamily: FONT, fontSize: 13, lineHeight: 1.5, resize: "vertical",
+                    border: `1.5px solid ${isActive ? "#ddd" : "#e0e0e0"}`,
+                    borderRadius: 8, padding: "6px 10px", outline: "none",
+                    background: isActive ? "#fff" : "#f5f5f5",
+                    cursor: isActive ? "text" : "default",
+                  }}
+                  onFocus={e => isActive && (e.target.style.borderColor = "#1b5e20")}
+                  onBlur={e => (e.target.style.borderColor = isActive ? "#ddd" : "#e0e0e0")}
+                />
+              </div>
+            );
+          })}
         </div>
-
-        <button onClick={addLevel} style={{
-          marginTop: 12, width: "100%", padding: "8px", borderRadius: 8,
-          border: "1.5px dashed #a5d6a7", background: "#f6faf6",
-          color: "#1b5e20", fontFamily: FONT, fontSize: 13, fontWeight: 600, cursor: "pointer",
-        }}>+ เพิ่มระดับ</button>
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
           <button onClick={onClose} style={{
@@ -352,8 +465,8 @@ function LevelsModal({ item, onClose, onSave, saving }) {
 }
 
 // ── AddItemRow ────────────────────────────────────────────────
-function AddItemRow({ onSave, onCancel, saving, hideWeights }) {
-  const [code,   setCode]   = useState('');
+function AddItemRow({ onSave, onCancel, saving, hideWeights, defaultCode }) {
+  const [code,   setCode]   = useState(defaultCode || '');
   const [nameTh, setNameTh] = useState('');
   const [weight, setWeight] = useState('0');
 
@@ -540,22 +653,50 @@ const TH = {
   borderBottom: "1px solid #dce8dc",
 };
 
+const ESG_GROUPS = [
+  { key: "1", label: "สิ่งแวดล้อม", en: "Environment", color: "#2e7d32" },
+  { key: "2", label: "สังคม",       en: "Social",       color: "#1565c0" },
+  { key: "3", label: "ธรรมาภิบาล", en: "Governance",   color: "#6a1b9a" },
+];
+
 // ── SectionCard ───────────────────────────────────────────────
 function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, esgFilter, hideWeights, effectiveEditable, onDelete, isBuffer }) {
   const [expanded,      setExpanded]      = useState(false);
   const [showAddRow,    setShowAddRow]    = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const isEsgSection = /^(PRE|POST)-ESG$/i.test(section.code ?? '');
+  const defaultGW    = { "1": 33.33, "2": 33.33, "3": 33.34 };
+  const [groupWeights, setGroupWeights] = useState(
+    () => section.groupWeights ? { ...section.groupWeights } : { ...defaultGW }
+  );
+  const [savingGW, setSavingGW] = useState(false);
+  const gwTotal = ESG_GROUPS.reduce((s, g) => s + (parseFloat(groupWeights[g.key]) || 0), 0);
+  const gwOk    = Math.abs(gwTotal - 100) < 0.1;
+
+  const saveGroupWeights = async () => {
+    if (!gwOk) return;
+    setSavingGW(true);
+    try {
+      await onUpdate("save-cat", section.id, { groupWeights });
+    } finally {
+      setSavingGW(false);
+    }
+  };
   const isSavingSection = saving?.type === "category" && saving?.id === section.id;
   const isSavingNew     = saving?.type === "new-item";
   let activeItems = section.items.filter(it => it.isActive !== false);
-  if (esgFilter === "ho")      activeItems = activeItems.filter(it => !it.code?.startsWith("F"));
-  if (esgFilter === "factory") activeItems = activeItems.filter(it =>  it.code?.startsWith("F"));
+  if (esgFilter === "ho")      activeItems = activeItems.filter(it => !isEsgFactory(it.code));
+  if (esgFilter === "factory") activeItems = activeItems.filter(it =>  isEsgFactory(it.code));
 
-  // Compute effective weights (same as Evalform's initWeights) when:
-  //   - effectiveEditable → Function modules: editable effective weight display
+  // Compute effective weights:
+  //   - effectiveEditable (Function modules): editable effective weight display
+  //   - isEsgSection: read-only per-item weight from groupWeights (live preview)
   const effectiveWeights = effectiveEditable
     ? computeEffectiveWeights(activeItems, section.totalWeight)
-    : null;
+    : isEsgSection && section.totalWeight > 0
+      ? computeEsgEffectiveWeights(section.items, section.totalWeight, groupWeights, esgFilter)
+      : null;
 
   const colCount = 6;
 
@@ -625,6 +766,61 @@ function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, e
         )}
       </div>
 
+      {expanded && isEsgSection && !hideWeights && (
+        <div style={{
+          padding: "14px 18px", borderBottom: "1px solid #e8f0e8",
+          background: "#f9fdf9",
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#333", marginBottom: 10 }}>
+            น้ำหนักหมวดย่อย ESG
+            <span style={{ fontWeight: 400, color: "#999", marginLeft: 6, fontSize: 11 }}>รวมต้องได้ 100%</span>
+          </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+            {ESG_GROUPS.map(g => (
+              <div key={g.key} style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 130 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <div style={{
+                    width: 10, height: 10, borderRadius: "50%", background: g.color, flexShrink: 0,
+                  }} />
+                  <span style={{ fontSize: 11, fontWeight: 700, color: g.color }}>{g.label}</span>
+                  <span style={{ fontSize: 10, color: "#aaa" }}>{g.en}</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <input
+                    type="number" min={0} max={100} step={0.01}
+                    value={groupWeights[g.key] ?? ""}
+                    disabled={disabled}
+                    onChange={e => setGroupWeights(prev => ({ ...prev, [g.key]: e.target.value }))}
+                    style={{
+                      width: 72, padding: "5px 8px", borderRadius: 6, fontFamily: FONT, fontSize: 13,
+                      border: `1.5px solid ${g.color}60`, outline: "none", textAlign: "right",
+                    }}
+                    onFocus={e => (e.target.style.borderColor = g.color)}
+                    onBlur={e => (e.target.style.borderColor = `${g.color}60`)}
+                  />
+                  <span style={{ fontSize: 12, color: "#888" }}>%</span>
+                </div>
+              </div>
+            ))}
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+              <span style={{ fontSize: 11, color: gwOk ? "#2e7d32" : "#b71c1c", fontWeight: 700 }}>
+                รวม: {r2adm(gwTotal)}%{gwOk ? " ✓" : " ≠ 100%"}
+              </span>
+              <button onClick={saveGroupWeights} disabled={disabled || savingGW || !gwOk}
+                style={{
+                  padding: "5px 14px", borderRadius: 7, border: "none", fontFamily: FONT, fontSize: 12,
+                  fontWeight: 700, cursor: (disabled || savingGW || !gwOk) ? "not-allowed" : "pointer",
+                  background: gwOk ? "#1b5e20" : "#ccc", color: "#fff",
+                  display: "flex", alignItems: "center", gap: 5,
+                }}>
+                {savingGW ? <RefreshCw size={12} style={{ animation: "spin 1s linear infinite" }} /> : <Save size={12} />}
+                บันทึก
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {expanded && (
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -654,6 +850,7 @@ function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, e
               }
               {showAddRow && (
                 <AddItemRow saving={isSavingNew} onCancel={() => setShowAddRow(false)}
+                  defaultCode={nextItemCode(section.code, section.items, esgFilter)}
                   onSave={data => {
                     setShowAddRow(false);
                     onUpdate("add-item", section.id, {
@@ -1049,8 +1246,8 @@ export default function AdminCriteriaEditor({ authUser }) {
   const scaleSectionItemsToTotal = useCallback((sec, newTotal, forceEqual = false) => {
     const isEsg = !!(sec.nameTh?.includes('ESG') || sec.code?.match(/ESG/i));
     if (!isEsg) return scaleItemsToTotal(sec.items, newTotal, forceEqual);
-    const ho  = sec.items.filter(it => !it.code?.startsWith('F'));
-    const fac = sec.items.filter(it =>  it.code?.startsWith('F'));
+    const ho  = sec.items.filter(it => !isEsgFactory(it.code));
+    const fac = sec.items.filter(it =>  isEsgFactory(it.code));
     return {
       ...scaleItemsToTotal(ho, newTotal, forceEqual),
       ...scaleItemsToTotal(fac, newTotal, forceEqual),
@@ -1138,8 +1335,8 @@ export default function AdminCriteriaEditor({ authUser }) {
       const esgPool = (!inFunc && isEsgSec(snapSec))
         ? snapSec.items.filter(it => {
             if (it.isActive === false) return false;
-            if (esgFilter === "ho") return !it.code?.startsWith("F");
-            if (esgFilter === "factory") return it.code?.startsWith("F");
+            if (esgFilter === "ho") return !isEsgFactory(it.code);
+            if (esgFilter === "factory") return isEsgFactory(it.code);
             return true;
           })
         : null;
@@ -1216,9 +1413,11 @@ export default function AdminCriteriaEditor({ authUser }) {
         const allSecs = inFunc ? funcSections : coreEsgSections;
         const current = allSecs.find(s => s.id === id);
         const body = { ...current, ...payload };
+        const patchBody = { nameTh: body.nameTh, totalWeight: body.totalWeight };
+        if (payload.groupWeights !== undefined) patchBody.groupWeights = payload.groupWeights;
         const r = await authFetch(`/api/criteria/categories/${id}`, {
           method: "PATCH",
-          body: JSON.stringify({ nameTh: body.nameTh, totalWeight: body.totalWeight }),
+          body: JSON.stringify(patchBody),
         });
         if (!r.ok) throw new Error();
         // Persist buffer section + scaled items when a Core/ESG weight changed
@@ -1260,6 +1459,15 @@ export default function AdminCriteriaEditor({ authUser }) {
             }));
           }
         }
+        // Update local state
+        setSecs(prev => prev.map(s => {
+          if (s.id !== id) return s;
+          const updated = { ...s };
+          if (payload.nameTh       !== undefined) updated.nameTh       = payload.nameTh;
+          if (payload.totalWeight  !== undefined) updated.totalWeight  = Number(payload.totalWeight);
+          if (payload.groupWeights !== undefined) updated.groupWeights = payload.groupWeights;
+          return updated;
+        }));
         showToast("บันทึกหัวข้อสำเร็จ");
         reloadContext();
       } catch {
@@ -1276,8 +1484,8 @@ export default function AdminCriteriaEditor({ authUser }) {
       if (!sec) return;
       const pool = sec.items.filter(it => {
         if (it.isActive === false) return false;
-        if (esgFilter === "ho")      return !it.code?.startsWith("F");
-        if (esgFilter === "factory") return  it.code?.startsWith("F");
+        if (esgFilter === "ho")      return !isEsgFactory(it.code);
+        if (esgFilter === "factory") return  isEsgFactory(it.code);
         return true;
       });
       const scales = scaleItemsToTotal(pool, sec.totalWeight, true); // force equal
@@ -1349,8 +1557,8 @@ export default function AdminCriteriaEditor({ authUser }) {
           const esgPool = (!inFunc && isEsgSec(itemSec))
             ? itemSec.items.filter(it => {
                 if (it.isActive === false) return false;
-                if (esgFilter === "ho") return !it.code?.startsWith("F");
-                if (esgFilter === "factory") return it.code?.startsWith("F");
+                if (esgFilter === "ho") return !isEsgFactory(it.code);
+                if (esgFilter === "factory") return isEsgFactory(it.code);
                 return true;
               })
             : null;
@@ -1389,7 +1597,7 @@ export default function AdminCriteriaEditor({ authUser }) {
     esgSecs.forEach(sec => {
       const pool = sec.items.filter(it => {
         if (it.isActive === false) return false;
-        return esgFilter === "factory" ? it.code?.startsWith("F") : !it.code?.startsWith("F");
+        return esgFilter === "factory" ? isEsgFactory(it.code) : !isEsgFactory(it.code);
       });
       if (pool.length === 0) return;
       const sum = pool.reduce((s, it) => s + (it.defaultWeight ?? 0), 0);
@@ -1673,7 +1881,7 @@ export default function AdminCriteriaEditor({ authUser }) {
             {addingSection === 'core'
               ? <AddSectionRow saving={savingSection} onCancel={() => setAddingSection(null)}
                   onSave={({ nameTh, totalWeight: tw }) => handleAddSection(
-                    evalType === 'post_eval' ? 'POST-CAT' : 'PRE-CAT', nameTh, tw
+                    evalType === 'post_eval' ? 'POST-CORE' : 'PRE-CORE', nameTh, tw
                   )}
                 />
               : <button onClick={() => setAddingSection('core')} disabled={!!saving}

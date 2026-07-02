@@ -400,6 +400,136 @@ pool.connect()
       ALTER TABLE evaluation_criteria ADD CONSTRAINT evaluation_criteria_set_code_key UNIQUE (criteria_set, code);
     `).catch(err => console.warn('evaluation_criteria criteria_set migration warning:', err.message));
 
+    // ── Category code rename migration (v4) ──────────────────────
+    // Must run BEFORE seedCriteriaFromConstants so the seeder sees new codes
+    // and does DO NOTHING instead of inserting duplicate rows.
+    // Old codes: PRE-CAT1..N, POST-CAT1..N, M1-CAT1..M7-CAT1
+    // New codes: PRE-CORE1..N / PRE-ESG, POST-CORE1..N / POST-ESG, FUNC-M1..FUNC-M7
+    // Idempotent: WHERE clauses only match old-style codes, so re-running is safe.
+    // Step A: remove new-format rows ONLY IF old-format rows still coexist
+    // (handles the edge case where seeder ran before this migration block existed)
+    await client.query(`
+      -- PRE/POST: delete new-format category rows when old-format still present
+      DELETE FROM evaluation_categories
+       WHERE (code ~ '^PRE-CORE[0-9]+$' OR code = 'PRE-ESG')
+         AND EXISTS (SELECT 1 FROM evaluation_categories WHERE code ~ '^PRE-CAT[0-9]+$');
+      DELETE FROM evaluation_categories
+       WHERE (code ~ '^POST-CORE[0-9]+$' OR code = 'POST-ESG')
+         AND EXISTS (SELECT 1 FROM evaluation_categories WHERE code ~ '^POST-CAT[0-9]+$');
+
+      -- Function modules: remove new-format criteria + categories if old-format criteria exist
+      DELETE FROM score_level_descriptions
+       WHERE criterion_id IN (SELECT id FROM evaluation_criteria WHERE criteria_set ~ '^m[0-9]+$')
+         AND EXISTS (SELECT 1 FROM evaluation_criteria WHERE criteria_set ~ '^module_m[0-9]+');
+      DELETE FROM evaluation_criteria
+       WHERE criteria_set ~ '^m[0-9]+$'
+         AND EXISTS (SELECT 1 FROM evaluation_criteria WHERE criteria_set ~ '^module_m[0-9]+');
+      DELETE FROM evaluation_categories
+       WHERE code ~ '^FUNC-M[0-9]+$'
+         AND EXISTS (SELECT 1 FROM evaluation_categories WHERE code ~ '^[A-Z][0-9]+-CAT');
+    `).catch(err => console.warn('pre-migration cleanup warning:', err.message));
+
+    // Step B: rename old-format codes to new-format
+    await client.query(`
+      UPDATE evaluation_categories
+         SET code = regexp_replace(code, '^PRE-CAT([0-9]+)$', 'PRE-CORE\\1')
+       WHERE code ~ '^PRE-CAT[0-9]+$' AND name_th NOT ILIKE '%ESG%';
+    `).catch(err => console.warn('rename PRE-CORE warning:', err.message));
+    await client.query(`
+      UPDATE evaluation_categories SET code = 'PRE-ESG'
+       WHERE code ~ '^PRE-CAT[0-9]+$' AND name_th ILIKE '%ESG%';
+    `).catch(err => console.warn('rename PRE-ESG warning:', err.message));
+    await client.query(`
+      UPDATE evaluation_categories
+         SET code = regexp_replace(code, '^POST-CAT([0-9]+)$', 'POST-CORE\\1')
+       WHERE code ~ '^POST-CAT[0-9]+$' AND name_th NOT ILIKE '%ESG%';
+    `).catch(err => console.warn('rename POST-CORE warning:', err.message));
+    await client.query(`
+      UPDATE evaluation_categories SET code = 'POST-ESG'
+       WHERE code ~ '^POST-CAT[0-9]+$' AND name_th ILIKE '%ESG%';
+    `).catch(err => console.warn('rename POST-ESG warning:', err.message));
+    await client.query(`
+      UPDATE evaluation_categories
+         SET code = 'FUNC-' || regexp_replace(code, '^([A-Z][0-9]+)-CAT.*$', '\\1')
+       WHERE code ~ '^[A-Z][0-9]+-CAT';
+    `).catch(err => console.warn('rename FUNC-M warning:', err.message));
+    await client.query(`
+      UPDATE evaluation_criteria
+         SET criteria_set = regexp_replace(criteria_set, '^module_', '')
+       WHERE criteria_set ~ '^module_m[0-9]+';
+    `).catch(err => console.warn('rename criteria_set warning:', err.message));
+
+    // ── Drop unused tables + legacy seed data ────────────────────
+    await client.query(`
+      -- evaluation_category_weights: defined in schema but never queried by any route
+      DROP TABLE IF EXISTS evaluation_category_weights;
+
+      -- Legacy placeholder rows from seed.sql (criteria_set='legacy', codes CAT1/CAT2)
+      DELETE FROM score_level_descriptions
+       WHERE criterion_id IN (
+         SELECT id FROM evaluation_criteria WHERE criteria_set = 'legacy'
+       );
+      DELETE FROM evaluation_criteria WHERE criteria_set = 'legacy';
+      DELETE FROM evaluation_categories WHERE code IN ('CAT1', 'CAT2');
+    `).catch(err => console.warn('cleanup migration warning:', err.message));
+
+    // ── is_active soft-delete for categories (v5) ───────────────
+    await client.query(`
+      ALTER TABLE evaluation_categories ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
+      UPDATE evaluation_categories SET is_active = TRUE WHERE is_active IS NULL;
+    `).catch(err => console.warn('evaluation_categories is_active migration warning:', err.message));
+
+    // ── ESG sub-group weights (v6b) ──────────────────────────────
+    // group_weights stores per-sub-group % within the ESG section:
+    // { "1": 33.33, "2": 33.33, "3": 33.34 } — group number → % of section weight.
+    await client.query(`
+      ALTER TABLE evaluation_categories ADD COLUMN IF NOT EXISTS group_weights JSONB;
+    `).catch(err => console.warn('group_weights migration warning:', err.message));
+
+    // ── ESG item code rename (v5) ────────────────────────────────
+    // Old: 5.1.1 / F5.1.2 (section prefix + subsection + item)
+    // New: ESG1.1 / ESGF1.2 (subsection + item, no section prefix)
+    // Idempotent: ESG/ESGF codes don't match the old-format WHERE clauses.
+    await client.query(`
+      UPDATE evaluation_criteria
+         SET code = 'ESG' || regexp_replace(code, '^\\d+\\.(\\d+)\\.(\\d+)$', '\\1.\\2')
+       WHERE criteria_set IN ('pre_eval', 'post_eval')
+         AND code ~ '^\\d+\\.\\d+\\.\\d+$';
+
+      UPDATE evaluation_criteria
+         SET code = 'ESGF' || regexp_replace(code, '^F\\d+\\.(\\d+)\\.(\\d+)$', '\\1.\\2')
+       WHERE criteria_set IN ('pre_eval', 'post_eval')
+         AND code ~ '^F\\d+\\.\\d+\\.\\d+$';
+    `).catch(err => console.warn('ESG item code rename warning:', err.message));
+
+    // ── Fix CORE/ESG display_order collision (v6) ───────────────
+    // New CORE sections added before this fix got MAX(display_order)+1 across
+    // the whole PRE-% family, landing them after ESG.
+    // Step 1: pull those CORE sections up to ESG's current slot.
+    // Step 2: push ESG to MAX(CORE)+1 so it always trails the CORE group.
+    await client.query(`
+      UPDATE evaluation_categories c
+         SET display_order = esg.display_order
+        FROM evaluation_categories esg
+       WHERE esg.code = regexp_replace(c.code, '-CORE\\d+$', '-ESG')
+         AND c.code  ~ '^(PRE|POST)-CORE\\d+$'
+         AND c.display_order > esg.display_order;
+    `).catch(err => console.warn('CORE/ESG order fix step-1 warning:', err.message));
+
+    await client.query(`
+      UPDATE evaluation_categories esg
+         SET display_order = sub.max_core + 1
+        FROM (
+          SELECT regexp_replace(code, '-CORE\\d+$', '-ESG') AS esg_code,
+                 MAX(display_order) AS max_core
+            FROM evaluation_categories
+           WHERE code ~ '^(PRE|POST)-CORE\\d+$'
+           GROUP BY esg_code
+        ) sub
+       WHERE esg.code = sub.esg_code
+         AND esg.code IN ('PRE-ESG', 'POST-ESG');
+    `).catch(err => console.warn('CORE/ESG order fix step-2 warning:', err.message));
+
     const { seedCriteriaFromConstants } = require('./utils/seedCriteriaFromConstants');
     await seedCriteriaFromConstants(client)
       .then(() => console.log('✅ evaluation_criteria seeded from src/constants.js'))
