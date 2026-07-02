@@ -1082,7 +1082,7 @@ export default function AdminCriteriaEditor({ authUser }) {
           // First time: all sections in pool start at 0 → set all equal to clamped
           setSecs(prev => prev.map(s => {
             if (!pool.some(p => p.id === s.id)) return s;
-            const scales = scaleItemsToTotal(s.items, clamped);
+            const scales = scaleSectionItemsToTotal(s, clamped);
             return { ...s, totalWeight: clamped, items: s.items.map(it => scales[it.id] !== undefined ? { ...it, defaultWeight: scales[it.id] } : it) };
           }));
           return;
@@ -1094,12 +1094,12 @@ export default function AdminCriteriaEditor({ authUser }) {
         }
         setSecs(prev => prev.map(s => {
           if (s.id === id) {
-            const scales = scaleItemsToTotal(s.items, clamped);
+            const scales = scaleSectionItemsToTotal(s, clamped);
             return { ...s, totalWeight: clamped, items: s.items.map(it => scales[it.id] !== undefined ? { ...it, defaultWeight: scales[it.id] } : it) };
           }
           const adjW = bufResult.adjustments?.[s.id];
           if (adjW !== undefined) {
-            const scales = scaleItemsToTotal(s.items, adjW);
+            const scales = scaleSectionItemsToTotal(s, adjW);
             return { ...s, totalWeight: adjW, items: s.items.map(it => scales[it.id] !== undefined ? { ...it, defaultWeight: scales[it.id] } : it) };
           }
           return s;
@@ -1229,7 +1229,7 @@ export default function AdminCriteriaEditor({ authUser }) {
           const buf = getCatBuffer(pool, id, clamped);
 
           // Save items in main section (proportional — preserves custom ratios)
-          const mainScales = scaleItemsToTotal(current?.items ?? [], clamped);
+          const mainScales = current ? scaleSectionItemsToTotal(current, clamped) : {};
           await Promise.all(Object.entries(mainScales).map(([itemId, w]) => {
             const it = current?.items?.find(x => x.id === itemId);
             if (!it) return Promise.resolve();
@@ -1248,7 +1248,7 @@ export default function AdminCriteriaEditor({ authUser }) {
                 method: "PATCH",
                 body: JSON.stringify({ nameTh: bufSec.nameTh, totalWeight: w }),
               });
-              const bufScales = scaleItemsToTotal(bufSec.items, w);
+              const bufScales = scaleSectionItemsToTotal(bufSec, w);
               await Promise.all(Object.entries(bufScales).map(([itemId, iw]) => {
                 const it = bufSec.items.find(x => x.id === itemId);
                 if (!it) return Promise.resolve();
@@ -1377,7 +1377,7 @@ export default function AdminCriteriaEditor({ authUser }) {
         setSaving(null);
       }
     }
-  }, [coreEsgSections, funcSections, esgFilter, evalType, showToast, loadAll, reloadContext, getCatBuffer, getItemBuffer, scaleItemsToTotal]);
+  }, [coreEsgSections, funcSections, esgFilter, evalType, showToast, loadAll, reloadContext, getCatBuffer, getItemBuffer, scaleItemsToTotal, scaleSectionItemsToTotal]);
 
   // Auto-normalize ESG item weights when filter or data changes
   useEffect(() => {
@@ -1491,6 +1491,57 @@ export default function AdminCriteriaEditor({ authUser }) {
       setSaving(null);
     }
   }, [coreEsgSections, scaleItemsToTotal, showToast, reloadContext, loadAll, evalType, setCoreTarget]);
+
+  // ── ESG total weight: distribute across ESG sections; within each section,
+  // HO and Factory sub-criteria are separate tracks and each gets scaled to
+  // the full new total independently (see scaleSectionItemsToTotal) ──
+  const handleEsgWeightSave = useCallback(async (newTotal) => {
+    const clamped = Math.max(0, Number(newTotal) || 0);
+    const isESGSec = s => !!(s.nameTh?.includes('ESG') || s.code?.match(/ESG/i));
+    const savedEsg = (savedSections.current ?? coreEsgSections).filter(isESGSec);
+    const n = savedEsg.length || 1;
+    const newWeights = {};
+    const each = r2adm(clamped / n);
+    let rem = clamped;
+    savedEsg.forEach((sec, i) => {
+      if (i === n - 1) { newWeights[sec.id] = Math.max(0, r2adm(rem)); }
+      else { newWeights[sec.id] = each; rem -= each; }
+    });
+    const syncEsg = prev => prev.map(s => {
+      const newW = newWeights[s.id];
+      if (newW === undefined) return s;
+      const scales = scaleSectionItemsToTotal(s, newW, true);
+      return { ...s, totalWeight: newW, items: s.items.map(it => scales[it.id] !== undefined ? { ...it, defaultWeight: scales[it.id] } : it) };
+    });
+    setCoreEsgSections(syncEsg);
+    setSaving({ type: "esg-total" });
+    try {
+      await Promise.all(savedEsg.map(async sec => {
+        const newW = newWeights[sec.id];
+        if (newW === undefined) return;
+        const cr = await authFetch(`/api/criteria/categories/${sec.id}`, {
+          method: "PATCH", body: JSON.stringify({ nameTh: sec.nameTh, totalWeight: newW }),
+        });
+        if (!cr.ok) throw new Error(`PATCH category ${sec.id} failed`);
+        const scales = scaleSectionItemsToTotal(sec, newW, true);
+        await Promise.all(Object.entries(scales).map(([itemId, w]) => {
+          const it = sec.items.find(x => x.id === itemId);
+          if (!it) return Promise.resolve();
+          return authFetch(`/api/criteria/items/${itemId}`, {
+            method: "PATCH", body: JSON.stringify({ nameTh: it.nameTh, defaultWeight: w }),
+          });
+        }));
+      }));
+      savedSections.current = syncEsg(savedSections.current ?? coreEsgSections);
+      showToast("บันทึกน้ำหนัก ESG สำเร็จ");
+      reloadContext();
+    } catch {
+      showToast("บันทึกน้ำหนัก ESG ไม่สำเร็จ", "error");
+      loadAll(evalType);
+    } finally {
+      setSaving(null);
+    }
+  }, [coreEsgSections, scaleSectionItemsToTotal, showToast, reloadContext, loadAll, evalType]);
 
   const coreWeight  = r2adm(coreSections.reduce((s, c) => s + (c.totalWeight ?? 0), 0));
   const esgWeight   = r2adm(esgSections.reduce((s, c) => s + (c.totalWeight ?? 0), 0));
@@ -1668,7 +1719,8 @@ export default function AdminCriteriaEditor({ authUser }) {
           </PartCard>
 
           {/* ESG */}
-          <PartCard label="ESG" weight={esgWeight} accent="#1565c0">
+          <PartCard label="ESG" weight={esgWeight} accent="#1565c0"
+            onWeightSave={handleEsgWeightSave} disabled={!!saving}>
             {/* HO/Store | Factory filter */}
             <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
               <EsgFilterBtn active={esgFilter === "ho"}      onClick={() => setEsgFilter("ho")}>HO / Store</EsgFilterBtn>
