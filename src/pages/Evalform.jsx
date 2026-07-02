@@ -24,7 +24,6 @@ const AHP_LOCAL_W = {
   '2.1': 42.54, '2.2': 23.06, '2.3': 14.92, '2.4': 19.48,
   '3.1': 33.33, '3.2': 33.33, '3.3': 16.67, '3.4': 16.67,
   '4.1': 32.50, '4.2': 35.62, '4.3': 19.37, '4.4': 12.51,
-  'ESG1 สิ่งแวดล้อม / Environment': 33.33, 'ESG2 สังคม — แรงงานและสิทธิมนุษยชน / Social': 33.33, 'ESG3 ธรรมาภิบาล / Governance': 33.33,
 };
 function getAhpMain(section) {
   const first = section.items.find(i => !i.divider);
@@ -40,13 +39,23 @@ function getAhpLocal(itemNo) {
 }
 
 
-// Distribute ESG section weight using per-sub-group groupWeight values on level-2 dividers.
-function assignEsgSubGroupWeights(sectionItems, sw, items) {
-  let curGroupWeight = null;
+// ESG sub-group dividers are labelled "ESG1 ...", "ESGF2 ...", etc. — the
+// trailing digit is the stable key used to key group-weight overrides,
+// independent of the HO/Factory "ESG" vs "ESGF" prefix.
+function esgGroupKey(label) {
+  return label?.match(/^(?:ESG|ESGF)(\d+)/i)?.[1] ?? null;
+}
+
+// Distribute ESG section weight across its items using `groupPct` (key =
+// esgGroupKey → % of section, e.g. {"1": 33.33, ...}), falling back to each
+// divider's own groupWeight, then to an equal 3-way split.
+function assignEsgSubGroupWeights(sectionItems, sw, items, groupPct) {
+  let curKey        = null;
+  let curFallbackPct = null;
   let curGroupItems  = [];
   const flush = () => {
     if (!curGroupItems.length) return;
-    const pct = curGroupWeight ?? (100 / 3);
+    const pct = (groupPct && curKey && groupPct[curKey] != null) ? groupPct[curKey] : (curFallbackPct ?? (100 / 3));
     const absW = (pct / 100) * sw;
     const each = r2(absW / curGroupItems.length);
     let rem = absW;
@@ -58,7 +67,7 @@ function assignEsgSubGroupWeights(sectionItems, sw, items) {
   };
   sectionItems.forEach(item => {
     if (item.divider) {
-      if (item.level === 2) { flush(); curGroupWeight = item.groupWeight ?? null; }
+      if (item.level === 2) { flush(); curKey = esgGroupKey(item.label); curFallbackPct = item.groupWeight ?? null; }
       return;
     }
     curGroupItems.push(item);
@@ -219,12 +228,11 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
         // unshifted index here was reading the Function section's weight (25)
         // instead of ESG's (15), causing totals like 110% instead of 100%.
         const sw = prev.sections[esgSectionIndexInCriteria] ?? (RAW_CRITERIA[esgSectionIndex]?.weight ?? 0);
-        const each = r2(sw / chosenCodes.length);
-        let rem = sw;
-        chosenCodes.forEach((code, i) => {
-          if (i === chosenCodes.length - 1) newItems[code] = Math.max(0, r2(rem));
-          else { newItems[code] = each; rem -= each; }
-        });
+        // Respect each group's configured groupWeight (from admin/parameter
+        // page) instead of splitting sw evenly across every item — otherwise
+        // switching HO ↔ Factory would discard the ESG1/ESG2/ESG3 ratios.
+        const chosenSection = esgTarget === "ho" || esgTarget === "factory" ? CRITERIA[esgSectionIndexInCriteria] : null;
+        if (chosenSection) assignEsgSubGroupWeights(chosenSection.items, sw, newItems);
       }
       return { ...prev, items: newItems };
     });
@@ -576,7 +584,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
               )}
               {section.items.map((item, ii) =>
                 item.divider
-                  ? <DividerRow key={item.label} label={item.label} level={item.level} />
+                  ? <DividerRow key={item.label} label={item.label} level={item.level} groupWeight={item.groupWeight} />
                   : (
                     <ScoreRow
                       key={item.no}
@@ -617,7 +625,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
               )}
               {section.items.map((item, ii) =>
                 item.divider
-                  ? <DividerMobile key={item.label} label={item.label} level={item.level} />
+                  ? <DividerMobile key={item.label} label={item.label} level={item.level} groupWeight={item.groupWeight} />
                   : (
                     <ScoreCardMobile
                       key={item.no}
@@ -1112,7 +1120,7 @@ function EsgTargetSelector({ value, onChange }) {
   );
 }
 
-function DividerRow({ label, level }) {
+function DividerRow({ label, level, groupWeight }) {
   const isMain = level === 1;
   return (
     <div style={{
@@ -1137,6 +1145,11 @@ function DividerRow({ label, level }) {
       }}>
         {label}
       </span>
+      {level === 2 && (
+        <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: "#1558a0" }}>
+          {r2(groupWeight ?? 100 / 3)}%
+        </span>
+      )}
     </div>
   );
 }
@@ -1323,7 +1336,7 @@ function SectionHeaderMobile({ section, secWeight, ahpW }) {
   );
 }
 
-function DividerMobile({ label, level }) {
+function DividerMobile({ label, level, groupWeight }) {
   const isMain = level === 1;
   return (
     <div style={{
@@ -1337,6 +1350,11 @@ function DividerMobile({ label, level }) {
       <span style={{ fontSize: isMain ? 13 : 12, fontWeight: isMain ? 700 : 600, color: isMain ? "#1558a0" : "#4a6080" }}>
         {label}
       </span>
+      {level === 2 && (
+        <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: "#1558a0" }}>
+          {r2(groupWeight ?? 100 / 3)}%
+        </span>
+      )}
     </div>
   );
 }

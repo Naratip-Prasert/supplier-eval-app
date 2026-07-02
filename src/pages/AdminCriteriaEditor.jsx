@@ -183,6 +183,16 @@ function computeEsgEffectiveWeights(sectionItems, totalWeight, groupWeights, esg
     const pct  = groupWeights?.[grp] != null ? Number(groupWeights[grp]) : (100 / 3);
     const absW = (pct / 100) * sw;
     const n    = items.length;
+
+    // Respect each item's own saved weight once they've been customized
+    // (i.e. already sum to the group's target) — otherwise fall back to an
+    // equal split, same as before.
+    const customSum = items.reduce((s, it) => s + (it.defaultWeight ?? 0), 0);
+    if (items.every(it => it.defaultWeight != null) && Math.abs(customSum - absW) < 0.1) {
+      items.forEach(it => { result[it.id] = r2(it.defaultWeight); });
+      return;
+    }
+
     let rem = absW;
     items.forEach((it, i) => {
       if (i === n - 1) result[it.id] = r2(Math.max(0, rem));
@@ -555,7 +565,7 @@ function AddSectionRow({ onSave, onCancel, saving }) {
 
 
 // ── ItemRow ───────────────────────────────────────────────────
-function ItemRow({ item, onUpdate, onOpenLevels, saving, disabled, effectiveWeight, hideWeight, editableEffective }) {
+function ItemRow({ item, onUpdate, onOpenLevels, saving, disabled, effectiveWeight, hideWeight, editableEffective, esgEditable }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const isSaving = saving?.type === "item" && saving?.id === item.id;
 
@@ -580,17 +590,17 @@ function ItemRow({ item, onUpdate, onOpenLevels, saving, disabled, effectiveWeig
       </td>
       {!hideWeight && (
         <td style={{ padding: "6px 10px", textAlign: "center", width: 80 }}>
-          {effectiveWeight != null && !editableEffective
-            ? /* ESG: read-only computed weight */
+          {effectiveWeight != null && !editableEffective && !esgEditable
+            ? /* fallback: read-only computed weight (currently unused — ESG is editable) */
               <span style={{
                 display: "inline-flex", alignItems: "center", justifyContent: "center",
                 minWidth: 42, padding: "2px 8px", borderRadius: 6,
                 background: "#e3f2fd", color: "#1565c0", fontWeight: 700, fontSize: 13,
                 border: "1.5px solid #90caf9",
               }}>{effectiveWeight}</span>
-            : /* Function/Core: editable — show effective weight when computed, defaultWeight otherwise */
+            : /* Function/Core/ESG: editable — show effective weight when computed, defaultWeight otherwise */
               <WeightInput
-                value={effectiveWeight != null && editableEffective ? effectiveWeight : item.defaultWeight}
+                value={effectiveWeight != null ? effectiveWeight : item.defaultWeight}
                 disabled={disabled}
                 onChange={v => onUpdate("item-weight", item.id, { defaultWeight: v })}
                 onSave={v => saveItem({ defaultWeight: v })}
@@ -678,7 +688,17 @@ function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, e
     if (!gwOk) return;
     setSavingGW(true);
     try {
-      await onUpdate("save-cat", section.id, { groupWeights });
+      // Saving the group % alone only touched the group_weights column —
+      // the per-item default_weight for every ESG1/ESG2/ESG3 sub-item was
+      // never persisted, so the DB stayed out of sync with what was shown
+      // on screen (which is just a live client-side computation). Compute
+      // and push the resulting item weights for BOTH HO and Factory subsets
+      // (group % is shared between them) alongside the group_weights save.
+      const itemWeights = {
+        ...computeEsgEffectiveWeights(section.items, section.totalWeight, groupWeights, 'ho'),
+        ...computeEsgEffectiveWeights(section.items, section.totalWeight, groupWeights, 'factory'),
+      };
+      await onUpdate("save-cat", section.id, { groupWeights, itemWeights });
     } finally {
       setSavingGW(false);
     }
@@ -829,7 +849,7 @@ function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, e
                 <th style={TH}>รหัส</th>
                 <th style={{ ...TH, textAlign: "left" }}>ชื่อหัวข้อ (คลิกเพื่อแก้ไข)</th>
                 <th style={TH}>
-                  น้ำหนัก{effectiveWeights && !effectiveEditable ? " (คำนวณ)" : ""}
+                  น้ำหนัก{effectiveWeights && !effectiveEditable && !isEsgSection ? " (คำนวณ)" : ""}
                 </th>
                 <th style={TH}>ระดับ</th>
                 <th style={TH}>แก้ระดับ</th>
@@ -845,6 +865,7 @@ function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, e
                     saving={saving} disabled={disabled}
                     effectiveWeight={effectiveWeights?.[item.id]}
                     editableEffective={effectiveEditable}
+                    esgEditable={isEsgSection}
                   />
                 ))
               }
@@ -1203,6 +1224,52 @@ export default function AdminCriteriaEditor({ authUser }) {
     return { adjustments };
   }, []);
 
+  // ESG sub-items (ESG1.1, ESG1.2, ...) rebalance within their OWN sub-group
+  // only, so the group's absolute weight (groupWeights[grp]% of section
+  // totalWeight) stays fixed — unlike getItemBuffer, which balances against
+  // the whole section pool and would let one group's edit bleed weight into
+  // another group's items.
+  const getEsgItemBuffer = useCallback((pool, totalWeight, groupWeights, editedId, newVal) => {
+    const grpOf = code => (code ?? '').match(/^ESGF?(\d+)\./i)?.[1] ?? null;
+    const edited = pool.find(it => it.id === editedId);
+    const grp = edited ? grpOf(edited.code) : null;
+    if (!grp) return { adjustments: {}, clamped: Math.max(0, Number(newVal) || 0) };
+
+    const groupItems = pool.filter(it => grpOf(it.code) === grp);
+    const pct  = groupWeights?.[grp] != null ? Number(groupWeights[grp]) : (100 / 3);
+    const absW = (pct / 100) * (totalWeight ?? 0);
+    const clamped = Math.max(0, Math.min(absW, Number(newVal) || 0));
+
+    const others = groupItems.filter(it => it.id !== editedId);
+    if (others.length === 0) return { adjustments: {}, clamped };
+
+    // Items never customized before have no defaultWeight in the DB (null)
+    // — treat their "current share" as an equal split, same as what's on
+    // screen, instead of 0 (which would silently zero them out here and
+    // leave them permanently null, breaking the "every item has a saved
+    // weight" check in computeEsgEffectiveWeights on the next load).
+    const fallbackShare = absW / groupItems.length;
+    const oldOthersSum = others.reduce((s, it) => s + (it.defaultWeight ?? fallbackShare), 0);
+    const remaining = Math.max(0, r2adm(absW - clamped));
+
+    // Every other item in the group gets an explicit weight written —
+    // proportional to its existing share, or equal split if none had one —
+    // so a single edit never leaves a sibling item's weight as null.
+    const adjustments = {};
+    let rem = remaining;
+    others.forEach((it, i) => {
+      if (i === others.length - 1) { adjustments[it.id] = Math.max(0, r2adm(rem)); return; }
+      const share = oldOthersSum > 0
+        ? ((it.defaultWeight ?? fallbackShare) / oldOthersSum) * remaining
+        : remaining / others.length;
+      const w = r2adm(share);
+      adjustments[it.id] = w;
+      rem -= w;
+    });
+
+    return { adjustments, clamped };
+  }, []);
+
   // Scale items to match newTotal.
   // If items have existing weights → proportional (preserves user's custom ratios).
   // If all items are 0 → equal: integer first → equal 2-dp → buffer last.
@@ -1331,16 +1398,30 @@ export default function AdminCriteriaEditor({ authUser }) {
       }
       // Use saved (DB) state for the section, not the live React state
       const snapSec = (savedSections.current ?? coreEsgSections).find(s => s.items?.some(it => it.id === id)) ?? sec;
-      // For ESG sections: buffer only within the currently-filtered subset (HO or Factory)
-      const esgPool = (!inFunc && isEsgSec(snapSec))
-        ? snapSec.items.filter(it => {
-            if (it.isActive === false) return false;
-            if (esgFilter === "ho") return !isEsgFactory(it.code);
-            if (esgFilter === "factory") return isEsgFactory(it.code);
-            return true;
-          })
-        : null;
-      const activeItems = esgPool ?? snapSec.items.filter(it => it.isActive !== false);
+
+      // ESG sections: rebalance within the item's OWN ESG1/ESG2/ESG3
+      // sub-group only (filtered to the current HO/Factory subset), so the
+      // group's configured % stays fixed instead of bleeding into other groups.
+      if (!inFunc && isEsgSec(snapSec)) {
+        const esgPool = snapSec.items.filter(it => {
+          if (it.isActive === false) return false;
+          if (esgFilter === "ho") return !isEsgFactory(it.code);
+          if (esgFilter === "factory") return isEsgFactory(it.code);
+          return true;
+        });
+        const buf = getEsgItemBuffer(esgPool, snapSec.totalWeight, snapSec.groupWeights, id, payload.defaultWeight);
+        setSecs(prev => prev.map(s => ({
+          ...s, items: s.items.map(it => {
+            if (it.id === id) return { ...it, defaultWeight: buf.clamped };
+            const adjW = buf.adjustments?.[it.id];
+            if (adjW !== undefined) return { ...it, defaultWeight: adjW };
+            return it;
+          }),
+        })));
+        return;
+      }
+
+      const activeItems = snapSec.items.filter(it => it.isActive !== false);
       const itemOldSum = activeItems.reduce((s, it) => s + (it.defaultWeight ?? 0), 0);
       const itemClamped = Math.max(0, Number(payload.defaultWeight) || 0);
       if (itemOldSum < 0.005) {
@@ -1350,10 +1431,7 @@ export default function AdminCriteriaEditor({ authUser }) {
         })));
         return;
       }
-      const bufSec = esgPool
-        ? { ...sec, items: esgPool, totalWeight: sec.totalWeight }
-        : sec;
-      const buf = getItemBuffer(bufSec, id, payload.defaultWeight);
+      const buf = getItemBuffer(sec, id, payload.defaultWeight);
       if (buf.tooLarge) {
         showToast("น้ำหนักเกิน — แก้ตัวก่อนหน้าก่อน", "error");
         return;
@@ -1459,6 +1537,20 @@ export default function AdminCriteriaEditor({ authUser }) {
             }));
           }
         }
+        // ESG group % save: push the resulting per-item weights (computed
+        // client-side from the new groupWeights) to the DB too — otherwise
+        // only the group_weights column changes and every ESG1/ESG2/ESG3
+        // sub-item's default_weight stays stale.
+        if (payload.itemWeights) {
+          await Promise.all(Object.entries(payload.itemWeights).map(([itemId, w]) => {
+            const it = current?.items?.find(x => x.id === itemId);
+            if (!it) return Promise.resolve();
+            return authFetch(`/api/criteria/items/${itemId}`, {
+              method: "PATCH",
+              body: JSON.stringify({ nameTh: it.nameTh, defaultWeight: w }),
+            });
+          }));
+        }
         // Update local state
         setSecs(prev => prev.map(s => {
           if (s.id !== id) return s;
@@ -1466,6 +1558,11 @@ export default function AdminCriteriaEditor({ authUser }) {
           if (payload.nameTh       !== undefined) updated.nameTh       = payload.nameTh;
           if (payload.totalWeight  !== undefined) updated.totalWeight  = Number(payload.totalWeight);
           if (payload.groupWeights !== undefined) updated.groupWeights = payload.groupWeights;
+          if (payload.itemWeights) {
+            updated.items = s.items.map(it =>
+              payload.itemWeights[it.id] !== undefined ? { ...it, defaultWeight: payload.itemWeights[it.id] } : it
+            );
+          }
           return updated;
         }));
         showToast("บันทึกหัวข้อสำเร็จ");
@@ -1488,7 +1585,29 @@ export default function AdminCriteriaEditor({ authUser }) {
         if (esgFilter === "factory") return  isEsgFactory(it.code);
         return true;
       });
-      const scales = scaleItemsToTotal(pool, sec.totalWeight, true); // force equal
+      // Per-group equal split (respects groupWeights), and only fills in
+      // groups that still have an un-set item — a flat whole-section split
+      // (the old behavior) ignored group boundaries entirely and would
+      // silently wipe out any custom per-item weights on every reload.
+      const grpOf = code => (code ?? '').match(/^ESGF?(\d+)\./i)?.[1] ?? null;
+      const byGroup = {};
+      pool.forEach(it => {
+        const g = grpOf(it.code);
+        if (g) (byGroup[g] = byGroup[g] ?? []).push(it);
+      });
+      const scales = {};
+      Object.entries(byGroup).forEach(([grp, items]) => {
+        if (!items.some(it => it.defaultWeight == null)) return; // fully customized already — leave alone
+        const pct  = sec.groupWeights?.[grp] != null ? Number(sec.groupWeights[grp]) : (100 / 3);
+        const absW = (pct / 100) * (sec.totalWeight ?? 0);
+        const n    = items.length;
+        let rem = absW;
+        items.forEach((it, i) => {
+          if (i === n - 1) scales[it.id] = Math.max(0, r2adm(rem));
+          else { const w = r2adm(absW / n); scales[it.id] = w; rem -= w; }
+        });
+      });
+      if (Object.keys(scales).length === 0) return;
       setSecs(prev => prev.map(s => s.id !== id ? s : {
         ...s,
         items: s.items.map(it => scales[it.id] !== undefined ? { ...it, defaultWeight: scales[it.id] } : it),
@@ -1545,27 +1664,37 @@ export default function AdminCriteriaEditor({ authUser }) {
       let itemSec = null;
       allSecs.forEach(s => s.items?.forEach(it => { if (it.id === id) { item = it; itemSec = s; } }));
       if (!item) return;
-      const body = { ...item, ...payload };
+      const isEsgItem = !inFunc && itemSec && isEsgSec(itemSec) && payload.defaultWeight != null;
+      const esgPool = isEsgItem
+        ? itemSec.items.filter(it => {
+            if (it.isActive === false) return false;
+            if (esgFilter === "ho") return !isEsgFactory(it.code);
+            if (esgFilter === "factory") return isEsgFactory(it.code);
+            return true;
+          })
+        : null;
+      const esgBuf = isEsgItem
+        ? getEsgItemBuffer(esgPool, itemSec.totalWeight, itemSec.groupWeights, id, payload.defaultWeight)
+        : null;
+      const body = { ...item, ...payload, ...(esgBuf ? { defaultWeight: esgBuf.clamped } : {}) };
       try {
         const r = await authFetch(`/api/criteria/items/${id}`, {
           method: "PATCH",
           body: JSON.stringify({ nameTh: body.nameTh, detailTh: body.detailTh, defaultWeight: body.defaultWeight, code: body.code }),
         });
         if (!r.ok) throw new Error();
-        // Persist the buffer item when weight changed (ESG: respect filter)
-        if (payload.defaultWeight != null && itemSec) {
-          const esgPool = (!inFunc && isEsgSec(itemSec))
-            ? itemSec.items.filter(it => {
-                if (it.isActive === false) return false;
-                if (esgFilter === "ho") return !isEsgFactory(it.code);
-                if (esgFilter === "factory") return isEsgFactory(it.code);
-                return true;
-              })
-            : null;
-          const bufSec = esgPool
-            ? { ...itemSec, items: esgPool, totalWeight: itemSec.totalWeight }
-            : itemSec;
-          const buf = getItemBuffer(bufSec, id, payload.defaultWeight);
+        if (esgBuf?.adjustments) {
+          await Promise.all(Object.entries(esgBuf.adjustments).map(([itemId, w]) => {
+            const it = itemSec.items.find(x => x.id === itemId);
+            if (!it) return Promise.resolve();
+            return authFetch(`/api/criteria/items/${itemId}`, {
+              method: "PATCH",
+              body: JSON.stringify({ nameTh: it.nameTh, defaultWeight: w }),
+            });
+          }));
+        } else if (!isEsgItem && payload.defaultWeight != null && itemSec) {
+          // Non-ESG: buffer against the whole section pool as before
+          const buf = getItemBuffer(itemSec, id, payload.defaultWeight);
           if (buf.adjustments) {
             await Promise.all(Object.entries(buf.adjustments).map(([itemId, w]) => {
               const it = itemSec.items.find(x => x.id === itemId);
@@ -1585,9 +1714,14 @@ export default function AdminCriteriaEditor({ authUser }) {
         setSaving(null);
       }
     }
-  }, [coreEsgSections, funcSections, esgFilter, evalType, showToast, loadAll, reloadContext, getCatBuffer, getItemBuffer, scaleItemsToTotal, scaleSectionItemsToTotal]);
+  }, [coreEsgSections, funcSections, esgFilter, evalType, showToast, loadAll, reloadContext, getCatBuffer, getItemBuffer, getEsgItemBuffer, scaleItemsToTotal, scaleSectionItemsToTotal]);
 
-  // Auto-normalize ESG item weights when filter or data changes
+  // Auto-normalize ESG item weights when filter or data changes.
+  // Only fills in items that have never been set (defaultWeight == null) —
+  // checking the whole-section sum against totalWeight was fragile (any
+  // rounding drift across groups tripped it) and, worse, "normalize-esg"
+  // used to flatten ALL groups into one equal split, wiping out any custom
+  // per-item weights on every reload/tab switch.
   useEffect(() => {
     if (esgNormalized.current[esgFilter]) return;
     const isEsg = s => !!(s.nameTh?.includes('ESG') || s.code?.match(/ESG/i));
@@ -1600,8 +1734,7 @@ export default function AdminCriteriaEditor({ authUser }) {
         return esgFilter === "factory" ? isEsgFactory(it.code) : !isEsgFactory(it.code);
       });
       if (pool.length === 0) return;
-      const sum = pool.reduce((s, it) => s + (it.defaultWeight ?? 0), 0);
-      if (Math.abs(sum - sec.totalWeight) > 0.01) needsNorm = true;
+      if (pool.some(it => it.defaultWeight == null)) needsNorm = true;
     });
     esgNormalized.current[esgFilter] = true;
     if (needsNorm) esgSecs.forEach(sec => handleUpdate("normalize-esg", sec.id, {}));
