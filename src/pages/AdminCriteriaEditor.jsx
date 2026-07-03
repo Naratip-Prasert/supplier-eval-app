@@ -1012,6 +1012,7 @@ export default function AdminCriteriaEditor({ authUser }) {
   const [addingFuncMod,   setAddingFuncMod]   = useState(false); // false | true
   const [savingSection,   setSavingSection]   = useState(false);
   const [coreTarget,      setCoreTarget]      = useState(null); // authorized Core total
+  const [esgTarget,       setEsgTarget]       = useState(null); // authorized ESG total
   const esgNormalized  = useRef({ ho: false, factory: false });
   const coreNormalized = useRef(false);
   // Ground-truth mirror of what's actually in DB for coreEsgSections.
@@ -1042,6 +1043,7 @@ export default function AdminCriteriaEditor({ authUser }) {
       savedSections.current = d1;
       const isEsg = s => !!(s.nameTh?.includes('ESG') || s.code?.match(/ESG/i));
       setCoreTarget(d1.filter(s => !isEsg(s)).reduce((s, c) => s + (parseFloat(c.totalWeight) || 0), 0));
+      setEsgTarget(d1.filter(s =>  isEsg(s)).reduce((s, c) => s + (parseFloat(c.totalWeight) || 0), 0));
     } catch {
       showToast("โหลดข้อมูลไม่สำเร็จ — ตรวจสอบว่า server กำลังทำงานอยู่", "error");
     } finally {
@@ -1310,15 +1312,30 @@ export default function AdminCriteriaEditor({ authUser }) {
   // together, but they're alternate evaluation tracks, not one shared pool — each
   // subset must independently sum to the section's totalWeight. Non-ESG sections
   // scale normally as a single pool.
+  // For ESG, items are further split by sub-group (ESG1.x / ESG2.x / ESG3.x) and
+  // each sub-group's allocation = totalWeight × groupWeights[grp]%. This keeps
+  // DB item weights consistent with the "คำนวณ" display in AdminCriteriaEditor.
   const scaleSectionItemsToTotal = useCallback((sec, newTotal, forceEqual = false) => {
     const isEsg = !!(sec.nameTh?.includes('ESG') || sec.code?.match(/ESG/i));
     if (!isEsg) return scaleItemsToTotal(sec.items, newTotal, forceEqual);
-    const ho  = sec.items.filter(it => !isEsgFactory(it.code));
-    const fac = sec.items.filter(it =>  isEsgFactory(it.code));
-    return {
-      ...scaleItemsToTotal(ho, newTotal, forceEqual),
-      ...scaleItemsToTotal(fac, newTotal, forceEqual),
-    };
+
+    const gw = sec.groupWeights ?? { "1": 33.33, "2": 33.33, "3": 33.34 };
+    const result = {};
+    ['ho', 'factory'].forEach(side => {
+      const sideItems = side === 'ho'
+        ? sec.items.filter(it => !isEsgFactory(it.code))
+        : sec.items.filter(it =>  isEsgFactory(it.code));
+      if (!sideItems.length) return;
+      ['1', '2', '3'].forEach(grp => {
+        const prefix = side === 'ho' ? `ESG${grp}.` : `ESGF${grp}.`;
+        const grpItems = sideItems.filter(it => it.code?.startsWith(prefix));
+        if (!grpItems.length) return;
+        const pct      = Number(gw[grp]) ?? (100 / 3);
+        const grpTotal = r2adm((pct / 100) * newTotal);
+        Object.assign(result, scaleItemsToTotal(grpItems, grpTotal, forceEqual));
+      });
+    });
+    return result;
   }, [scaleItemsToTotal]);
 
   // ── handleUpdate (unified across both datasets) ──────────────
@@ -1354,6 +1371,11 @@ export default function AdminCriteriaEditor({ authUser }) {
         const bufResult = getCatBuffer(pool, id, clamped);
         if (bufResult.tooLarge) {
           showToast("น้ำหนักเกิน — แก้ตัวก่อนหน้าก่อน", "error");
+          return;
+        }
+        // Single-section ESG: no buffer → block if over esgTarget budget
+        if (isEsg && pool.length < 2 && esgTarget !== null && clamped > esgTarget + 0.005) {
+          showToast(`น้ำหนัก ESG เกิน ${esgTarget}% — กดแก้น้ำหนักรวม ESG ก่อน`, "error");
           return;
         }
         setSecs(prev => prev.map(s => {
@@ -1490,6 +1512,28 @@ export default function AdminCriteriaEditor({ authUser }) {
       try {
         const allSecs = inFunc ? funcSections : coreEsgSections;
         const current = allSecs.find(s => s.id === id);
+
+        // Pre-flight: validate section weight against buffer BEFORE touching DB.
+        // This prevents the category row from being saved with an over-budget weight
+        // that would leave the buffer section in an impossible negative state.
+        let poolBuf = null;
+        if (!inFunc && payload.totalWeight != null) {
+          const clamped = Math.max(0, Number(payload.totalWeight) || 0);
+          const isEsg   = isEsgSec(current ?? {});
+          const pool    = coreEsgSections.filter(s => isEsgSec(s) === isEsg);
+          const buf     = getCatBuffer(pool, id, clamped);
+          if (buf.tooLarge) {
+            showToast("น้ำหนักเกินขีดจำกัด — ลดน้ำหนักหัวข้ออื่นก่อน", "error");
+            return;
+          }
+          // Single-section ESG: no buffer section to absorb → compare directly vs esgTarget
+          if (isEsg && pool.length < 2 && esgTarget !== null && clamped > esgTarget + 0.005) {
+            showToast(`น้ำหนัก ESG เกิน ${esgTarget}% — กดแก้น้ำหนักรวม ESG ก่อน`, "error");
+            return;
+          }
+          poolBuf = { clamped, pool, buf };
+        }
+
         const body = { ...current, ...payload };
         const patchBody = { nameTh: body.nameTh, totalWeight: body.totalWeight };
         if (payload.groupWeights !== undefined) patchBody.groupWeights = payload.groupWeights;
@@ -1499,11 +1543,8 @@ export default function AdminCriteriaEditor({ authUser }) {
         });
         if (!r.ok) throw new Error();
         // Persist buffer section + scaled items when a Core/ESG weight changed
-        if (!inFunc && payload.totalWeight != null) {
-          const clamped = Math.max(0, Number(payload.totalWeight) || 0);
-          const isEsg = isEsgSec(current ?? {});
-          const pool = coreEsgSections.filter(s => isEsgSec(s) === isEsg);
-          const buf = getCatBuffer(pool, id, clamped);
+        if (poolBuf) {
+          const { clamped, pool, buf } = poolBuf;
 
           // Save items in main section (proportional — preserves custom ratios)
           const mainScales = current ? scaleSectionItemsToTotal(current, clamped) : {};
@@ -1714,7 +1755,7 @@ export default function AdminCriteriaEditor({ authUser }) {
         setSaving(null);
       }
     }
-  }, [coreEsgSections, funcSections, esgFilter, evalType, showToast, loadAll, reloadContext, getCatBuffer, getItemBuffer, getEsgItemBuffer, scaleItemsToTotal, scaleSectionItemsToTotal]);
+  }, [coreEsgSections, funcSections, esgFilter, evalType, showToast, loadAll, reloadContext, getCatBuffer, getItemBuffer, getEsgItemBuffer, scaleItemsToTotal, scaleSectionItemsToTotal, esgTarget]);
 
   // Auto-normalize ESG item weights when filter or data changes.
   // Only fills in items that have never been set (defaultWeight == null) —
@@ -1874,6 +1915,7 @@ export default function AdminCriteriaEditor({ authUser }) {
         }));
       }));
       savedSections.current = syncEsg(savedSections.current ?? coreEsgSections);
+      setEsgTarget(clamped);
       showToast("บันทึกน้ำหนัก ESG สำเร็จ");
       reloadContext();
     } catch {
@@ -1882,7 +1924,7 @@ export default function AdminCriteriaEditor({ authUser }) {
     } finally {
       setSaving(null);
     }
-  }, [coreEsgSections, scaleSectionItemsToTotal, showToast, reloadContext, loadAll, evalType]);
+  }, [coreEsgSections, scaleSectionItemsToTotal, showToast, reloadContext, loadAll, evalType, setEsgTarget]);
 
   const coreWeight  = r2adm(coreSections.reduce((s, c) => s + (c.totalWeight ?? 0), 0));
   const esgWeight   = r2adm(esgSections.reduce((s, c) => s + (c.totalWeight ?? 0), 0));
@@ -2061,7 +2103,9 @@ export default function AdminCriteriaEditor({ authUser }) {
 
           {/* ESG */}
           <PartCard label="ESG" weight={esgWeight} accent="#1565c0"
-            onWeightSave={handleEsgWeightSave} disabled={!!saving}>
+            onWeightSave={handleEsgWeightSave} disabled={!!saving}
+            warning={esgTarget !== null && Math.abs(esgWeight - esgTarget) > 0.05}
+            warningMsg={esgTarget !== null ? `น้ำหนักรวม ${esgWeight} เกินเป้า ${esgTarget} — กดแก้น้ำหนักรวม` : undefined}>
             {/* HO/Store | Factory filter */}
             <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
               <EsgFilterBtn active={esgFilter === "ho"}      onClick={() => setEsgFilter("ho")}>HO / Store</EsgFilterBtn>
