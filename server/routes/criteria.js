@@ -20,28 +20,34 @@ router.get('/', async (req, res) => {
   try {
     const et = req.query.evalType ?? '';
     const isFunctionLoad = et === 'function' || /^m\d+$/i.test(et);
+    // Function modules are configured separately per Pre/Post track (each
+    // track needs its own weight so Core+Func+ESG can independently total
+    // 100% for that track — e.g. Post is 60+26+14, Pre is 60+25+15).
+    // Defaults to 'post' for callers that don't pass it (back-compat).
+    const track = req.query.track === 'pre' ? 'pre' : 'post';
+    const funcCodePrefix = track === 'pre' ? 'FUNC-PRE-M' : 'FUNC-POST-M';
+    const funcSetPrefix  = track === 'pre' ? 'pre_m'      : 'post_m';
 
     let categoriesResult, criteriaResult, levelsResult;
 
     if (isFunctionLoad) {
       const isAllModules = et === 'function';
-      // Category codes: FUNC-M1, FUNC-M2, ... (was M1-CAT1, M2-CAT1)
-      // Criteria set:   m1, m2, ...           (was module_m1, module_m2)
       [categoriesResult, criteriaResult, levelsResult] = await Promise.all([
         isAllModules
           ? pool.query(
               `SELECT id, code, name_th AS "nameTh", name_en AS "nameEn",
                       total_weight AS "totalWeight", display_order AS "displayOrder"
                  FROM evaluation_categories
-                WHERE code LIKE 'FUNC-M%' AND (is_active = TRUE OR is_active IS NULL)
-                ORDER BY substring(code from 'FUNC-M(\\d+)')::integer, code`
+                WHERE code LIKE $1 AND (is_active = TRUE OR is_active IS NULL)
+                ORDER BY substring(code from '${funcCodePrefix}(\\d+)')::integer, code`,
+              [`${funcCodePrefix}%`]
             )
           : pool.query(
               `SELECT id, code, name_th AS "nameTh", name_en AS "nameEn",
                       total_weight AS "totalWeight", display_order AS "displayOrder"
                  FROM evaluation_categories
                 WHERE code = $1 AND (is_active = TRUE OR is_active IS NULL)`,
-              [`FUNC-${et.toUpperCase()}`]
+              [`${funcCodePrefix}${et.replace(/^m/i, '')}`]
             ),
         isAllModules
           ? pool.query(
@@ -54,8 +60,8 @@ router.get('/', async (req, res) => {
                       level_values AS "levelValues"
                  FROM evaluation_criteria
                 WHERE criteria_set ~ $1
-                ORDER BY substring(criteria_set from '^m(\\d+)')::integer, display_order`,
-              ['^m[0-9]+$']
+                ORDER BY substring(criteria_set from '^${funcSetPrefix}(\\d+)')::integer, display_order`,
+              [`^${funcSetPrefix}[0-9]+$`]
             )
           : pool.query(
               `SELECT id, category_id AS "categoryId", code,
@@ -68,7 +74,7 @@ router.get('/', async (req, res) => {
                  FROM evaluation_criteria
                 WHERE criteria_set = $1
                 ORDER BY display_order`,
-              [et.toLowerCase()]
+              [`${funcSetPrefix}${et.replace(/^m/i, '').toLowerCase()}`]
             ),
         pool.query(
           `SELECT criterion_id AS "criterionId", level, description
@@ -207,7 +213,7 @@ router.patch('/categories/:id', requireAdmin, async (req, res) => {
 
 // ── POST /api/criteria/categories — เพิ่ม section ใหม่ ──────────
 router.post('/categories', requireAdmin, async (req, res) => {
-  const { nameTh, totalWeight, codePrefix, type } = req.body;
+  const { nameTh, totalWeight, codePrefix, type, track } = req.body;
   if (!nameTh?.trim())
     return res.status(400).json({ message: 'กรุณาระบุ nameTh' });
   if (type !== 'function' && !codePrefix?.trim())
@@ -219,13 +225,17 @@ router.post('/categories', requireAdmin, async (req, res) => {
     let code;
 
     if (type === 'function') {
-      // Reactivate an inactive FUNC-M{n} if one exists, otherwise create next sequential
+      // Function modules are configured separately per Pre/Post track (see
+      // GET / above) — same idea as PRE-CORE*/POST-CORE*, just for FUNC-*.
+      const funcPrefix = track === 'pre' ? 'FUNC-PRE-M' : 'FUNC-POST-M';
+      // Reactivate an inactive FUNC-{PRE|POST}-M{n} if one exists, otherwise create next sequential
       const inactiveRes = await client.query(
         `SELECT id, code, display_order AS "displayOrder"
            FROM evaluation_categories
-          WHERE code LIKE 'FUNC-M%' AND is_active = FALSE
-          ORDER BY substring(code from 'FUNC-M(\\d+)')::integer
-          LIMIT 1`
+          WHERE code LIKE $1 AND is_active = FALSE
+          ORDER BY substring(code from '${funcPrefix}(\\d+)')::integer
+          LIMIT 1`,
+        [`${funcPrefix}%`]
       );
       if (inactiveRes.rows.length > 0) {
         const row = inactiveRes.rows[0];
@@ -242,11 +252,12 @@ router.post('/categories', requireAdmin, async (req, res) => {
       }
       // No inactive row — generate next sequential code
       const { rows } = await client.query(
-        `SELECT code FROM evaluation_categories WHERE code LIKE 'FUNC-M%' ORDER BY code`
+        `SELECT code FROM evaluation_categories WHERE code LIKE $1 ORDER BY code`,
+        [`${funcPrefix}%`]
       );
-      const nums = rows.map(r => { const m = r.code.match(/^FUNC-M(\d+)$/i); return m ? parseInt(m[1], 10) : 0; }).filter(Boolean);
+      const nums = rows.map(r => { const m = r.code.match(new RegExp(`^${funcPrefix}(\\d+)$`, 'i')); return m ? parseInt(m[1], 10) : 0; }).filter(Boolean);
       const nextNum = nums.length > 0 ? Math.max(...nums) + 1 : 1;
-      code = `FUNC-M${nextNum}`;
+      code = `${funcPrefix}${nextNum}`;
     } else {
       const prefix = codePrefix.trim();
       // Reactivate first inactive category with this prefix if one exists
@@ -309,7 +320,7 @@ router.post('/categories', requireAdmin, async (req, res) => {
         nextOrder = parseInt(orderRes.rows[0].next);
       }
     } else {
-      const orderLikePat = type === 'function' ? 'FUNC-M%'
+      const orderLikePat = type === 'function' ? (track === 'pre' ? 'FUNC-PRE-M%' : 'FUNC-POST-M%')
         : prefix.startsWith('PRE')  ? 'PRE-%'
         : prefix.startsWith('POST') ? 'POST-%'
         : `${prefix}%`;

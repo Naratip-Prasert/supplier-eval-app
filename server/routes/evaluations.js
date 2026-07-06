@@ -210,16 +210,19 @@ router.post('/', async (req, res) => {
     // numbers (e.g. "1.1") for different criteria, so lookups must be scoped
     // by criteria_set — same mapping the frontend's getCriteria/isPostEvalType
     // (src/constants.js) use to choose between PRE_CRITERIA and POST_CRITERIA.
-    // Part2 "Function module" items (M1-M7) are seeded under their own
-    // criteria_set ('module_m1'..'module_m7') — include the chosen module's
-    // set too, or its codes would never resolve and silently drop out of
-    // total_score (the exact failure mode the matchedScores filter below
-    // was built to prevent for a different cause).
-    const criteriaSet = ['post_eval', 'half_year', 'yearly'].includes(sessionEvalType)
-      ? 'post_eval'
-      : 'pre_eval';
+    // Part2 "Function module" items (M1-M7) are seeded per-track under
+    // 'pre_m1'..'pre_m7' / 'post_m1'..'post_m7' (each track has its own
+    // module weight, since Core+ESG totals differ between Pre and Post) —
+    // include the chosen module's set too, or its codes would never resolve
+    // and silently drop out of total_score (the exact failure mode the
+    // matchedScores filter below was built to prevent for a different cause).
+    // NOTE: this previously looked up `module_${moduleCode}`, which never
+    // matched the actual seeded criteria_set at all — Function module scores
+    // were silently excluded from every evaluation that used one.
+    const isPostTrack = ['post_eval', 'half_year', 'yearly'].includes(sessionEvalType);
+    const criteriaSet = isPostTrack ? 'post_eval' : 'pre_eval';
     const criteriaSets = moduleCode && moduleCode !== 'custom'
-      ? [criteriaSet, `module_${moduleCode}`]
+      ? [criteriaSet, `${isPostTrack ? 'post' : 'pre'}_${moduleCode}`]
       : [criteriaSet];
     const codes = Object.keys(scores);
     const criteriaResult = await client.query(
@@ -551,6 +554,37 @@ router.get('/my-timeline', async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error('GET /api/evaluations/my-timeline error:', err);
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+  }
+});
+
+// ── GET /api/evaluations/by-vendor/:vendorCode ────────────────
+// Returns past saved evaluations for one supplier (all eval types/periods),
+// newest first — feeds the "Evaluation History" widget on the Result page.
+router.get('/by-vendor/:vendorCode', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+         ev.id              AS "evalId",
+         es.eval_type       AS "evalType",
+         es.period,
+         ev.role,
+         ev.total_score     AS "totalScore",
+         ev.grade,
+         ev.submitted_at    AS "submittedAt",
+         es.final_score     AS "finalScore",
+         es.final_grade     AS "finalGrade"
+       FROM evaluations ev
+       JOIN evaluation_sessions es ON es.id = ev.session_id
+       JOIN suppliers           s  ON s.id  = es.supplier_id
+       WHERE s.vendor_code = $1 AND ev.status = 'saved'
+       ORDER BY ev.submitted_at DESC
+       LIMIT 20`,
+      [req.params.vendorCode]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('GET /api/evaluations/by-vendor error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
 });

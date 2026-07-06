@@ -1676,11 +1676,11 @@ export const FUNCTION_SECTION_WEIGHT = 25;
 function buildFunctionSection(moduleCode, customItems) {
   if (!moduleCode) return null;
   if (moduleCode === "custom") {
-    return { section: "Part 2 · อื่นๆ (กำหนดเอง)", weight: FUNCTION_SECTION_WEIGHT, items: customItems ?? [] };
+    return { section: "อื่นๆ (กำหนดเอง)", weight: FUNCTION_SECTION_WEIGHT, items: customItems ?? [] };
   }
   const mod = FUNCTION_MODULES[moduleCode];
   if (!mod) return null;
-  return { section: `Part 2 · ${mod.label}`, weight: FUNCTION_SECTION_WEIGHT, items: mod.items };
+  return { section: `${mod.label}`, weight: FUNCTION_SECTION_WEIGHT, items: mod.items };
 }
 
 export function getScoredCriteria(evalType, scores, moduleCode, customItems) {
@@ -1713,7 +1713,7 @@ export function buildCombinedFunctionSection() {
     { divider: true, label: `${key.toUpperCase()} · ${mod.label.split(' · ').slice(1).join(' · ')}`, level: 1 },
     ...mod.items,
   ]);
-  return { section: "Part 2 · Function (คะแนนร่วม)", weight: FUNCTION_SECTION_WEIGHT, items };
+  return { section: "Function (คะแนนร่วม)", weight: FUNCTION_SECTION_WEIGHT, items };
 }
 
 export function getDisplayCriteria(evalType, esgTarget, moduleCode, customItems) {
@@ -1727,7 +1727,7 @@ export function getDisplayCriteria(evalType, esgTarget, moduleCode, customItems)
     return { ...section, items: chosen };
   });
   const functionSection = buildFunctionSection(moduleCode, customItems)
-    ?? { section: "Part 2 · Function", weight: FUNCTION_SECTION_WEIGHT, items: [] };
+    ?? { section: "Function", weight: FUNCTION_SECTION_WEIGHT, items: [] };
   return [...core.slice(0, esgIdx), functionSection, ...core.slice(esgIdx)];
 }
 
@@ -1744,7 +1744,11 @@ export function getGrade(score) {
 // Accept an already-overridden baseCriteria array instead of evalType,
 // so callers can apply DB overrides before calling these functions.
 
-export function getDisplayCriteriaFrom(baseCriteria, esgTarget, moduleCode, customItems, funcOverrideItems) {
+// funcOverride: { items, totalWeight } from buildFunctionOverrideMap — using
+// its totalWeight (instead of always falling back to the hardcoded
+// FUNCTION_SECTION_WEIGHT) keeps the eval form's grand total in sync after
+// admin changes a module's weight on the Parameter page.
+export function getDisplayCriteriaFrom(baseCriteria, esgTarget, moduleCode, customItems, funcOverride) {
   const esgIdx = findEsgSectionIndex(baseCriteria);
   if (esgIdx === -1) return baseCriteria;
   const core = baseCriteria.map((section, si) => {
@@ -1754,17 +1758,17 @@ export function getDisplayCriteriaFrom(baseCriteria, esgTarget, moduleCode, cust
     return { ...section, items: chosen };
   });
   let functionSection;
-  if (funcOverrideItems && moduleCode && moduleCode !== "custom") {
+  if (funcOverride?.items && moduleCode && moduleCode !== "custom") {
     const mod = FUNCTION_MODULES[moduleCode];
-    functionSection = { section: `Part 2 · ${mod?.label ?? moduleCode.toUpperCase()}`, weight: FUNCTION_SECTION_WEIGHT, items: funcOverrideItems };
+    functionSection = { section: `${mod?.label ?? moduleCode.toUpperCase()}`, weight: funcOverride.totalWeight ?? FUNCTION_SECTION_WEIGHT, items: funcOverride.items };
   } else {
     functionSection = buildFunctionSection(moduleCode, customItems)
-      ?? { section: "Part 2 · Function", weight: FUNCTION_SECTION_WEIGHT, items: [] };
+      ?? { section: "Function", weight: FUNCTION_SECTION_WEIGHT, items: [] };
   }
   return [...core.slice(0, esgIdx), functionSection, ...core.slice(esgIdx)];
 }
 
-export function getScoredCriteriaFrom(baseCriteria, scores, moduleCode, customItems, funcOverrideItems) {
+export function getScoredCriteriaFrom(baseCriteria, scores, moduleCode, customItems, funcOverride) {
   const esgIdx = findEsgSectionIndex(baseCriteria);
   if (esgIdx === -1 || !scores) return baseCriteria;
   const core = baseCriteria.map((section, si) => {
@@ -1779,9 +1783,9 @@ export function getScoredCriteriaFrom(baseCriteria, scores, moduleCode, customIt
     return { ...section, items: chosen };
   });
   let functionSection;
-  if (funcOverrideItems && moduleCode && moduleCode !== "custom") {
+  if (funcOverride?.items && moduleCode && moduleCode !== "custom") {
     const mod = FUNCTION_MODULES[moduleCode];
-    functionSection = { section: `Part 2 · ${mod?.label ?? moduleCode.toUpperCase()}`, weight: FUNCTION_SECTION_WEIGHT, items: funcOverrideItems };
+    functionSection = { section: `${mod?.label ?? moduleCode.toUpperCase()}`, weight: funcOverride.totalWeight ?? FUNCTION_SECTION_WEIGHT, items: funcOverride.items };
   } else {
     // Prefer module-specific section (old saved results); fall back to combined
     functionSection = buildFunctionSection(moduleCode, customItems)

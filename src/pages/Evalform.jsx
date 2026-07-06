@@ -49,30 +49,46 @@ function esgGroupKey(label) {
 // Distribute ESG section weight across its items using `groupPct` (key =
 // esgGroupKey → % of section, e.g. {"1": 33.33, ...}), falling back to each
 // divider's own groupWeight, then to an equal 3-way split.
+//
+// The last group absorbs whatever's left of `sw` instead of computing its
+// own rounded share — three independently-rounded percentages (e.g.
+// 33.33/33.34/33.33% each rounded to 2dp) can individually round up, so
+// summing them can overshoot sw by a cent or two even though each GROUP's
+// own items correctly sum to that group's share. That 0.01 leftover then
+// shows up as the eval form's total sticking at "100.01% ≠ 100%" forever.
 function assignEsgSubGroupWeights(sectionItems, sw, items, groupPct) {
-  let curKey        = null;
-  let curFallbackPct = null;
-  let curGroupItems  = [];
-  const flush = () => {
-    if (!curGroupItems.length) return;
-    const pct = (groupPct && curKey && groupPct[curKey] != null) ? groupPct[curKey] : (curFallbackPct ?? (100 / 3));
-    const absW = (pct / 100) * sw;
-    const each = r2(absW / curGroupItems.length);
-    let rem = absW;
-    curGroupItems.forEach((it, i) => {
-      if (i === curGroupItems.length - 1) items[it.no] = r2(Math.max(0, rem));
-      else { items[it.no] = each; rem -= each; }
-    });
-    curGroupItems = [];
+  const groups = [];
+  let curKey = null, curFallbackPct = null, curItems = [];
+  const pushGroup = () => {
+    if (curItems.length) groups.push({ key: curKey, fallbackPct: curFallbackPct, items: curItems });
+    curItems = [];
   };
   sectionItems.forEach(item => {
     if (item.divider) {
-      if (item.level === 2) { flush(); curKey = esgGroupKey(item.label); curFallbackPct = item.groupWeight ?? null; }
+      if (item.level === 2) { pushGroup(); curKey = esgGroupKey(item.label); curFallbackPct = item.groupWeight ?? null; }
       return;
     }
-    curGroupItems.push(item);
+    curItems.push(item);
   });
-  flush();
+  pushGroup();
+
+  let rem = sw;
+  groups.forEach((g, gi) => {
+    let absW;
+    if (gi === groups.length - 1) {
+      absW = Math.max(0, rem);
+    } else {
+      const pct = (groupPct && g.key && groupPct[g.key] != null) ? groupPct[g.key] : (g.fallbackPct ?? (100 / groups.length));
+      absW = r2((pct / 100) * sw);
+      rem -= absW;
+    }
+    const each = r2(absW / g.items.length);
+    let itemRem = absW;
+    g.items.forEach((it, i) => {
+      if (i === g.items.length - 1) items[it.no] = r2(Math.max(0, itemRem));
+      else { items[it.no] = each; itemRem -= each; }
+    });
+  });
 }
 
 function initWeights(criteria) {
@@ -130,7 +146,7 @@ function initWeights(criteria) {
 
 export default function EvalForm({ formData, savedState, user, profilePic, onBack, onDone }) {
   const overrideMap    = useCriteriaOverrides(isPostEvalType(formData.evalType));
-  const funcMap        = useFunctionOverrides();
+  const funcMap        = useFunctionOverrides(isPostEvalType(formData.evalType));
   const RAW_CRITERIA   = applyOverrides(getCriteria(formData.evalType), overrideMap);
   const esgSectionIndex = findEsgSectionIndex(RAW_CRITERIA);
   const esgGroups       = esgSectionIndex !== -1 ? splitEsgGroups(RAW_CRITERIA[esgSectionIndex].items) : null;
@@ -164,10 +180,10 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
   const [moduleCode, setModuleCode] = useState(() => savedState?.moduleCode ?? null);
   const [customItems, setCustomItems] = useState(() => savedState?.customItems ?? []);
 
-  const funcOverrideItems = (funcMap && moduleCode && moduleCode !== "custom")
+  const funcOverride = (funcMap && moduleCode && moduleCode !== "custom")
     ? (funcMap[moduleCode] ?? null)
     : null;
-  const CRITERIA = getDisplayCriteriaFrom(RAW_CRITERIA, esgTarget, moduleCode, customItems, funcOverrideItems);
+  const CRITERIA = getDisplayCriteriaFrom(RAW_CRITERIA, esgTarget, moduleCode, customItems, funcOverride);
 
   const [ws, setWs] = useState(() => savedState?.ws ?? initWeights(CRITERIA));
   const sectionWeights = ws.sections;
@@ -178,12 +194,12 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
   const userAdjustedWeights = useRef(false);
   useEffect(() => {
     if (overrideMap === null || savedState?.ws || userAdjustedWeights.current) return;
-    const resolvedFuncItems = (funcMap && moduleCode && moduleCode !== "custom")
+    const resolvedFuncOverride = (funcMap && moduleCode && moduleCode !== "custom")
       ? (funcMap[moduleCode] ?? null)
       : null;
     const updatedCriteria = getDisplayCriteriaFrom(
       applyOverrides(getCriteria(formData.evalType), overrideMap),
-      esgTarget, moduleCode, customItems, resolvedFuncItems
+      esgTarget, moduleCode, customItems, resolvedFuncOverride
     );
     setWs(initWeights(updatedCriteria));
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -241,6 +257,15 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
   // เมื่อเลือก/เปลี่ยนโมดูล: ล้างคะแนน/หมายเหตุ/น้ำหนักของโค้ดที่ไม่ได้อยู่ในโมดูล
   // ที่เลือกปัจจุบันทิ้ง แล้วแจกน้ำหนักของ section Function ใหม่ให้เฉพาะโค้ดที่
   // ใช้อยู่ — ตรรกะเดียวกับ ESG ด้านบน
+  //
+  // sw MUST come from funcOverride (the DB-configured module weight), not
+  // prev.sections[functionSectionIndex] — that slot is seeded at mount from
+  // the "no module chosen yet" fallback (moduleCode is null on a fresh
+  // form), which locks it to the hardcoded FUNCTION_SECTION_WEIGHT forever.
+  // Reading the stale section weight here silently redistributed items to
+  // the wrong total (e.g. 25% instead of an admin-configured 26%), so the
+  // grand total permanently drifted from 100% for every fresh evaluation.
+  const funcSectionWeight = moduleCode === "custom" ? FUNCTION_SECTION_WEIGHT : (funcOverride?.totalWeight ?? FUNCTION_SECTION_WEIGHT);
   useEffect(() => {
     if (functionSectionIndex === -1) return;
     const currentCodes = moduleCode === "custom"
@@ -269,15 +294,16 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
 
     setWs((prev) => {
       const toDelete = [...otherFixedCodes, ...staleCustomCodes(prev.items)];
-      const allWeighted = currentCodes.length > 0 && currentCodes.every((c) => prev.items[c] != null);
+      const sw = funcSectionWeight;
+      const weightInSync = prev.sections[functionSectionIndex] === sw;
+      const allWeighted = currentCodes.length > 0 && currentCodes.every((c) => prev.items[c] != null) && weightInSync;
       const droppable = toDelete.some((c) => c in prev.items);
-      if (!droppable && (currentCodes.length === 0 || allWeighted)) return prev;
+      if (!droppable && weightInSync && (currentCodes.length === 0 || allWeighted)) return prev;
 
       const newItems = { ...prev.items };
       toDelete.forEach((c) => delete newItems[c]);
 
       if (currentCodes.length > 0 && !allWeighted) {
-        const sw = prev.sections[functionSectionIndex] ?? FUNCTION_SECTION_WEIGHT;
         const each = r2(sw / currentCodes.length);
         let rem = sw;
         currentCodes.forEach((code, i) => {
@@ -285,9 +311,9 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
           else { newItems[code] = each; rem -= each; }
         });
       }
-      return { ...prev, items: newItems };
+      return { ...prev, sections: { ...prev.sections, [functionSectionIndex]: sw }, items: newItems };
     });
-  }, [moduleCode, customItems]);
+  }, [moduleCode, customItems, funcSectionWeight]);
 
   const allItems        = CRITERIA.flatMap((s) => s.items.filter((i) => !i.divider));
   const answered        = allItems.filter((item) => scores[item.no] != null).length;

@@ -2,7 +2,7 @@
 //  pages/ResultPage.jsx
 // ============================================================
 
-import { useState, useRef, Fragment } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import * as XLSX from "xlsx";
 import { Header, GreenButton, useModal } from "../components";
 import { isPostEvalType, GRADE_MAP, GRADE_GUIDE, getCriteria, getScoredCriteriaFrom } from "../constants";
@@ -23,6 +23,8 @@ function getShortLabel(section) {
 // Professional muted palette — no rainbow
 const SECTION_COLORS = ["#1e6b3a", "#1558a0", "#6b3fa0", "#a02020", "#b56a00", "#00787a"];
 
+const EVAL_TYPE_LABEL = { pre_eval: "Pre", post_eval: "Post", half_year: "Half-Year", yearly: "Yearly" };
+
 // Shared card style
 const card = (extra = {}) => ({
   background: "#fff",
@@ -32,19 +34,19 @@ const card = (extra = {}) => ({
   ...extra,
 });
 
-export default function ResultPage({ formData, result, user, profilePic, onBack, onBackToEval, readOnly = false }) {
+export default function ResultPage({ formData, result, user, profilePic, onBack, onBackToEval, onViewHistoryEval, readOnly = false }) {
   const { showConfirm, ModalEl } = useModal();
   const { totalScore, grade, scores = {} } = result;
   const gradeColor = GRADE_MAP[grade];
   const evalLabel  = isPostEvalType(formData.evalType) ? "Post" : "Pre";
   const overrideMap = useCriteriaOverrides(isPostEvalType(formData.evalType));
-  const funcMap     = useFunctionOverrides();
-  const funcOverrideItems = (funcMap && result.moduleCode && result.moduleCode !== "custom")
+  const funcMap     = useFunctionOverrides(isPostEvalType(formData.evalType));
+  const funcOverride = (funcMap && result.moduleCode && result.moduleCode !== "custom")
     ? (funcMap[result.moduleCode] ?? null)
     : null;
   const CRITERIA    = getScoredCriteriaFrom(
     applyOverrides(getCriteria(formData.evalType), overrideMap),
-    result.scores, result.moduleCode, result.customItems, funcOverrideItems
+    result.scores, result.moduleCode, result.customItems, funcOverride
   );
 
   const now     = new Date();
@@ -52,7 +54,13 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
 
   const sectionSummary = CRITERIA.map((sec, si) => {
     const realItems = sec.items.filter(i => !i.divider);
-    const max = result.sectionWeights?.[si] ?? sec.weight ?? 0;
+    // Prefer the weights actually saved with this evaluation (result.weights,
+    // frozen per item at submit time) over the section's live/current weight
+    // (sec.weight) — otherwise a history view keeps "re-pricing" itself to
+    // whatever the admin has since changed the criteria weights to, instead
+    // of showing what was really scored at the time.
+    const frozenWeightSum = realItems.reduce((s, item) => s + (result.weights?.[item.no] ?? 0), 0);
+    const max = result.sectionWeights?.[si] ?? (frozenWeightSum > 0 ? frozenWeightSum : (sec.weight ?? 0));
     const got = realItems.reduce((s, item) => {
       const lv = scores[item.no];
       if (!lv) return s;
@@ -69,6 +77,15 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
   const [doneErrMsg,  setDoneErrMsg]  = useState("");
   const [showExport, setShowExport] = useState(false);
   const exportRef = useRef(null);
+
+  const [evalHistory, setEvalHistory] = useState([]);
+  useEffect(() => {
+    if (!formData.vendorCode) return;
+    authFetch(`/api/evaluations/by-vendor/${encodeURIComponent(formData.vendorCode)}`)
+      .then(r => r.ok ? r.json() : [])
+      .then(rows => setEvalHistory(Array.isArray(rows) ? rows.filter(r => r.evalId !== result.evalId) : []))
+      .catch(() => setEvalHistory([]));
+  }, [formData.vendorCode, result.evalId]);
 
   const handleBackToEval = async () => {
     if (readOnly) { onBack(); return; }
@@ -566,8 +583,43 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
               <div style={{ fontWeight: 700, fontSize: 13, color: "#718096", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 12 }}>
                 Evaluation History
               </div>
-              <div style={{ height: 36, background: "#f8faf8", border: "1px solid #e0e6e0", borderRadius: 5, marginBottom: 8 }} />
-              <div style={{ height: 36, background: "#f0f4f0", border: "1px solid #e0e6e0", borderRadius: 5 }} />
+              {evalHistory.length === 0 ? (
+                <div style={{ fontSize: 12, color: "#a0aec0", padding: "8px 2px" }}>
+                  ยังไม่มีประวัติการประเมินก่อนหน้าของซัพพลายเออร์รายนี้
+                </div>
+              ) : (
+                <div className="no-print" style={{ maxHeight: 150, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+                  {evalHistory.map(h => {
+                    const clickable = !!onViewHistoryEval;
+                    const gColor = GRADE_MAP[h.grade] || "#a0aec0";
+                    return (
+                      <div
+                        key={h.evalId}
+                        onClick={() => clickable && onViewHistoryEval(h.evalId)}
+                        style={{
+                          display: "flex", alignItems: "center", justifyContent: "space-between",
+                          gap: 8, padding: "7px 10px",
+                          background: "#f8faf8", border: "1px solid #e0e6e0", borderRadius: 5,
+                          cursor: clickable ? "pointer" : "default",
+                        }}
+                      >
+                        <div style={{ fontSize: 12, color: "#2d3748", minWidth: 0 }}>
+                          <span style={{ fontWeight: 600 }}>{EVAL_TYPE_LABEL[h.evalType] ?? h.evalType}</span>
+                          {h.period ? <span style={{ color: "#718096" }}> · {h.period}</span> : null}
+                          <span style={{ color: "#a0aec0" }}> · {h.role}</span>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                          <span style={{ fontSize: 12, color: "#4a5568" }}>{Number(h.totalScore ?? 0).toFixed(1)}</span>
+                          <span style={{
+                            background: gColor, color: "#fff", borderRadius: 4,
+                            padding: "1px 8px", fontWeight: 800, fontSize: 12,
+                          }}>{h.grade ?? "—"}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
 

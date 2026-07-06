@@ -13,7 +13,9 @@
 //    PRE-ESG       — PRE eval ESG section
 //    POST-CORE{n}  — POST/half-year/yearly CORE sections
 //    POST-ESG      — POST/half-year/yearly ESG section
-//    FUNC-M{n}     — Function modules (M1–M7+)
+//    FUNC-PRE-M{n} / FUNC-POST-M{n} — Function modules (M1–M7+), configured
+//      separately per track since each track's Core+ESG total differs, so
+//      each needs its own Function weight to independently reach 100%.
 // ============================================================
 const fs = require('fs');
 const path = require('path');
@@ -105,9 +107,10 @@ async function seedCriteriaFromConstants(client) {
   await seedSet(client, POST_CRITERIA, 'post_eval', 'POST');
   for (const [code, mod] of Object.entries(FUNCTION_MODULES)) {
     const sections = [{ section: mod.label, weight: FUNCTION_SECTION_WEIGHT, items: mod.items }];
-    // criteriaSet = code ('m1','m2',...) — matches criteria.js query `WHERE criteria_set = $1`
-    // codePrefix  = 'FUNC-M1','FUNC-M2',... — becomes the category code directly
-    await seedSet(client, sections, code, `FUNC-${code.toUpperCase()}`);
+    // criteriaSet = 'pre_m1'/'post_m1',... — matches criteria.js query `WHERE criteria_set = $1`
+    // codePrefix  = 'FUNC-PRE-M1'/'FUNC-POST-M1',... — becomes the category code directly
+    await seedSet(client, sections, `pre_${code}`,  `FUNC-PRE-${code.toUpperCase()}`);
+    await seedSet(client, sections, `post_${code}`, `FUNC-POST-${code.toUpperCase()}`);
   }
 }
 

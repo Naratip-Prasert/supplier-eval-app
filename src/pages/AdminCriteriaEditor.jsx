@@ -52,14 +52,17 @@ function buildSeedPayload() {
       };
     });
 
-  const transformModules = () =>
+  // Function modules are configured separately per Pre/Post track (each
+  // track's Core+ESG total differs, so each needs its own Function weight
+  // to independently reach 100%) — mirrors PRE-CORE*/POST-CORE*.
+  const transformModules = (track) =>
     Object.entries(FUNCTION_MODULES).map(([key, mod], ki) => {
       const wMap = computeEqualWeights(mod.items, FUNCTION_SECTION_WEIGHT);
       return {
-        code:         `FUNC-${key.toUpperCase()}`,
+        code:         `FUNC-${track.toUpperCase()}-${key.toUpperCase()}`,
         nameTh:       mod.label,
         totalWeight:  FUNCTION_SECTION_WEIGHT,
-        criteriaSet:  key,
+        criteriaSet:  `${track}_${key}`,
         displayOrder: ki + 1,
         items: mod.items.map(item => ({
           code:          item.no,
@@ -74,15 +77,16 @@ function buildSeedPayload() {
   return [
     ...transform(PRE_CRITERIA,  'PRE',  'pre_eval'),
     ...transform(POST_CRITERIA, 'POST', 'post_eval'),
-    ...transformModules(),
+    ...transformModules('pre'),
+    ...transformModules('post'),
   ];
 }
 
 // Derive DB criteria_set from category code
 function getCriteriaSetFromCode(code) {
   if (!code) return 'pre_eval';
-  const m = code.match(/^FUNC-M(\d+)$/i);
-  if (m) return `m${m[1]}`;
+  const m = code.match(/^FUNC-(PRE|POST)-M(\d+)$/i);
+  if (m) return `${m[1].toLowerCase()}_m${m[2]}`;
   return code.startsWith('POST-') ? 'post_eval' : 'pre_eval';
 }
 
@@ -105,7 +109,7 @@ function nextItemCode(sectionCode, allItems, esgFilter) {
     return `${sn}.${maxN + 1}`;
   }
 
-  const funcMatch = sectionCode.match(/^FUNC-M(\d+)$/i);
+  const funcMatch = sectionCode.match(/^FUNC-(?:PRE|POST)-M(\d+)$/i);
   if (funcMatch) {
     const mn = funcMatch[1];
     let maxN = 0;
@@ -1032,9 +1036,10 @@ export default function AdminCriteriaEditor({ authUser }) {
     coreNormalized.current = false;
     savedSections.current  = null;
     try {
+      const track = et === 'post_eval' ? 'post' : 'pre';
       const [r1, r2] = await Promise.all([
         authFetch(`/api/criteria?evalType=${et}`),
-        authFetch(`/api/criteria?evalType=function`),
+        authFetch(`/api/criteria?evalType=function&track=${track}`),
       ]);
       if (!r1.ok || !r2.ok) throw new Error();
       const [d1, d2] = await Promise.all([r1.json(), r2.json()]);
@@ -1107,7 +1112,7 @@ export default function AdminCriteriaEditor({ authUser }) {
     setSavingSection(true);
     try {
       const body = isFunc
-        ? { nameTh, totalWeight, type: 'function' }
+        ? { nameTh, totalWeight, type: 'function', track: evalType === 'post_eval' ? 'post' : 'pre' }
         : { codePrefix, nameTh, totalWeight };
       const r = await authFetch('/api/criteria/categories', {
         method: 'POST',
@@ -1131,7 +1136,7 @@ export default function AdminCriteriaEditor({ authUser }) {
     } finally {
       setSavingSection(false);
     }
-  }, [showToast, reloadContext]);
+  }, [evalType, showToast, reloadContext]);
 
   // ── Delete section ───────────────────────────────────────────
   const handleDeleteSection = useCallback(async (id) => {

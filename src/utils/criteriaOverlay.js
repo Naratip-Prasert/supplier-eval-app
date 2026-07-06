@@ -43,24 +43,31 @@ export function buildOverrideMap(dbSections) {
 }
 
 // Build a lookup map for function module overrides from the DB response.
-// Key = module key lowercase (e.g. "m1", "m2").
+// Key = module key lowercase (e.g. "m1", "m2"). Carries totalWeight alongside
+// the items — without it, callers fall back to the hardcoded
+// FUNCTION_SECTION_WEIGHT constant even after admin edits a module's weight
+// on the Parameter page, so the eval form's grand total silently drifts
+// from the Parameter page's (e.g. showing 99% instead of 100%).
 export function buildFunctionOverrideMap(dbSections) {
   const map = {};
   if (!Array.isArray(dbSections)) return map;
   dbSections.forEach(sec => {
-    const m = sec.code?.match(/^FUNC-(M\d+)$/i) ?? sec.code?.match(/^(M\d+)-CAT/i);
+    const m = sec.code?.match(/^FUNC-(?:PRE|POST)-(M\d+)$/i) ?? sec.code?.match(/^FUNC-(M\d+)$/i) ?? sec.code?.match(/^(M\d+)-CAT/i);
     if (!m) return;
     const key = m[1].toLowerCase();
-    map[key] = (sec.items ?? [])
-      .filter(it => it.isActive !== false)
-      .map(it => ({
-        no:          it.code,
-        title:       it.nameTh        ?? it.code,
-        weight:      it.defaultWeight ?? 0,
-        levels:      Array.isArray(it.levels) ? it.levels : [],
-        levelValues: Array.isArray(it.levelValues) && it.levelValues.length > 0
-          ? it.levelValues : null,
-      }));
+    map[key] = {
+      totalWeight: sec.totalWeight,
+      items: (sec.items ?? [])
+        .filter(it => it.isActive !== false)
+        .map(it => ({
+          no:          it.code,
+          title:       it.nameTh        ?? it.code,
+          weight:      it.defaultWeight ?? 0,
+          levels:      Array.isArray(it.levels) ? it.levels : [],
+          levelValues: Array.isArray(it.levelValues) && it.levelValues.length > 0
+            ? it.levelValues : null,
+        })),
+    };
   });
   return map;
 }

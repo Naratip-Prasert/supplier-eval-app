@@ -183,6 +183,7 @@ export default function AdminPage({ authUser, onBack, onViewEvaluation, onViewUp
             setEntryDateFilter={setEntryDateFilter}
           />
         )}
+        {tab === "criteria"  && <AdminCriteriaEditor authUser={authUser} />}
       </div>
 
       <style>{`

@@ -13,7 +13,7 @@ import SupervisorPage     from "./pages/SupervisorPage";
 import LoginPage          from "./pages/LoginPage";
 
 // ── Loader: fetch a saved evaluation and render ResultPage read-only ──
-function EvalHistoryLoader({ evalId, user, profilePic, onBack }) {
+function EvalHistoryLoader({ evalId, user, profilePic, onBack, onViewHistoryEval }) {
   const [loaded, setLoaded] = useState(null);
 
   useEffect(() => {
@@ -73,6 +73,7 @@ function EvalHistoryLoader({ evalId, user, profilePic, onBack }) {
             productType:  d.productType,
           },
           result: {
+            evalId:       d.id,
             totalScore:   Number(d.totalScore),
             grade:        d.grade,
             scores:       scoresObj,
@@ -110,6 +111,7 @@ function EvalHistoryLoader({ evalId, user, profilePic, onBack }) {
       profilePic={profilePic}
       onBack={onBack}
       onBackToEval={onBack}
+      onViewHistoryEval={onViewHistoryEval}
       readOnly
     />
   );
@@ -257,6 +259,7 @@ export default function App() {
         user={user}
         profilePic={profilePic}
         onBack={() => { setPage(prevPage ?? "history"); setPrevPage(null); }}
+        onViewHistoryEval={(id) => setEvalDetailId(id)}
       />
     );
   }
@@ -312,6 +315,7 @@ export default function App() {
           setEvalSavedState(null);
           setPage("portal");
         }}
+        onViewHistoryEval={(id) => { setPrevPage("result"); setEvalDetailId(id); setPage("evalDetail"); }}
       />
     );
   }
