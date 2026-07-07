@@ -3,9 +3,10 @@
 // ============================================================
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Header, useClickOutside } from "../components";
+import { PaginationBar } from "../components/PaginationBar";
 import { authFetch } from "../utils/api";
 import TasksPage from "./TasksPage";
-import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter, todayRangeFilter } from "../utils/dateFilter";
+import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter } from "../utils/dateFilter";
 import { SESSION_STATUS_LABELS, SESSION_STATUS_COLORS, getDisplayStatus } from "../utils/statusLabels";
 import { TimelineStepper } from "../components/TimelineStepper";
 import { FilterChips, toggleInSet } from "../components/FilterChips";
@@ -15,17 +16,13 @@ import {
   AlertCircle, SlidersHorizontal,
 } from "lucide-react";
 import AdminCriteriaEditor from "./AdminCriteriaEditor";
+import { ROLE_THEME, GRADE_COLOR } from "../styles/theme";
 
 // ── Constants ─────────────────────────────────────────────────
-const ROLE_COLORS = {
-  USER:       { bg: "#e8f5e9", color: "#1b5e20", label: "USER"       },
-  GCP:        { bg: "#e3f2fd", color: "#1565c0", label: "GCP"        },
-  ADMIN:      { bg: "#fce4ec", color: "#880e4f", label: "ADMIN"      },
-  SUPERVISOR: { bg: "#f3e5f5", color: "#6a1b9a", label: "SUPERVISOR" },
-};
-const GRADE_COLORS = {
-  A: "#1b5e20", B: "#1565c0", C: "#e65100", D: "#b71c1c", F: "#4a0000",
-};
+const ROLE_COLORS = Object.fromEntries(
+  Object.entries(ROLE_THEME).map(([role, { main, bg }]) => [role, { bg, color: main, label: role }])
+);
+const GRADE_COLORS = GRADE_COLOR;
 const TABS = [
   {
     key: "employees", label: "พนักงาน", labelEn: "Employees", icon: Users,
@@ -51,20 +48,6 @@ const TAB_COUNTS = {
   sessions:  (c) => c.pendingSessions,
 };
 
-// Persisted in sessionStorage (not just component/module state) so the
-// filter survives not only SPA tab navigation but also a real browser
-// refresh or a frontend dev-server restart — it only resets when the
-// browser tab/session itself is closed.
-const ENTRY_DATE_FILTER_KEY = "admin_sessions_entryDateFilter";
-
-function loadEntryDateFilter() {
-  try {
-    const raw = sessionStorage.getItem(ENTRY_DATE_FILTER_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch { /* ignore malformed/unavailable storage */ }
-  return todayRangeFilter();
-}
-
 // ── AdminPage ─────────────────────────────────────────────────
 export default function AdminPage({ authUser, onBack, onViewEvaluation, onViewUploadHistory, initialSessionId, initialTab }) {
   const [tab,             setTab]             = useState(initialTab ?? (initialSessionId ? "sessions" : "employees"));
@@ -72,14 +55,6 @@ export default function AdminPage({ authUser, onBack, onViewEvaluation, onViewUp
   const [sessions,        setSessions]        = useState([]);
   const [loading,         setLoading]         = useState(false);
   const [error,           setError]           = useState(null);
-  const [entryDateFilter, setEntryDateFilterState] = useState(loadEntryDateFilter);
-  const setEntryDateFilter = useCallback((value) => {
-    setEntryDateFilterState(prev => {
-      const next = typeof value === "function" ? value(prev) : value;
-      try { sessionStorage.setItem(ENTRY_DATE_FILTER_KEY, JSON.stringify(next)); } catch { /* ignore */ }
-      return next;
-    });
-  }, []);
 
   // เช็ค r.ok ก่อนแปลง JSON เสมอ — ไม่งั้น error body ของ server (เช่น 500)
   // จะถูกตีความเป็นข้อมูลจริงแล้วค่อยถูก Array.isArray กรองทิ้งเป็น [] เงียบๆ
@@ -185,8 +160,6 @@ export default function AdminPage({ authUser, onBack, onViewEvaluation, onViewUp
             sessions={sessions}
             onViewEvaluation={onViewEvaluation}
             initialSessionId={initialSessionId}
-            entryDateFilter={entryDateFilter}
-            setEntryDateFilter={setEntryDateFilter}
           />
         )}
         {tab === "criteria"  && <AdminCriteriaEditor authUser={authUser} />}
@@ -472,17 +445,42 @@ function VerifyAdminModal({ authUser, targetName, onCancel, onVerified }) {
 }
 
 // ── Sessions Tab ──────────────────────────────────────────────
-function SessionsTab({ sessions, onViewEvaluation, initialSessionId, entryDateFilter, setEntryDateFilter }) {
+// หน้านี้ตั้งใจโชว์ "เฉพาะรอบที่ Approved แล้ว" เท่านั้น — ไม่งั้นจะซ้ำกับ
+// หน้า "งานประเมิน (Upload)" ที่มีไว้ติดตามงานที่ยังไม่เสร็จ/อยู่ระหว่างทำอยู่แล้ว
+const SESSIONS_PAGE_SIZE = 10;
+
+function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
   const [search,            setSearch]            = useState("");
-  const [statusFilter,      setStatusFilter]      = useState(new Set()); // empty = all
   const [evalTypeFilter,    setEvalTypeFilter]    = useState(new Set());
   const [periodFilter,      setPeriodFilter]      = useState(new Set());
   const [dateFilter,        setDateFilter]        = useState(DEFAULT_DATE_FILTER);
   const [selectedSessionId, setSelectedSessionId] = useState(initialSessionId ?? null);
   const [filterOpen,        setFilterOpen]        = useState(false);
+  const [page,              setPage]              = useState(1);
   const filterPanelRef = useRef(null);
 
+  const approvedSessions = sessions.filter(s => s.status === "completed");
+
+  // รอบที่ (ครั้งที่) ของแต่ละ session เทียบกับ supplier รายนั้น — เรียงตาม
+  // เวลาที่ Approved จากเก่าไปใหม่ แล้วนับ 1, 2, 3... ต่อ vendor (ไม่ใช่นับจาก
+  // approvedSessions ทั้งระบบ) นับจาก approvedSessions ทั้งชุดเสมอ ไม่ใช่แค่ที่
+  // กรอง/แบ่งหน้าอยู่ตอนนี้ เพื่อให้เลขรอบนิ่ง ไม่เลื่อนตามตัวกรอง
+  const roundIndexBySession = {};
+  const sessionsByVendor = approvedSessions.reduce((acc, s) => {
+    (acc[s.vendorCode] ??= []).push(s);
+    return acc;
+  }, {});
+  Object.values(sessionsByVendor).forEach(list => {
+    [...list]
+      .sort((a, b) => new Date(a.completedAt ?? a.createdAt) - new Date(b.completedAt ?? b.createdAt))
+      .forEach((s, idx) => { roundIndexBySession[s.sessionId] = idx + 1; });
+  });
+
   useClickOutside(filterPanelRef, filterOpen, () => setFilterOpen(false));
+
+  // รีเซ็ตกลับหน้า 1 ทุกครั้งที่ตัวกรอง/คำค้นหาเปลี่ยน ไม่งั้นอาจค้างอยู่หน้า
+  // ที่เกินจำนวนรายการที่กรองได้ใหม่ กลายเป็นหน้าว่างเปล่า
+  useEffect(() => { setPage(1); }, [search, evalTypeFilter, periodFilter, dateFilter]);
 
   if (selectedSessionId) {
     return (
@@ -494,41 +492,33 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId, entryDateFi
     );
   }
 
-  const filtered = sessions.filter(s => {
+  const filtered = approvedSessions.filter(s => {
     const q = search.toLowerCase();
     const matchSearch = !q ||
       s.supplierName?.toLowerCase().includes(q) ||
       s.vendorCode?.toLowerCase().includes(q) ||
       s.period?.toLowerCase().includes(q);
-    // Always resolve to the same "effective" status the row's badge
-    // actually shows (getDisplayStatus) — filtering by "pending" used to
-    // match on the raw s.status even when the row's badge displayed
-    // "Overdue", since the overdue check only ran when "overdue" itself
-    // was one of the selected filters.
-    const displayStatus = getDisplayStatus(s.status, s.dueDate);
-    const matchStatus   = statusFilter.size === 0 || statusFilter.has(displayStatus);
     const matchEvalType = evalTypeFilter.size === 0 || evalTypeFilter.has(s.evalType);
     const matchPeriod   = periodFilter.size === 0 || s.evalType !== "post_eval" || periodFilter.has(s.period);
-    const matchEntry    = matchesDateFilter(s.createdAt, entryDateFilter);
     const matchDate     = matchesDateFilter(s.completedAt, dateFilter);
-    return matchSearch && matchStatus && matchEvalType && matchPeriod && matchEntry && matchDate;
+    return matchSearch && matchEvalType && matchPeriod && matchDate;
   });
 
   const activeFilterCount = [
-    statusFilter.size > 0,
     evalTypeFilter.size > 0,
     periodFilter.size > 0,
-    !!entryDateFilter.from || !!entryDateFilter.to,
     !!dateFilter.from || !!dateFilter.to || (dateFilter.preset && dateFilter.preset !== "all"),
   ].filter(Boolean).length;
 
   function resetAllFilters() {
-    setStatusFilter(new Set());
     setEvalTypeFilter(new Set());
     setPeriodFilter(new Set());
-    setEntryDateFilter(DEFAULT_DATE_FILTER);
     setDateFilter(DEFAULT_DATE_FILTER);
   }
+
+  const totalPages  = Math.max(1, Math.ceil(filtered.length / SESSIONS_PAGE_SIZE));
+  const pageClamped = Math.min(page, totalPages);
+  const pageRows    = filtered.slice((pageClamped - 1) * SESSIONS_PAGE_SIZE, pageClamped * SESSIONS_PAGE_SIZE);
 
   return (
     <div>
@@ -580,23 +570,6 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId, entryDateFi
             }}
           >
             <div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>สถานะ</div>
-              <FilterChips
-                options={[
-                  { v: "pending",        l: SESSION_STATUS_LABELS.pending },
-                  { v: "in_progress",    l: SESSION_STATUS_LABELS.in_progress },
-                  { v: "pending_review", l: SESSION_STATUS_LABELS.pending_review },
-                  { v: "completed",      l: SESSION_STATUS_LABELS.completed },
-                  { v: "returned",       l: SESSION_STATUS_LABELS.returned },
-                  { v: "overdue",        l: SESSION_STATUS_LABELS.overdue },
-                ]}
-                selected={statusFilter}
-                onToggle={v => setStatusFilter(s => toggleInSet(s, v))}
-                onClear={() => setStatusFilter(new Set())}
-              />
-            </div>
-
-            <div>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>ประเภทการประเมิน</div>
               <FilterChips
                 options={[{ v: "pre_eval", l: "Pre" }, { v: "post_eval", l: "Post" }, { v: "half_year", l: "Half-Year" }, { v: "yearly", l: "Yearly" }]}
@@ -625,11 +598,6 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId, entryDateFi
             </div>
 
             <div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>วันแรกที่ประเมิน</div>
-              <DateFilterBar filter={entryDateFilter} onChange={setEntryDateFilter} label="วันแรกที่ประเมิน" showPresets={false} />
-            </div>
-
-            <div>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>วันที่เสร็จสิ้น</div>
               <DateFilterBar filter={dateFilter} onChange={setDateFilter} label="วันที่เสร็จสิ้น" showPresets={false} />
             </div>
@@ -653,21 +621,23 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId, entryDateFi
         )}
       </div>
 
-      <div style={{ fontSize: 12, color: "#aaa", marginBottom: 10 }}>แสดง {filtered.length} จาก {sessions.length} รายการ</div>
+      <div style={{ fontSize: 12, color: "#aaa", marginBottom: 10 }}>
+        แสดงเฉพาะรอบที่ Approved แล้ว — {filtered.length} จาก {approvedSessions.length} รายการ
+      </div>
 
       <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden", border: "1px solid #dde3dd", boxShadow: "0 2px 10px rgba(0,0,0,0.06)" }}>
         <table className="admin-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
             <tr>
-              {["ซัพพลายเออร์", "ประเภทการประเมิน", "Period", "สถานะ", "วันแรกที่ประเมิน", "เสร็จสิ้นเมื่อ", "คะแนนรวม", "เกรด", "ผู้ประเมิน"].map(h => (
+              {["ซัพพลายเออร์", "ประเภทการประเมิน", "Period", "สถานะ", "เสร็จสิ้นเมื่อ", "คะแนนรวม", "เกรด", "ผู้ประเมิน", "ครั้งที่ประเมิน"].map(h => (
                 <th key={h}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {pageRows.length === 0 ? (
               <tr><td colSpan={9} style={{ padding: 32, textAlign: "center", color: "#bbb" }}>ไม่พบข้อมูล</td></tr>
-            ) : filtered.map((s, i) => (
+            ) : pageRows.map((s, i) => (
               <tr
                 key={s.sessionId}
                 onClick={() => setSelectedSessionId(s.sessionId)}
@@ -687,9 +657,6 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId, entryDateFi
                 </td>
                 <td style={{ padding: "11px 14px", fontSize: 12, color: "#666" }}>{s.period}</td>
                 <td style={{ padding: "11px 14px" }}><StatusBadge status={s.status} dueDate={s.dueDate} /></td>
-                <td style={{ padding: "11px 14px", fontSize: 12, color: "#888", whiteSpace: "nowrap" }}>
-                  {s.createdAt ? new Date(s.createdAt).toLocaleDateString("th-TH") : "—"}
-                </td>
                 <td style={{ padding: "11px 14px", fontSize: 12, color: "#888", whiteSpace: "nowrap" }}>
                   {s.completedAt ? new Date(s.completedAt).toLocaleDateString("th-TH") : "—"}
                 </td>
@@ -735,11 +702,31 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId, entryDateFi
                     {(s.evaluations ?? []).length === 0 && <span style={{ color: "#bbb", fontSize: 11 }}>ยังไม่มีผล</span>}
                   </div>
                 </td>
+                <td style={{ padding: "11px 14px", textAlign: "center" }}>
+                  <span style={{
+                    display: "inline-flex", alignItems: "center", justifyContent: "center",
+                    minWidth: 26, height: 22, padding: "0 8px", borderRadius: 6,
+                    background: "#f3e8fd", color: "#6a1b9a", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap",
+                  }}>
+                    {roundIndexBySession[s.sessionId] ?? 1}
+                  </span>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {filtered.length > 0 && (
+        <PaginationBar
+          page={pageClamped}
+          totalPages={totalPages}
+          total={filtered.length}
+          pageSize={SESSIONS_PAGE_SIZE}
+          onPrev={() => setPage(p => Math.max(1, p - 1))}
+          onNext={() => setPage(p => Math.min(totalPages, p + 1))}
+        />
+      )}
     </div>
   );
 }

@@ -266,8 +266,12 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
     }
   }
 
-  const activeTasks    = useMemo(() => tasks.filter(t => t.status !== "completed"), [tasks]);
-  const completedTasks = useMemo(() => tasks.filter(t => t.status === "completed"), [tasks]);
+  // Session ที่ Approved แล้ว (สถานะรวม = completed) ให้ไปอยู่แค่หน้า
+  // "ผลและประวัติการประเมิน" เท่านั้น — ไม่โชว์ซ้ำที่นี่ หน้านี้เก็บไว้เฉพาะ
+  // งานที่ยังไม่จบรอบ (รอประเมิน/รออนุมัติ/ถูกตีกลับ/เกินกำหนด ฯลฯ)
+  const notYetApproved = useMemo(() => tasks.filter(t => t.sessionStatus !== "completed"), [tasks]);
+  const activeTasks    = useMemo(() => notYetApproved.filter(t => t.status !== "completed"), [notYetApproved]);
+  const completedTasks = useMemo(() => notYetApproved.filter(t => t.status === "completed"), [notYetApproved]);
   const baseList = mainTab === "completed" ? completedTasks : activeTasks;
 
   const filtered = useMemo(() => {

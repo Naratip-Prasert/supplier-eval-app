@@ -74,6 +74,8 @@ function EvalHistoryLoader({ evalId, user, profilePic, onBack, onViewHistoryEval
           },
           result: {
             evalId:       d.id,
+            submittedAt:  d.submittedAt,
+            role:         d.role,
             totalScore:   Number(d.totalScore),
             grade:        d.grade,
             scores:       scoresObj,
@@ -296,7 +298,15 @@ export default function App() {
         user={user}
         profilePic={profilePic}
         onBack={() => { setEvalSavedState(null); setPage("landing"); }}
-        onDone={(res) => { setEvalSavedState(res); setResult(res); setPage("result"); }}
+        onDone={(res) => {
+          // ผู้ที่กำลังส่งผลตอนนี้คือ user ที่ล็อกอินอยู่ — แนบ role ไว้ด้วย
+          // เพื่อให้ป้าย "(ผลประเมินล่าสุด)" บนหน้า Result รู้ว่าต้องเทียบ
+          // ล่าสุดกับ role ไหน (USER/GCP มีสิทธิ์ประเมินแยกกัน)
+          const withRole = { ...res, role: user.role };
+          setEvalSavedState(withRole);
+          setResult(withRole);
+          setPage("result");
+        }}
       />
     );
   }

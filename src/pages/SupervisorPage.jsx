@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import { ArrowLeft, CheckCircle2, RotateCcw, Clock, RefreshCw, AlertCircle, Pencil, Check, X, Eye, ChevronDown, ChevronRight, History as HistoryIcon, Search, SlidersHorizontal } from "lucide-react";
 import { Header, useModal } from "../components";
 import { authFetch } from "../utils/api";
+import { GRADE_COLOR } from "../styles/theme";
 
 const EVAL_TYPE_LABEL = {
   pre_eval:     "Pre-Evaluation",
@@ -9,8 +10,6 @@ const EVAL_TYPE_LABEL = {
   half_year:    "Half-Year",
   yearly:       "Yearly",
 };
-
-const GRADE_COLOR = { A: "#15803d", B: "#1d4ed8", C: "#b45309", D: "#b91c1c", F: "#7f1d1d" };
 
 const FONT = "Sarabun, sans-serif";
 
@@ -314,7 +313,7 @@ export default function SupervisorPage({ authUser, onBack, onViewEvaluation }) {
                       disabled={savingNote || !editText.trim()}
                       style={{
                         display: "flex", alignItems: "center", gap: 6,
-                        background: "#15803d", color: "#fff", border: "none", borderRadius: 8,
+                        background: "#1b5e20", color: "#fff", border: "none", borderRadius: 8,
                         padding: "8px 18px", cursor: "pointer", fontFamily: FONT, fontWeight: 700, fontSize: 13,
                         opacity: savingNote || !editText.trim() ? 0.6 : 1,
                       }}
@@ -457,7 +456,7 @@ export default function SupervisorPage({ authUser, onBack, onViewEvaluation }) {
                       }}>
                         <span style={{
                           background: p.reviewStatus === "approved" ? "#ecfdf5" : "#eff6ff",
-                          color: p.reviewStatus === "approved" ? "#047857" : "#1d4ed8",
+                          color: p.reviewStatus === "approved" ? "#047857" : "#1565c0",
                           border: `1px solid ${p.reviewStatus === "approved" ? "#a7f3d0" : "#bfdbfe"}`,
                           padding: "3px 10px", borderRadius: 6, fontSize: 11.5, fontWeight: 700,
                           height: "fit-content", flexShrink: 0, whiteSpace: "nowrap",
@@ -747,7 +746,7 @@ export default function SupervisorPage({ authUser, onBack, onViewEvaluation }) {
                           onClick={() => handleDecision(session.sessionId, "approve")}
                           disabled={saving}
                           style={{
-                            background: "#15803d", color: "#fff", border: "none", borderRadius: 8,
+                            background: "#1b5e20", color: "#fff", border: "none", borderRadius: 8,
                             padding: "9px 20px", cursor: "pointer", fontFamily: FONT, fontWeight: 700, fontSize: 13,
                             display: "flex", alignItems: "center", gap: 7, opacity: saving ? 0.6 : 1,
                           }}
@@ -853,7 +852,7 @@ export default function SupervisorPage({ authUser, onBack, onViewEvaluation }) {
                           <td style={{ padding: "11px 16px" }}>
                             {row.reviewStatus === "approved" && hasPrior ? (
                               <span style={{
-                                background: "#fff", color: "#15803d", border: "1px solid #a7f3d0",
+                                background: "#fff", color: "#1b5e20", border: "1px solid #a7f3d0",
                                 padding: "3px 10px", borderRadius: 6, fontSize: 11.5, fontWeight: 700,
                                 whiteSpace: "nowrap",
                               }}>
@@ -862,7 +861,7 @@ export default function SupervisorPage({ authUser, onBack, onViewEvaluation }) {
                             ) : (
                               <span style={{
                                 background: row.reviewStatus === "approved" ? "#ecfdf5" : "#eff6ff",
-                                color: row.reviewStatus === "approved" ? "#047857" : "#1d4ed8",
+                                color: row.reviewStatus === "approved" ? "#047857" : "#1565c0",
                                 border: `1px solid ${row.reviewStatus === "approved" ? "#a7f3d0" : "#bfdbfe"}`,
                                 padding: "3px 10px", borderRadius: 6, fontSize: 11.5, fontWeight: 700,
                               }}>
@@ -900,7 +899,7 @@ export default function SupervisorPage({ authUser, onBack, onViewEvaluation }) {
                                 display: "flex", alignItems: "center", gap: 6,
                                 background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 7,
                                 padding: "6px 12px", cursor: "pointer", fontFamily: FONT,
-                                fontSize: 12, fontWeight: 600, color: "#1d4ed8", whiteSpace: "nowrap",
+                                fontSize: 12, fontWeight: 600, color: "#1565c0", whiteSpace: "nowrap",
                               }}
                               onMouseEnter={e => e.currentTarget.style.background = "#dbeafe"}
                               onMouseLeave={e => e.currentTarget.style.background = "#eff6ff"}
@@ -921,7 +920,7 @@ export default function SupervisorPage({ authUser, onBack, onViewEvaluation }) {
                             <td style={{ padding: "8px 16px" }}>
                               <span style={{
                                 background: p.reviewStatus === "approved" ? "#ecfdf5" : "#eff6ff",
-                                color: p.reviewStatus === "approved" ? "#047857" : "#1d4ed8",
+                                color: p.reviewStatus === "approved" ? "#047857" : "#1565c0",
                                 border: `1px solid ${p.reviewStatus === "approved" ? "#a7f3d0" : "#bfdbfe"}`,
                                 padding: "2px 8px", borderRadius: 6, fontSize: 10.5, fontWeight: 700,
                               }}>

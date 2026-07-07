@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import { PRODUCT_TYPE_OPTIONS, EVAL_PERIOD_OPTIONS, PRE_PERIOD_OPTIONS, DUE_DATE_SORT_LABEL as SORT_LABEL } from "../constants";
+import { roleThemeColor, roleThemeGradient } from "../styles/theme";
 
 const PRODUCT_MAP   = { "สินค้า": "goods", "บริการ": "services", "สินค้าและบริการ": "both" };
 const PRODUCT_LABEL = { goods: "สินค้า", services: "บริการ", both: "สินค้าและบริการ" };
@@ -114,10 +115,11 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
   const { showAlert, ModalEl } = useModal();
 
   const isGCP      = authUser.role === "GCP";
-  const themeColor = isGCP ? "#1d4ed8" : "#15803d";
-  const themeBg    = isGCP
-    ? "linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 60%, #2563eb 100%)"
-    : "linear-gradient(135deg, #14532d 0%, #15803d 60%, #16a34a 100%)";
+  // ธีมสีตาม role จริง (เดิมมีแค่ 2 ทาง GCP/ไม่ใช่ GCP — ADMIN ที่เข้าหน้านี้
+  // เพื่อกรอกฟอร์มเอง (canManualEntry ด้านล่าง) เลยเคยได้ธีมเขียวของ USER
+  // ไปโดยไม่ตั้งใจ ตอนนี้ใช้สีตาม role ที่แท้จริงจากจุดกลางเดียวกันทั้งแอป)
+  const themeColor = roleThemeColor(authUser.role);
+  const themeBg    = roleThemeGradient(authUser.role);
   // USER/GCP can only evaluate suppliers explicitly assigned to them via the
   // task system — free-typing a vendor code is reserved for ADMIN (ad-hoc use).
   const canManualEntry = authUser.role === "ADMIN";
@@ -432,7 +434,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                 style={{
                   display: "flex", alignItems: "center", gap: 6,
                   background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8,
-                  padding: "6px 12px", cursor: "pointer", fontSize: 12, color: "#6b7280",
+                  padding: "6px 12px", cursor: "pointer", fontSize: 12, color: "#64748b",
                   fontFamily: "Sarabun, sans-serif",
                 }}
               >
@@ -454,7 +456,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                     padding: "7px 14px", borderRadius: 7, border: "none", cursor: "pointer",
                     fontSize: 12.5, fontWeight: taskTab === tb.key ? 700 : 500, fontFamily: "Sarabun, sans-serif",
                     background: taskTab === tb.key ? "#fff" : "transparent",
-                    color: taskTab === tb.key ? themeColor : "#6b7280",
+                    color: taskTab === tb.key ? themeColor : "#64748b",
                     boxShadow: taskTab === tb.key ? "0 1px 4px rgba(0,0,0,0.1)" : "none",
                   }}
                 >
@@ -573,7 +575,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
             </div>
 
             {filteredTimeline.length === 0 ? (
-              <div style={{ textAlign: "center", padding: 30, color: "#9ca3af", fontSize: 13 }}>ไม่มีรายการ</div>
+              <div style={{ textAlign: "center", padding: 30, color: "#94a3b8", fontSize: 13 }}>ไม่มีรายการ</div>
             ) : (
               <>
                 {/* On narrow screens a horizontally-scrolling table hides
@@ -594,7 +596,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                     <thead>
                       <tr style={{ borderBottom: "2px solid #f1f5f9" }}>
                         {["Supplier", "ประเภท", "สถานะ", "ครบกำหนด", "จัดการ"].map(h => (
-                          <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "#6b7280", fontSize: 11.5, textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" }}>
+                          <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "#64748b", fontSize: 11.5, textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" }}>
                             {h}
                           </th>
                         ))}
@@ -610,7 +612,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                           <tr key={t.taskId} style={{ borderBottom: "1px solid #f1f5f9" }}>
                             <td style={{ padding: "10px 10px" }}>
                               <div style={{ fontWeight: 700, color: "#111827" }}>{t.supplierName}</div>
-                              <div style={{ fontSize: 11, color: "#9ca3af" }}>{t.vendorCode}</div>
+                              <div style={{ fontSize: 11, color: "#94a3b8" }}>{t.vendorCode}</div>
                               {isReturned && t.supervisorNotes && (
                                 <button
                                   onClick={() => setReturnedNote({ supplierName: t.supplierName, notes: t.supervisorNotes })}
@@ -633,7 +635,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                             <td style={{ padding: "10px 10px" }}>
                               <TimelineStepper status={t.sessionStatus} dueDate={t.dueDate} compact />
                             </td>
-                            <td style={{ padding: "10px 10px", color: overdue ? "#c62828" : "#6b7280", fontWeight: overdue ? 700 : 400, whiteSpace: "nowrap", fontSize: 12 }}>
+                            <td style={{ padding: "10px 10px", color: overdue ? "#c62828" : "#64748b", fontWeight: overdue ? 700 : 400, whiteSpace: "nowrap", fontSize: 12 }}>
                               {t.dueDate ? new Date(t.dueDate).toLocaleDateString("th-TH") : "—"}
                             </td>
                             <td style={{ padding: "10px 10px" }}>
@@ -650,7 +652,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                                   {isReturned ? "ประเมินใหม่" : "เริ่มประเมิน"}
                                 </button>
                               ) : (
-                                <span style={{ fontSize: 11.5, color: "#9ca3af" }}>
+                                <span style={{ fontSize: 11.5, color: "#94a3b8" }}>
                                   {t.taskStatus === "completed" ? "ส่งแล้ว" : "—"}
                                 </span>
                               )}
@@ -676,7 +678,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
                           <div>
                             <div style={{ fontWeight: 700, color: "#111827" }}>{t.supplierName}</div>
-                            <div style={{ fontSize: 11, color: "#9ca3af" }}>{t.vendorCode}</div>
+                            <div style={{ fontSize: 11, color: "#94a3b8" }}>{t.vendorCode}</div>
                           </div>
                           <span style={{ color: "#555", fontSize: 11.5, whiteSpace: "nowrap", flexShrink: 0 }}>
                             {TASK_EVAL_TYPE_LABEL[t.evalType] || t.evalType}
@@ -688,7 +690,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                         </div>
 
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: isReturned && t.supervisorNotes ? 8 : 0 }}>
-                          <span style={{ fontSize: 12, color: overdue ? "#c62828" : "#6b7280", fontWeight: overdue ? 700 : 400 }}>
+                          <span style={{ fontSize: 12, color: overdue ? "#c62828" : "#64748b", fontWeight: overdue ? 700 : 400 }}>
                             ครบกำหนด: {t.dueDate ? new Date(t.dueDate).toLocaleDateString("th-TH") : "—"}
                           </span>
                           {actionable ? (
@@ -704,7 +706,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                               {isReturned ? "ประเมินใหม่" : "เริ่มประเมิน"}
                             </button>
                           ) : (
-                            <span style={{ fontSize: 11.5, color: "#9ca3af" }}>
+                            <span style={{ fontSize: 11.5, color: "#94a3b8" }}>
                               {t.taskStatus === "completed" ? "ส่งแล้ว" : "—"}
                             </span>
                           )}
@@ -745,7 +747,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
           <div style={{
             background: "#fff", border: "1.5px dashed #d1d5db", borderRadius: 16,
             boxShadow: "0 4px 32px rgba(0,0,0,0.10)",
-            padding: "40px 20px", textAlign: "center", color: "#9ca3af",
+            padding: "40px 20px", textAlign: "center", color: "#94a3b8",
             animation: "fadeUp 0.3s ease",
           }}>
             ไม่มีงานที่ต้องประเมินในขณะนี้
@@ -783,7 +785,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 14, color: "#111827" }}>{authUser.fullName}</div>
-              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 1 }}>
+              <div style={{ fontSize: 12, color: "#64748b", marginTop: 1 }}>
                 {authUser.empId}{authUser.department ? ` · ${authUser.department}` : ""}
                 {authUser.jobTitle ? ` · ${authUser.jobTitle}` : ""}
               </div>
@@ -801,7 +803,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
               display: "flex", gap: 10, alignItems: "flex-start",
               padding: "12px 24px",
               background: "#eff6ff", borderBottom: "1px solid #bfdbfe",
-              fontSize: 12, color: "#1d4ed8",
+              fontSize: 12, color: "#1565c0",
             }}>
               <Info size={15} style={{ flexShrink: 0, marginTop: 1 }} />
               <span>เจ้าหน้าที่ GCP จะเห็นแบบประเมินทั้งหมด แต่สามารถกรอกได้เฉพาะส่วนของฝ่ายจัดซื้อเท่านั้น</span>
@@ -816,7 +818,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                 <div style={{
                   width: 24, height: 24, borderRadius: "50%",
                   background: evalType ? themeColor : "#e5e7eb",
-                  color: evalType ? "#fff" : "#9ca3af",
+                  color: evalType ? "#fff" : "#94a3b8",
                   display: "flex", alignItems: "center", justifyContent: "center",
                   fontSize: 12, fontWeight: 700, flexShrink: 0, transition: "background 0.2s",
                 }}>1</div>
@@ -846,13 +848,13 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                         width: 40, height: 40, borderRadius: 10, flexShrink: 0,
                         background: active ? themeColor : "#e5e7eb",
                         display: "flex", alignItems: "center", justifyContent: "center",
-                        color: active ? "#fff" : "#9ca3af", transition: "all 0.2s",
+                        color: active ? "#fff" : "#94a3b8", transition: "all 0.2s",
                       }}>{icon}</div>
                       <div>
                         <div style={{ fontSize: 14, fontWeight: 700, color: active ? themeColor : "#374151", transition: "color 0.2s" }}>
                           {label}
                         </div>
-                        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>{desc}</div>
+                        <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{desc}</div>
                       </div>
                       {active && (
                         <CheckCircle2 size={16} style={{ color: themeColor, marginLeft: "auto", flexShrink: 0 }} />
@@ -870,7 +872,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                   <div style={{
                     width: 24, height: 24, borderRadius: "50%",
                     background: vendorFound ? themeColor : "#e5e7eb",
-                    color: vendorFound ? "#fff" : "#9ca3af",
+                    color: vendorFound ? "#fff" : "#94a3b8",
                     display: "flex", alignItems: "center", justifyContent: "center",
                     fontSize: 12, fontWeight: 700, flexShrink: 0, transition: "background 0.2s",
                   }}>2</div>
@@ -889,7 +891,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                     />
                     <div style={{ marginTop: 5, minHeight: 18 }}>
                       {vendorLookup.status === "loading" && (
-                        <span style={{ fontSize: 11, color: "#6b7280", display: "flex", alignItems: "center", gap: 4 }}>
+                        <span style={{ fontSize: 11, color: "#64748b", display: "flex", alignItems: "center", gap: 4 }}>
                           <Loader2 size={11} style={{ animation: "spin 0.8s linear infinite" }} /> กำลังค้นหา...
                         </span>
                       )}
@@ -904,7 +906,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
                         </span>
                       )}
                       {vendorFound && (
-                        <span style={{ fontSize: 11, color: "#15803d", display: "flex", alignItems: "center", gap: 4 }}>
+                        <span style={{ fontSize: 11, color: "#1b5e20", display: "flex", alignItems: "center", gap: 4 }}>
                           <CheckCircle2 size={11} /> พบข้อมูลผู้ขายแล้ว
                         </span>
                       )}

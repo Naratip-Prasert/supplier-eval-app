@@ -14,7 +14,7 @@ export function Field({ label, required, hint, children }) {
       <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 7 }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>{label}</span>
         {required && <span style={{ color: "#ef4444", fontSize: 13 }}>*</span>}
-        {hint && <span style={{ fontSize: 11, color: "#9ca3af" }}>{hint}</span>}
+        {hint && <span style={{ fontSize: 11, color: "#94a3b8" }}>{hint}</span>}
       </div>
       {children}
     </div>
@@ -29,9 +29,9 @@ export function ReadBox({ value, placeholder, locked }) {
       background: locked ? "#f3f4f6" : "#f9fafb",
       border: `1.5px solid ${locked ? "#d1d5db" : "#e5e7eb"}`,
       borderRadius: 9, padding: "9px 14px", minHeight: 42,
-      color: value ? "#111827" : "#9ca3af", fontSize: 14,
+      color: value ? "#111827" : "#94a3b8", fontSize: 14,
     }}>
-      {locked && <Building2 size={14} style={{ color: "#9ca3af", flexShrink: 0 }} />}
+      {locked && <Building2 size={14} style={{ color: "#94a3b8", flexShrink: 0 }} />}
       <span>{value || <em style={{ fontStyle: "normal" }}>{placeholder}</em>}</span>
       {locked && value && <CheckCircle2 size={14} style={{ color: "#22c55e", marginLeft: "auto", flexShrink: 0 }} />}
     </div>
@@ -49,7 +49,7 @@ export function TextInput({ value, onChange, onBlur, placeholder, themeColor }) 
       boxShadow: focused ? `0 0 0 3px ${themeColor}18` : "none",
       transition: "border-color 0.15s, box-shadow 0.15s",
     }}>
-      <Search size={14} style={{ color: focused ? themeColor : "#9ca3af", flexShrink: 0, transition: "color 0.15s" }} />
+      <Search size={14} style={{ color: focused ? themeColor : "#94a3b8", flexShrink: 0, transition: "color 0.15s" }} />
       <input
         value={value}
         onChange={e => onChange(e.target.value)}
@@ -80,7 +80,7 @@ export function StyledSelect({ value, onChange, options, placeholder, themeColor
           width: "100%", appearance: "none", WebkitAppearance: "none",
           border: `1.5px solid ${focused ? themeColor : "#d1d5db"}`,
           borderRadius: 9, background: "#fff", padding: "9px 36px 9px 14px",
-          fontSize: 14, fontFamily: "Sarabun, sans-serif", color: value ? "#111827" : "#9ca3af",
+          fontSize: 14, fontFamily: "Sarabun, sans-serif", color: value ? "#111827" : "#94a3b8",
           boxShadow: focused ? `0 0 0 3px ${themeColor}18` : "none",
           transition: "border-color 0.15s, box-shadow 0.15s",
           cursor: "pointer", outline: "none", minHeight: 42,
@@ -93,7 +93,7 @@ export function StyledSelect({ value, onChange, options, placeholder, themeColor
       </select>
       <ChevronDown size={15} style={{
         position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)",
-        color: focused ? themeColor : "#9ca3af", pointerEvents: "none",
+        color: focused ? themeColor : "#94a3b8", pointerEvents: "none",
         transition: "color 0.15s",
       }} />
     </div>

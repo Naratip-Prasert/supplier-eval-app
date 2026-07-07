@@ -96,21 +96,27 @@ async function seedSet(client, sections, criteriaSet, codePrefix) {
   }
 }
 
-// Part 2 "Function module" weight — mirrors FUNCTION_SECTION_WEIGHT in
-// src/constants.js (defined after this file's load-cutoff point, so it
-// isn't importable here; keep the two in sync if the split ever changes).
-const FUNCTION_SECTION_WEIGHT = 25;
+// Part 2 "Function module" weight — not a fixed constant (admin rebalances
+// Core/Function/ESG on the Parameter page after seeding). The seed default
+// is the complement that makes each track total exactly 100%:
+// 100 − (that track's Core+ESG section weights) — mirrors
+// functionSectionWeightFrom() in src/constants.js.
+function functionWeightFor(criteria) {
+  const used = (criteria ?? []).reduce((t, sec) => t + (Number(sec.weight) || 0), 0);
+  return Math.max(0, Math.round((100 - used) * 100) / 100);
+}
 
 async function seedCriteriaFromConstants(client) {
   const { PRE_CRITERIA, POST_CRITERIA, FUNCTION_MODULES } = loadConstants();
   await seedSet(client, PRE_CRITERIA, 'pre_eval', 'PRE');
   await seedSet(client, POST_CRITERIA, 'post_eval', 'POST');
+  const preFuncW  = functionWeightFor(PRE_CRITERIA);
+  const postFuncW = functionWeightFor(POST_CRITERIA);
   for (const [code, mod] of Object.entries(FUNCTION_MODULES)) {
-    const sections = [{ section: mod.label, weight: FUNCTION_SECTION_WEIGHT, items: mod.items }];
     // criteriaSet = 'pre_m1'/'post_m1',... — matches criteria.js query `WHERE criteria_set = $1`
     // codePrefix  = 'FUNC-PRE-M1'/'FUNC-POST-M1',... — becomes the category code directly
-    await seedSet(client, sections, `pre_${code}`,  `FUNC-PRE-${code.toUpperCase()}`);
-    await seedSet(client, sections, `post_${code}`, `FUNC-POST-${code.toUpperCase()}`);
+    await seedSet(client, [{ section: mod.label, weight: preFuncW,  items: mod.items }], `pre_${code}`,  `FUNC-PRE-${code.toUpperCase()}`);
+    await seedSet(client, [{ section: mod.label, weight: postFuncW, items: mod.items }], `post_${code}`, `FUNC-POST-${code.toUpperCase()}`);
   }
 }
 

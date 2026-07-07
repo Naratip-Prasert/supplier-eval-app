@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Header, GreenButton, useModal } from "../components";
-import { getCriteria, isPostEvalType, LEVEL_COLORS, GRADE_MAP, GRADE_GUIDE, getGrade, findEsgSectionIndex, splitEsgGroups, getDisplayCriteriaFrom, FUNCTION_MODULES, FUNCTION_SECTION_WEIGHT } from "../constants";
+import { getCriteria, isPostEvalType, LEVEL_COLORS, GRADE_MAP, GRADE_GUIDE, getGrade, findEsgSectionIndex, splitEsgGroups, getDisplayCriteriaFrom, FUNCTION_MODULES, functionSectionWeightFrom } from "../constants";
 import { useCriteriaOverrides, useFunctionOverrides } from "../context/CriteriaContext";
 import { applyOverrides } from "../utils/criteriaOverlay";
 import { r2, getAhpMain, getAhpLocal, assignEsgSubGroupWeights, initWeights } from "../utils/evalWeightMath";
@@ -133,11 +133,15 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
   // sw MUST come from funcOverride (the DB-configured module weight), not
   // prev.sections[functionSectionIndex] — that slot is seeded at mount from
   // the "no module chosen yet" fallback (moduleCode is null on a fresh
-  // form), which locks it to the hardcoded FUNCTION_SECTION_WEIGHT forever.
-  // Reading the stale section weight here silently redistributed items to
-  // the wrong total (e.g. 25% instead of an admin-configured 26%), so the
+  // form), which used to lock it to a hardcoded constant forever. Reading
+  // the stale section weight here silently redistributed items to the
+  // wrong total (e.g. 25% instead of an admin-configured 26%), so the
   // grand total permanently drifted from 100% for every fresh evaluation.
-  const funcSectionWeight = moduleCode === "custom" ? FUNCTION_SECTION_WEIGHT : (funcOverride?.totalWeight ?? FUNCTION_SECTION_WEIGHT);
+  // custom module has no DB row (funcOverride is null then), so it falls to
+  // 100 − (Core+ESG in effect) — the same complement getDisplayCriteriaFrom
+  // uses — keeping the grand total at exactly 100% no matter how admin
+  // rebalanced the other parts.
+  const funcSectionWeight = funcOverride?.totalWeight ?? functionSectionWeightFrom(RAW_CRITERIA);
   useEffect(() => {
     if (functionSectionIndex === -1) return;
     const currentCodes = moduleCode === "custom"
@@ -549,7 +553,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
         }}>
           <div style={{
             padding: "13px 18px", borderBottom: "1px solid #c8d8c8",
-            background: "linear-gradient(90deg,#1a6b1a,#2e7d32)",
+            background: "linear-gradient(90deg,#1b5e20,#2e7d32)",
             fontWeight: 700, fontSize: 14, color: "#fff", letterSpacing: 0.3,
           }}>
             เกณฑ์การตัดสิน / Scoring Criteria
@@ -607,7 +611,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
       }}>
         <div className="sticky-score-progress" style={{ display: "flex", alignItems: "center", gap: 12, flex: 1 }}>
           <span style={{ fontSize: 13, color: "#555", whiteSpace: "nowrap" }}>
-            ตอบแล้ว <b style={{ color: "#1a6b1a" }}>{answered}</b>/{total} ข้อ
+            ตอบแล้ว <b style={{ color: "#1b5e20" }}>{answered}</b>/{total} ข้อ
           </span>
           <div style={{ flex: 1, height: 8, background: "#e0e0e0", borderRadius: 4, maxWidth: 200, minWidth: 60 }}>
             <div style={{
@@ -618,14 +622,14 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
           </div>
           <span style={{ fontSize: 12, color: "#888", whiteSpace: "nowrap" }}>
             น้ำหนักรวม:{" "}
-            <b style={{ color: r2(totalItemWeight) === 100 ? "#1a6b1a" : "#e65100" }}>{r2(totalItemWeight)}%</b>
+            <b style={{ color: r2(totalItemWeight) === 100 ? "#1b5e20" : "#e65100" }}>{r2(totalItemWeight)}%</b>
             {r2(totalItemWeight) !== 100 && <span style={{ color: "#e65100" }}> ≠ 100%</span>}
           </span>
         </div>
 
         <div className="sticky-score-totals" style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: "#444" }}>คะแนนรวม:</span>
-          <span style={{ fontSize: 28, fontWeight: 800, color: "#1a6b1a", lineHeight: 1 }}>
+          <span style={{ fontSize: 28, fontWeight: 800, color: "#1b5e20", lineHeight: 1 }}>
             {totalScore.toFixed(1)}
           </span>
           <span style={{ fontSize: 13, color: "#888" }}>/100</span>
@@ -660,7 +664,7 @@ function LegalComplianceCard({ status, onChange, onSubmitDisqualified }) {
   const headerBg = isFail
     ? "linear-gradient(90deg,#b71c1c,#e53935)"
     : isPass
-    ? "linear-gradient(90deg,#1a6b1a,#2e7d32)"
+    ? "linear-gradient(90deg,#1b5e20,#2e7d32)"
     : "linear-gradient(90deg,#bf360c,#e64a19)";
 
   return (
@@ -962,7 +966,7 @@ function CustomModuleBuilder({ items, onChange }) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
             {[0, 1, 2].map((li) => (
               <div key={li}>
-                <div style={{ fontSize: 10.5, color: "#9ca3af", marginBottom: 3 }}>คำอธิบายระดับ {[1, 3, 5][li]}</div>
+                <div style={{ fontSize: 10.5, color: "#94a3b8", marginBottom: 3 }}>คำอธิบายระดับ {[1, 3, 5][li]}</div>
                 <input
                   value={item.levels[li]}
                   onChange={(e) => updateItem(idx, { levels: item.levels.map((l, j) => (j === li ? e.target.value : l)) })}
@@ -1063,7 +1067,7 @@ function SectionHeaderRow({ section, secWeight, ahpW }) {
   return (
     <div style={{
       display: "grid", gridTemplateColumns: COLS, gap: 4,
-      background: "linear-gradient(90deg,#1a6b1a,#2e7d32)",
+      background: "linear-gradient(90deg,#1b5e20,#2e7d32)",
       color: "#fff", alignItems: "center",
     }}>
       <div style={{ gridColumn: "1 / 3", padding: "10px 16px", fontSize: 14, fontWeight: 700, letterSpacing: 0.3 }}>
@@ -1098,7 +1102,7 @@ function ScoreRow({ item, weight, selected, note, onSelect, onNote, shaded, ahpW
     }}>
       <div style={{
         padding: "14px 4px", textAlign: "center", fontSize: 12,
-        fontWeight: 800, color: "#1a6b1a", letterSpacing: 0.3,
+        fontWeight: 800, color: "#1b5e20", letterSpacing: 0.3,
         display: "flex", alignItems: "center", justifyContent: "center",
         borderRight: "1px solid #e8ece8",
       }}>
@@ -1138,7 +1142,7 @@ function ScoreRow({ item, weight, selected, note, onSelect, onNote, shaded, ahpW
       </div>
 
       <div style={{ padding: "8px 4px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2 }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: "#1a6b1a", padding: "4px 10px" }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: "#1b5e20", padding: "4px 10px" }}>
           {weight}%
           {ahpW != null && <span style={{ fontSize: 11, fontWeight: 400, color: "#888", marginLeft: 2 }}>({ahpW}%)</span>}
         </span>
@@ -1205,7 +1209,7 @@ function ScoreRow({ item, weight, selected, note, onSelect, onNote, shaded, ahpW
 
       <div style={{
         padding: "12px 4px", textAlign: "center", fontSize: 15, fontWeight: 800,
-        color: selected ? "#1a6b1a" : "#ccc",
+        color: selected ? "#1b5e20" : "#ccc",
         display: "flex", alignItems: "center", justifyContent: "center",
         borderLeft: "1px solid #e8ece8",
       }}>
@@ -1229,7 +1233,7 @@ function SectionHeaderMobile({ section, secWeight, ahpW }) {
   return (
     <div style={{
       display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
-      background: "linear-gradient(90deg,#1a6b1a,#2e7d32)", color: "#fff",
+      background: "linear-gradient(90deg,#1b5e20,#2e7d32)", color: "#fff",
       padding: "10px 14px",
     }}>
       <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: 0.3 }}>{section.section}</div>
@@ -1279,8 +1283,8 @@ function ScoreCardMobile({ item, weight, selected, note, onSelect, onNote, shade
       background: selected ? (shaded ? "#f0faf0" : "#f6fcf6") : (shaded ? "#f8faf8" : "#fff"),
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8 }}>
-        <span style={{ fontSize: 12, fontWeight: 800, color: "#1a6b1a" }}>ข้อ {item.no}</span>
-        <span style={{ fontSize: 12.5, fontWeight: 700, color: "#1a6b1a", flexShrink: 0 }}>
+        <span style={{ fontSize: 12, fontWeight: 800, color: "#1b5e20" }}>ข้อ {item.no}</span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: "#1b5e20", flexShrink: 0 }}>
           {weight}%
           {ahpW != null && <span style={{ fontSize: 11, fontWeight: 400, color: "#aaa", marginLeft: 2 }}>({ahpW}%)</span>}
         </span>
@@ -1337,7 +1341,7 @@ function ScoreCardMobile({ item, weight, selected, note, onSelect, onNote, shade
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
         <span style={{ fontSize: 12, color: "#718096" }}>คะแนนที่ได้</span>
-        <span style={{ fontSize: 16, fontWeight: 800, color: selected ? "#1a6b1a" : "#ccc" }}>{rowScore}</span>
+        <span style={{ fontSize: 16, fontWeight: 800, color: selected ? "#1b5e20" : "#ccc" }}>{rowScore}</span>
       </div>
 
       <NoteCell itemNo={item.no} value={note} onChange={onNote} />
@@ -1773,7 +1777,7 @@ function NoteCell({ itemNo, value, onChange }) {
 
             {/* header */}
             <div style={{
-              background: "#1a6b1a", color: "#fff",
+              background: "#1b5e20", color: "#fff",
               padding: "14px 20px",
               display: "flex", alignItems: "center", justifyContent: "space-between",
             }}>

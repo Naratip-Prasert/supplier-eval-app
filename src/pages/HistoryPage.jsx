@@ -5,17 +5,22 @@
 import { useState, useEffect, useMemo } from "react";
 import { Header } from "../components";
 import { authFetch } from "../utils/api";
+import { roleThemeColor, GRADE_COLOR as GRADE_MAP } from "../styles/theme";
 import {
   ClipboardList, Loader2, AlertCircle, ChevronRight,
   Search, SlidersHorizontal, X,
 } from "lucide-react";
 
+// bg/text/bar เดิมใช้สีที่ไม่ตรงกับเกรดจริงเลย (เขียว/ฟ้า/เหลือง/แดง/ชมพู
+// ตามธีม Tailwind ทั่วไป) ทำให้ "เกรด A" ในหน้านี้กับหน้า Result เป็นคนละสี
+// กัน — ตอนนี้ text/bar ใช้สีเกรดจริงจาก constants.js (GRADE_MAP) ทุกหน้า
+// เหมือนกันแล้ว เหลือแค่ bg เป็นเฉดอ่อนที่เข้าคู่สีให้พอมองแยกกลุ่มได้
 const GRADE_COLOR = {
-  A: { bg: "#dcfce7", text: "#166534", bar: "#16a34a" },
-  B: { bg: "#dbeafe", text: "#1e40af", bar: "#2563eb" },
-  C: { bg: "#fef9c3", text: "#854d0e", bar: "#ca8a04" },
-  D: { bg: "#fee2e2", text: "#991b1b", bar: "#dc2626" },
-  F: { bg: "#fce7f3", text: "#831843", bar: "#db2777" },
+  A: { bg: "#eaf7e0", text: GRADE_MAP.A, bar: GRADE_MAP.A },
+  B: { bg: "#f3f8d9", text: GRADE_MAP.B, bar: GRADE_MAP.B },
+  C: { bg: "#fbfacc", text: GRADE_MAP.C, bar: GRADE_MAP.C },
+  D: { bg: "#fbe4e0", text: GRADE_MAP.D, bar: GRADE_MAP.D },
+  F: { bg: "#f0dede", text: GRADE_MAP.F, bar: GRADE_MAP.F },
 };
 
 const EVAL_LABEL = { pre_eval: "Pre", post_eval: "Post", half_year: "Half-Year", yearly: "Yearly" };
@@ -42,7 +47,7 @@ function Pill({ active, onClick, children, color }) {
         fontSize: 12, fontWeight: 600, cursor: "pointer",
         fontFamily: "Sarabun, sans-serif",
         background: active ? (color || "#111827") : "#f3f4f6",
-        color: active ? "#fff" : "#6b7280",
+        color: active ? "#fff" : "#64748b",
         transition: "all 0.15s",
       }}
     >
@@ -62,7 +67,7 @@ function StatCard({ label, value, color, total }) {
       boxShadow: "0 1px 4px rgba(0,0,0,0.05)",
     }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4, marginBottom: 8 }}>
-        <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+        <span style={{ fontSize: 12, color: "#64748b", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
         <span style={{ fontSize: 18, fontWeight: 800, color, flexShrink: 0 }}>{value}</span>
       </div>
       <div style={{ height: 4, background: "#f3f4f6", borderRadius: 99 }}>
@@ -136,7 +141,9 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
     setFilterPeriod("all"); // reset period when switching eval type
   };
 
-  const themeColor = "#15803d";
+  // สีตาม role จริง (เดิม hardcode เขียวไว้ค่าเดียว ไม่สนใจว่าใครเปิดหน้านี้
+  // ทั้งที่ ADMIN ก็เข้าหน้านี้ได้ผ่าน "ประวัติการประเมินของฉัน")
+  const themeColor = roleThemeColor(authUser?.role);
 
   return (
     <div style={{ minHeight: "100vh", background: "#f8fafc", fontFamily: "Sarabun, sans-serif" }}>
@@ -192,7 +199,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
         }}>
           {/* Search row */}
           <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px" }}>
-            <Search size={16} style={{ color: "#9ca3af", flexShrink: 0 }} />
+            <Search size={16} style={{ color: "#94a3b8", flexShrink: 0 }} />
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
@@ -204,7 +211,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
             />
             {search && (
               <button onClick={() => setSearch("")} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: 0 }}>
-                <X size={15} style={{ color: "#9ca3af" }} />
+                <X size={15} style={{ color: "#94a3b8" }} />
               </button>
             )}
             <div style={{ width: 1, height: 20, background: "#e5e7eb", flexShrink: 0 }} />
@@ -215,7 +222,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
                 background: showFilter ? "#f0fdf4" : "none",
                 border: `1px solid ${showFilter ? themeColor : "#e5e7eb"}`,
                 borderRadius: 7, padding: "5px 12px", cursor: "pointer",
-                fontSize: 12, fontWeight: 600, color: showFilter ? themeColor : "#6b7280",
+                fontSize: 12, fontWeight: 600, color: showFilter ? themeColor : "#64748b",
                 fontFamily: "Sarabun, sans-serif", transition: "all 0.15s",
               }}
             >
@@ -229,7 +236,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
               )}
             </button>
             {status === "ok" && (
-              <span style={{ fontSize: 12, color: "#9ca3af", whiteSpace: "nowrap" }}>
+              <span style={{ fontSize: 12, color: "#94a3b8", whiteSpace: "nowrap" }}>
                 {filtered.length}/{records.length}
               </span>
             )}
@@ -242,7 +249,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
 
                 {/* Eval type */}
                 <div>
-                  <div style={{ fontSize: 11, color: "#9ca3af", fontWeight: 600, marginBottom: 6, textTransform: "uppercase" }}>ประเภท</div>
+                  <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, marginBottom: 6, textTransform: "uppercase" }}>ประเภท</div>
                   <div style={{ display: "flex", gap: 6 }}>
                     {[["all","ทั้งหมด"],["pre_eval","Pre"],["post_eval","Post"],["half_year","Half-Year"],["yearly","Yearly"]].map(([v,l]) => (
                       <Pill key={v} active={filterEval===v} onClick={()=>handleEvalFilter(v)} color={themeColor}>{l}</Pill>
@@ -253,7 +260,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
                 {/* Period — show only when Post is selected */}
                 {filterEval === "post_eval" && (
                   <div>
-                    <div style={{ fontSize: 11, color: "#9ca3af", fontWeight: 600, marginBottom: 6, textTransform: "uppercase" }}>รอบประเมิน</div>
+                    <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, marginBottom: 6, textTransform: "uppercase" }}>รอบประเมิน</div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                       {[
                         ["all",         "ทั้งหมด"],
@@ -270,7 +277,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
 
                 {/* Grade */}
                 <div>
-                  <div style={{ fontSize: 11, color: "#9ca3af", fontWeight: 600, marginBottom: 6, textTransform: "uppercase" }}>เกรด</div>
+                  <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, marginBottom: 6, textTransform: "uppercase" }}>เกรด</div>
                   <div style={{ display: "flex", gap: 6 }}>
                     {[["all","ทั้งหมด"],["A","A"],["B","B"],["C","C"],["D","D"],["F","F"]].map(([v,l]) => (
                       <Pill key={v} active={filterGrade===v} onClick={()=>setFilterGrade(v)} color={GRADE_COLOR[v]?.bar || themeColor}>{l}</Pill>
@@ -281,10 +288,10 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
                 {/* Role (admin only) */}
                 {isAdmin && (
                   <div>
-                    <div style={{ fontSize: 11, color: "#9ca3af", fontWeight: 600, marginBottom: 6, textTransform: "uppercase" }}>ผู้ประเมิน</div>
+                    <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, marginBottom: 6, textTransform: "uppercase" }}>ผู้ประเมิน</div>
                     <div style={{ display: "flex", gap: 6 }}>
                       {[["all","ทั้งหมด"],["USER","USER"],["GCP","GCP"]].map(([v,l]) => (
-                        <Pill key={v} active={filterRole===v} onClick={()=>setFilterRole(v)} color={v==="GCP"?"#1d4ed8":themeColor}>{l}</Pill>
+                        <Pill key={v} active={filterRole===v} onClick={()=>setFilterRole(v)} color={v==="GCP"?"#1565c0":themeColor}>{l}</Pill>
                       ))}
                     </div>
                   </div>
@@ -292,7 +299,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
 
                 {/* Date submitted */}
                 <div>
-                  <div style={{ fontSize: 11, color: "#9ca3af", fontWeight: 600, marginBottom: 6, textTransform: "uppercase" }}>วันที่ตอนที่เข้ามา</div>
+                  <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, marginBottom: 6, textTransform: "uppercase" }}>วันที่ตอนที่เข้ามา</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <input
                       type="date"
@@ -304,7 +311,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
                         fontSize: 12, fontFamily: "Sarabun, sans-serif", color: "#374151",
                       }}
                     />
-                    <span style={{ fontSize: 12, color: "#9ca3af" }}>—</span>
+                    <span style={{ fontSize: 12, color: "#94a3b8" }}>—</span>
                     <input
                       type="date"
                       value={dateTo}
@@ -336,7 +343,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
 
         {/* ── States ── */}
         {status === "loading" && (
-          <div style={{ textAlign: "center", padding: 60, color: "#9ca3af" }}>
+          <div style={{ textAlign: "center", padding: 60, color: "#94a3b8" }}>
             <Loader2 size={26} style={{ animation: "spin 0.8s linear infinite", marginBottom: 10 }} />
             <div style={{ fontSize: 13 }}>กำลังโหลด...</div>
           </div>
@@ -355,14 +362,14 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
         {status === "ok" && records.length === 0 && (
           <div style={{ textAlign: "center", padding: "56px 20px", background: "#fff", borderRadius: 12, border: "1.5px dashed #e5e7eb" }}>
             <ClipboardList size={36} style={{ color: "#d1d5db", marginBottom: 10 }} />
-            <div style={{ fontSize: 14, color: "#9ca3af" }}>ยังไม่มีประวัติการประเมิน</div>
+            <div style={{ fontSize: 14, color: "#94a3b8" }}>ยังไม่มีประวัติการประเมิน</div>
           </div>
         )}
 
         {status === "ok" && records.length > 0 && filtered.length === 0 && (
           <div style={{ textAlign: "center", padding: "40px 20px", background: "#fff", borderRadius: 12, border: "1px solid #f3f4f6" }}>
             <Search size={28} style={{ color: "#d1d5db", marginBottom: 8 }} />
-            <div style={{ fontSize: 13, color: "#9ca3af" }}>ไม่พบรายการที่ตรงกับตัวกรอง</div>
+            <div style={{ fontSize: 13, color: "#94a3b8" }}>ไม่พบรายการที่ตรงกับตัวกรอง</div>
           </div>
         )}
 
@@ -393,7 +400,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
               gridTemplateColumns: isAdmin ? "36px 1fr 130px 90px 100px 80px 80px 20px" : "36px 1fr 130px 100px 80px 80px 20px",
               gap: "0 12px", padding: "8px 18px",
               background: "#f9fafb", borderBottom: "1px solid #f3f4f6",
-              fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: 0.5,
+              fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.5,
               alignItems: "center",
             }}>
               <div />
@@ -440,7 +447,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
                     }}>
                       {r.supplierName}
                     </div>
-                    <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>
+                    <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
                       {r.vendorCode} · {PRODUCT_LABEL[r.productType] ?? r.productType ?? "—"}
                     </div>
                   </div>
@@ -454,7 +461,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
                       <span style={{
                         fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4,
                         background: r.evalType === "post_eval" ? "#eff6ff" : "#f0fdf4",
-                        color: r.evalType === "post_eval" ? "#1d4ed8" : "#15803d",
+                        color: r.evalType === "post_eval" ? "#1565c0" : "#1b5e20",
                       }}>
                         {EVAL_LABEL[r.evalType] ?? r.evalType}
                       </span>
@@ -485,7 +492,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
                         <span style={{
                           fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 4,
                           background: r.role === "GCP" ? "#eff6ff" : "#f0fdf4",
-                          color: r.role === "GCP" ? "#1d4ed8" : "#15803d",
+                          color: r.role === "GCP" ? "#1565c0" : "#1b5e20",
                         }}>
                           {r.role}
                         </span>
@@ -494,7 +501,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
                   )}
 
                   {/* Date submitted */}
-                  <div style={{ fontSize: 11.5, color: "#6b7280" }}>
+                  <div style={{ fontSize: 11.5, color: "#64748b" }}>
                     {formatDateOnly(r.submittedAt)}
                   </div>
 
@@ -553,7 +560,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
                     <div style={{ fontWeight: 700, fontSize: 13.5, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {r.supplierName}
                     </div>
-                    <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {r.vendorCode} · {PRODUCT_LABEL[r.productType] ?? r.productType ?? "—"}
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5, flexWrap: "wrap" }}>
@@ -561,7 +568,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
                       <span style={{
                         fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4,
                         background: r.evalType === "post_eval" ? "#eff6ff" : "#f0fdf4",
-                        color: r.evalType === "post_eval" ? "#1d4ed8" : "#15803d",
+                        color: r.evalType === "post_eval" ? "#1565c0" : "#1b5e20",
                       }}>
                         {EVAL_LABEL[r.evalType] ?? r.evalType}
                       </span>
@@ -570,7 +577,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
                           display: "inline-flex", alignItems: "center", gap: 4,
                           fontSize: 10, fontWeight: 700, padding: "1px 6px 1px 2px", borderRadius: 4,
                           background: r.role === "GCP" ? "#eff6ff" : "#f0fdf4",
-                          color: r.role === "GCP" ? "#1d4ed8" : "#15803d",
+                          color: r.role === "GCP" ? "#1565c0" : "#1b5e20",
                         }}>
                           <span style={{
                             width: 14, height: 14, borderRadius: "50%", flexShrink: 0,
@@ -598,7 +605,7 @@ export default function HistoryPage({ authUser, onBack, onViewDetail }) {
                       {r.grade ?? "—"}
                     </span>
                     <div style={{ fontSize: 14, fontWeight: 800, color: gc.bar, lineHeight: 1 }}>{score}</div>
-                    <div style={{ fontSize: 9.5, color: "#9ca3af", marginTop: 2 }}>
+                    <div style={{ fontSize: 9.5, color: "#94a3b8", marginTop: 2 }}>
                       {formatDateOnly(r.submittedAt)}
                     </div>
                   </div>

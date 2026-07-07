@@ -3,7 +3,7 @@
 // ============================================================
 
 import { useState, useEffect } from "react";
-import { Header } from "../components";
+import { Header, useModal } from "../components";
 import { authFetch } from "../utils/api";
 import {
   ClipboardList, Clock, BarChart2, Shield, CheckSquare,
@@ -101,7 +101,7 @@ const ROLE_BADGE = {
 const ROLE_HERO = {
   // network nodes — dots joined by faint crossing lines
   USER: {
-    gradient: "linear-gradient(135deg, #1a6b1a 0%, #2e7d32 60%, #388e3c 100%)",
+    gradient: "linear-gradient(135deg, #1b5e20 0%, #2e7d32 60%, #388e3c 100%)",
     shadow: "rgba(26,107,26,0.28)",
     pattern: `
       radial-gradient(rgba(255,255,255,0.22) 1.6px, transparent 1.8px),
@@ -151,6 +151,12 @@ export default function PortalPage({
   const badge   = ROLE_BADGE[role] ?? ROLE_BADGE.USER;
   const hero    = ROLE_HERO[role] ?? ROLE_HERO.USER;
 
+  const { showConfirm, ModalEl } = useModal();
+  const handleLogoutClick = async () => {
+    const ok = await showConfirm("ต้องการออกจากระบบใช่ไหม?", "ยืนยันการออกจากระบบ");
+    if (ok) onLogout();
+  };
+
   // Surface "returned by supervisor" right here on the Portal — previously
   // evaluators only found out by happening to open the evaluate module.
   const [returnedTasks, setReturnedTasks] = useState([]);
@@ -185,6 +191,7 @@ export default function PortalPage({
 
   return (
     <div style={{ minHeight: "100vh", background: "#f0f4f0", fontFamily: "Sarabun, sans-serif" }}>
+      {ModalEl}
 
       {/* ── Header ── */}
       <Header />
@@ -299,7 +306,7 @@ export default function PortalPage({
               <User size={13} /> โปรไฟล์
             </button>
             <button
-              onClick={onLogout}
+              onClick={handleLogoutClick}
               title="ออกจากระบบ"
               style={{
                 display: "flex", alignItems: "center", gap: 7,

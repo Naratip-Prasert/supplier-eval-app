@@ -1670,32 +1670,39 @@ export function splitEsgGroups(items) {
 // would silently hide the other half's score from the section total and
 // radar axis, even though it's part of the stored total_score.
 // Showing "whichever has a score" degrades correctly for both cases.
-// Part 2 "Function module" — target weight carved out of the 100% total
-// (Core 60 / Function 25 / ESG 15, see the section-weight rescale above).
+// Part 2 "Function module" — the section's weight is NOT a fixed constant
+// (it used to be hardcoded 25): admin can rebalance Core/Function/ESG on the
+// Parameter page, so the real weight lives in the DB (funcOverride.totalWeight).
+// When no DB value is available (custom module, DB still loading, fresh seed),
+// derive it as the complement that makes the grand total exactly 100% —
+// 100 − (sum of the Core+ESG section weights actually in effect).
 // Items use weight:1 uniformly so they take the same initWeights "equal
-// split" fallback branch ESG items already use — the section's 25% gets
+// split" fallback branch ESG items already use — the section's weight gets
 // divided evenly across however many items are visible.
-export const FUNCTION_SECTION_WEIGHT = 25;
+export function functionSectionWeightFrom(baseCriteria) {
+  const used = (baseCriteria ?? []).reduce((t, sec) => t + (Number(sec.weight) || 0), 0);
+  return Math.max(0, Math.round((100 - used) * 100) / 100);
+}
 
-function buildFunctionSection(moduleCode, customItems) {
+function buildFunctionSection(moduleCode, customItems, weight) {
   if (!moduleCode) return null;
   if (moduleCode === "custom") {
-    return { section: "อื่นๆ (กำหนดเอง)", weight: FUNCTION_SECTION_WEIGHT, items: customItems ?? [] };
+    return { section: "อื่นๆ (กำหนดเอง)", weight, items: customItems ?? [] };
   }
   const mod = FUNCTION_MODULES[moduleCode];
   if (!mod) return null;
-  return { section: `${mod.label}`, weight: FUNCTION_SECTION_WEIGHT, items: mod.items };
+  return { section: `${mod.label}`, weight, items: mod.items };
 }
 
 // Combined function section — all M1-M7 items in one flat section with
 // module dividers between groups. Used when no specific moduleCode is set
 // (the new "คะแนนร่วม" mode) and as fallback for backward-compat displays.
-export function buildCombinedFunctionSection() {
+export function buildCombinedFunctionSection(weight) {
   const items = Object.entries(FUNCTION_MODULES).flatMap(([key, mod]) => [
     { divider: true, label: `${key.toUpperCase()} · ${mod.label.split(' · ').slice(1).join(' · ')}`, level: 1 },
     ...mod.items,
   ]);
-  return { section: "Function (คะแนนร่วม)", weight: FUNCTION_SECTION_WEIGHT, items };
+  return { section: "Function (คะแนนร่วม)", weight, items };
 }
 
 export function getGrade(score) {
@@ -1712,12 +1719,13 @@ export function getGrade(score) {
 // so callers can apply DB overrides before calling these functions.
 
 // funcOverride: { items, totalWeight } from buildFunctionOverrideMap — using
-// its totalWeight (instead of always falling back to the hardcoded
-// FUNCTION_SECTION_WEIGHT) keeps the eval form's grand total in sync after
-// admin changes a module's weight on the Parameter page.
+// its totalWeight (instead of always falling back to a derived default)
+// keeps the eval form's grand total in sync after admin changes a module's
+// weight on the Parameter page.
 export function getDisplayCriteriaFrom(baseCriteria, esgTarget, moduleCode, customItems, funcOverride) {
   const esgIdx = findEsgSectionIndex(baseCriteria);
   if (esgIdx === -1) return baseCriteria;
+  const funcW = functionSectionWeightFrom(baseCriteria);
   const core = baseCriteria.map((section, si) => {
     if (si !== esgIdx) return section;
     const groups = splitEsgGroups(section.items);
@@ -1727,10 +1735,10 @@ export function getDisplayCriteriaFrom(baseCriteria, esgTarget, moduleCode, cust
   let functionSection;
   if (funcOverride?.items && moduleCode && moduleCode !== "custom") {
     const mod = FUNCTION_MODULES[moduleCode];
-    functionSection = { section: `${mod?.label ?? moduleCode.toUpperCase()}`, weight: funcOverride.totalWeight ?? FUNCTION_SECTION_WEIGHT, items: funcOverride.items };
+    functionSection = { section: `${mod?.label ?? moduleCode.toUpperCase()}`, weight: funcOverride.totalWeight ?? funcW, items: funcOverride.items };
   } else {
-    functionSection = buildFunctionSection(moduleCode, customItems)
-      ?? { section: "Function", weight: FUNCTION_SECTION_WEIGHT, items: [] };
+    functionSection = buildFunctionSection(moduleCode, customItems, funcW)
+      ?? { section: "Function", weight: funcW, items: [] };
   }
   return [...core.slice(0, esgIdx), functionSection, ...core.slice(esgIdx)];
 }
@@ -1738,6 +1746,7 @@ export function getDisplayCriteriaFrom(baseCriteria, esgTarget, moduleCode, cust
 export function getScoredCriteriaFrom(baseCriteria, scores, moduleCode, customItems, funcOverride) {
   const esgIdx = findEsgSectionIndex(baseCriteria);
   if (esgIdx === -1 || !scores) return baseCriteria;
+  const funcW = functionSectionWeightFrom(baseCriteria);
   const core = baseCriteria.map((section, si) => {
     if (si !== esgIdx) return section;
     const groups     = splitEsgGroups(section.items);
@@ -1752,11 +1761,11 @@ export function getScoredCriteriaFrom(baseCriteria, scores, moduleCode, customIt
   let functionSection;
   if (funcOverride?.items && moduleCode && moduleCode !== "custom") {
     const mod = FUNCTION_MODULES[moduleCode];
-    functionSection = { section: `${mod?.label ?? moduleCode.toUpperCase()}`, weight: funcOverride.totalWeight ?? FUNCTION_SECTION_WEIGHT, items: funcOverride.items };
+    functionSection = { section: `${mod?.label ?? moduleCode.toUpperCase()}`, weight: funcOverride.totalWeight ?? funcW, items: funcOverride.items };
   } else {
     // Prefer module-specific section (old saved results); fall back to combined
-    functionSection = buildFunctionSection(moduleCode, customItems)
-      ?? buildCombinedFunctionSection();
+    functionSection = buildFunctionSection(moduleCode, customItems, funcW)
+      ?? buildCombinedFunctionSection(funcW);
   }
   return [...core.slice(0, esgIdx), functionSection, ...core.slice(esgIdx)];
 }

@@ -6,7 +6,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { authFetch } from "../utils/api";
 import { useCriteriaReload } from "../context/CriteriaContext";
-import { FUNCTION_SECTION_WEIGHT } from "../constants";
 import {
   r2adm, isEsgCategory, isEsgFactory, getCriteriaSetFromCode, nextItemCode,
   computeEffectiveWeights, computeEsgEffectiveWeights,
@@ -1567,12 +1566,15 @@ export default function AdminCriteriaEditor() {
 
   const coreWeight  = r2adm(coreSections.reduce((s, c) => s + (c.totalWeight ?? 0), 0));
   const esgWeight   = r2adm(esgSections.reduce((s, c) => s + (c.totalWeight ?? 0), 0));
-  const funcWeight  = r2adm(funcSections[0]?.totalWeight ?? FUNCTION_SECTION_WEIGHT);
+  // ยังไม่มี row Function ใน DB (ก่อน seed) → ใช้ส่วนที่เหลือจาก 100 แทน
+  // ค่าคงที่ — น้ำหนัก Function จริงเป็นค่าที่ admin ปรับได้ ไม่ใช่ 25 ตายตัว
+  const funcWeight  = r2adm(funcSections[0]?.totalWeight ?? Math.max(0, 100 - coreWeight - esgWeight));
   const totalWeight = r2adm(coreWeight + funcWeight + esgWeight);
   const weightOk    = Math.abs(totalWeight - 100) < 0.1;
   const allEmpty    = !loading && coreEsgSections.length === 0 && funcSections.length === 0;
 
-  // Function: each M1-M7 module = 25% (evaluator picks one module only)
+  // Function: evaluator picks one M1-M7 module; each module carries the
+  // full Function weight (admin-configurable, defaults to 100 − Core − ESG)
   const funcAvgInfo = "สำหรับ Function ให้แก้ไขที่น้ำหนักรวม";
 
   return (
@@ -1710,7 +1712,7 @@ export default function AdminCriteriaEditor() {
 
           {/* Function */}
           <PartCard label="Function"
-            weight={funcSections[0]?.totalWeight ?? FUNCTION_SECTION_WEIGHT}
+            weight={funcWeight}
             weightLabel="น้ำหนักรวม:" avgInfo={funcAvgInfo} accent="#2e7d32"
             onWeightSave={handleFuncWeightSave} disabled={!!saving || seeding}
           >

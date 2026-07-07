@@ -4,6 +4,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Eye, EyeOff, AlertTriangle, HelpCircle } from "lucide-react";
+import { GREEN } from "../styles/theme";
 
 // ------ useClickOutside ----------------------------------------
 // ปิด dropdown/popover เมื่อคลิกข้างนอกกล่อง — pattern นี้ถูก copy ซ้ำแยก
@@ -54,10 +55,17 @@ export function Clock() {
 
 // ------ Header ----------------------------------------------
 export function Header({ subtitle, backLabel, onBack, titleOverride, user, onLogout, profilePic }) {
+  const { showConfirm, ModalEl } = useModal();
+  const handleLogoutClick = async () => {
+    const ok = await showConfirm("ต้องการออกจากระบบใช่ไหม?", "ยืนยันการออกจากระบบ");
+    if (ok) onLogout();
+  };
   return (
+    <>
+    {ModalEl}
     <div className="app-header" style={{
       position: "relative", overflow: "hidden",
-      background: "linear-gradient(115deg, #1b7a1f 0%, #146318 55%, #0d4d0d 100%)",
+      background: `linear-gradient(115deg, ${GREEN.dark} 0%, ${GREEN.darkest} 55%, #0d4d0d 100%)`,
       color: "#fff", padding: "16px 24px",
       display: "flex", alignItems: "center", justifyContent: "space-between",
       gap: 12, flexWrap: "wrap",
@@ -137,7 +145,7 @@ export function Header({ subtitle, backLabel, onBack, titleOverride, user, onLog
         <div className="app-header-clock"><Clock /></div>
         {onLogout && (
           <button
-            onClick={onLogout}
+            onClick={handleLogoutClick}
             style={{
               background: "rgba(255,255,255,0.15)", color: "#fff",
               border: "1px solid rgba(255,255,255,0.35)", borderRadius: 6,
@@ -152,6 +160,7 @@ export function Header({ subtitle, backLabel, onBack, titleOverride, user, onLog
         )}
       </div>
     </div>
+    </>
   );
 }
 
@@ -310,7 +319,7 @@ const MODAL_ANIM = `
 
 function AppModal({ type, title, message, onClose }) {
   const isWarn   = type === "alert";
-  const headerBg = isWarn ? "#e65100" : "#1a6b1a";
+  const headerBg = isWarn ? "#e65100" : "#1b5e20";
   const Icon     = isWarn ? AlertTriangle : HelpCircle;
   const okColor  = isWarn ? "#e65100" : "#2e7d32";
   const okHover  = isWarn ? "#bf360c" : "#1b5e20";

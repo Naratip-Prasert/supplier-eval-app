@@ -72,7 +72,7 @@ export default function LoginPage({ onLogin }) {
   return (
     <div style={{
       minHeight: "100vh",
-      background: "linear-gradient(135deg, #14532d 0%, #1a6b1a 55%, #2e7d32 100%)",
+      background: "linear-gradient(135deg, #14532d 0%, #1b5e20 55%, #2e7d32 100%)",
       fontFamily: "Sarabun, sans-serif",
       display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
       padding: "32px 20px", position: "relative", overflow: "hidden",
@@ -124,11 +124,11 @@ export default function LoginPage({ onLogin }) {
           <div className="login-card-logo" style={{
             display: "inline-flex", alignItems: "center", justifyContent: "center",
             width: 48, height: 48, borderRadius: 14, marginBottom: 10,
-            background: "#1a6b1a",
+            background: "#1b5e20",
           }}>
             <Logo size={30} />
           </div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: "#1a6b1a" }}>เข้าสู่ระบบ</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: "#1b5e20" }}>เข้าสู่ระบบ</div>
           <div style={{ fontSize: 12.5, color: "#888", marginTop: 4 }}>กรอกข้อมูลบัญชีของคุณเพื่อเข้าใช้งาน</div>
         </div>
 

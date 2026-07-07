@@ -6,12 +6,12 @@ import { useState, useEffect, useRef } from "react";
 import { Header } from "../components";
 import { ShieldCheck, Camera, Loader2 } from "lucide-react";
 import { authFetch } from "../utils/api";
+import { roleThemeColor } from "../styles/theme";
 
 const ROLE_LABEL = { gcp: "GCP", user: "USER", admin: "ADMIN", supervisor: "SUPERVISOR" };
-const ROLE_COLOR = { gcp: "#1565c0", user: "#1a6b1a", admin: "#6a1b9a", supervisor: "#b56a00" };
 
 export default function ProfilePage({ authUser, onBack, onProfileUpdate }) {
-  const themeColor = ROLE_COLOR[authUser.role?.toLowerCase()] ?? "#1a6b1a";
+  const themeColor = roleThemeColor(authUser.role);
 
   const [profilePic, setProfilePic] = useState(null);
   const [fullName,   setFullName]   = useState(authUser.fullName || "");

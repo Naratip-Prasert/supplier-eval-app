@@ -5,7 +5,7 @@
 //  ได้ output เดียวกันเสมอ ไม่ผูกกับ state/closure ของ component) ทำให้
 //  ทดสอบและอ่านง่ายกว่าเดิมที่ฝังอยู่ใน 2000+ บรรทัดของหน้า Admin
 // ============================================================
-import { PRE_CRITERIA, POST_CRITERIA, FUNCTION_MODULES, FUNCTION_SECTION_WEIGHT } from "../constants";
+import { PRE_CRITERIA, POST_CRITERIA, FUNCTION_MODULES, functionSectionWeightFrom } from "../constants";
 
 export const r2adm = n => Math.round(n * 100) / 100;
 
@@ -367,13 +367,16 @@ export function buildSeedPayload() {
   // Function modules are configured separately per Pre/Post track (each
   // track's Core+ESG total differs, so each needs its own Function weight
   // to independently reach 100%) — mirrors PRE-CORE*/POST-CORE*.
-  const transformModules = (track) =>
-    Object.entries(FUNCTION_MODULES).map(([key, mod], ki) => {
-      const wMap = computeEqualWeights(mod.items, FUNCTION_SECTION_WEIGHT);
+  // Seed weight = 100 − (that track's Core+ESG total), not a hardcoded
+  // constant, so the freshly-seeded DB always sums to exactly 100%.
+  const transformModules = (track) => {
+    const funcW = functionSectionWeightFrom(track === 'pre' ? PRE_CRITERIA : POST_CRITERIA);
+    return Object.entries(FUNCTION_MODULES).map(([key, mod], ki) => {
+      const wMap = computeEqualWeights(mod.items, funcW);
       return {
         code:         `FUNC-${track.toUpperCase()}-${key.toUpperCase()}`,
         nameTh:       mod.label,
-        totalWeight:  FUNCTION_SECTION_WEIGHT,
+        totalWeight:  funcW,
         criteriaSet:  `${track}_${key}`,
         displayOrder: ki + 1,
         items: mod.items.map(item => ({
@@ -385,6 +388,7 @@ export function buildSeedPayload() {
         })),
       };
     });
+  };
 
   return [
     ...transform(PRE_CRITERIA,  'PRE',  'pre_eval'),

@@ -44,9 +44,9 @@ export function buildOverrideMap(dbSections) {
 
 // Build a lookup map for function module overrides from the DB response.
 // Key = module key lowercase (e.g. "m1", "m2"). Carries totalWeight alongside
-// the items — without it, callers fall back to the hardcoded
-// FUNCTION_SECTION_WEIGHT constant even after admin edits a module's weight
-// on the Parameter page, so the eval form's grand total silently drifts
+// the items — without it, callers fall back to the derived default weight
+// (100 − Core+ESG) even after admin edits a module's weight on the
+// Parameter page, so the eval form's grand total silently drifts
 // from the Parameter page's (e.g. showing 99% instead of 100%).
 export function buildFunctionOverrideMap(dbSections) {
   const map = {};

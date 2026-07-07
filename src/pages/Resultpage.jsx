@@ -49,8 +49,10 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
     result.scores, result.moduleCode, result.customItems, funcOverride
   );
 
-  const now     = new Date();
-  const dateStr = `${String(now.getDate()).padStart(2,"0")}/${String(now.getMonth()+1).padStart(2,"0")}/${now.getFullYear()}`;
+  // ถ้าเป็นการดูผลย้อนหลัง (มี submittedAt จริงจาก DB) ให้โชว์วันที่ประเมินจริง
+  // ไม่ใช่วันนี้ — เดิมใช้ new Date() ตายตัว เลยขึ้นวันที่ปัจจุบันเสมอแม้ดูผลเก่า
+  const evalDateObj = result.submittedAt ? new Date(result.submittedAt) : new Date();
+  const dateStr = `${String(evalDateObj.getDate()).padStart(2,"0")}/${String(evalDateObj.getMonth()+1).padStart(2,"0")}/${evalDateObj.getFullYear()}`;
 
   const sectionSummary = CRITERIA.map((sec, si) => {
     const realItems = sec.items.filter(i => !i.divider);
@@ -97,6 +99,22 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
       .catch(() => { if (!cancelled) setEvalHistory([]); });
     return () => { cancelled = true; };
   }, [formData.vendorCode, result.evalId]);
+
+  // หาว่าผลที่กำลังแสดงอยู่ตอนนี้ (main) หรือรายการใดใน Evaluation History
+  // ที่ถูกส่งล่าสุดจริงๆ เพื่อแปะป้าย "(ผลประเมินล่าสุด)" ไว้จุดเดียว — เทียบ
+  // แยกตาม role (USER/GCP/ฯลฯ) เพราะแต่ละ role ประเมินแยกกันเป็นอิสระ ไม่ควร
+  // เอาผลของ USER ไปทับ "ล่าสุด" ของ GCP หรือกลับกัน
+  const mainTime = evalDateObj.getTime();
+  const mainRole = result.role ?? null;
+
+  const latestByRole = evalHistory.reduce((acc, h) => {
+    if (!h.role) return acc;
+    const t = h.submittedAt ? new Date(h.submittedAt).getTime() : 0;
+    if (!acc[h.role] || t > acc[h.role].t) acc[h.role] = { evalId: h.evalId, t };
+    return acc;
+  }, {});
+
+  const isMainLatest = !!mainRole && (!latestByRole[mainRole] || mainTime >= latestByRole[mainRole].t);
 
   const handleBackToEval = async () => {
     if (readOnly) { onBack(); return; }
@@ -301,10 +319,10 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
         <div className="result-content-inner" style={{ maxWidth: 1200, margin: "0 auto", padding: "20px 16px" }}>
 
           {/* ── Print-only document header ── */}
-          <div className="print-doc-header" style={{ marginBottom: 18, paddingBottom: 12, borderBottom: "2.5px solid #1a6b1a" }}>
+          <div className="print-doc-header" style={{ marginBottom: 18, paddingBottom: 12, borderBottom: "2.5px solid #1b5e20" }}>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
               <div>
-                <div style={{ fontSize: 17, fontWeight: 800, color: "#1a6b1a", letterSpacing: 0.3 }}>
+                <div style={{ fontSize: 17, fontWeight: 800, color: "#1b5e20", letterSpacing: 0.3 }}>
                   Supplier Performance Evaluation — {evalLabel} Evaluation
                 </div>
                 <div style={{ fontSize: 11, color: "#555", marginTop: 4 }}>
@@ -313,7 +331,7 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
                 </div>
               </div>
               <div style={{ textAlign: "right", flexShrink: 0 }}>
-                <div style={{ fontSize: 26, fontWeight: 900, color: "#1a6b1a", lineHeight: 1 }}>{totalScore.toFixed(1)}</div>
+                <div style={{ fontSize: 26, fontWeight: 900, color: "#1b5e20", lineHeight: 1 }}>{totalScore.toFixed(1)}</div>
                 <div style={{ fontSize: 10, color: "#888" }}>/100</div>
                 <div style={{
                   display: "inline-block", marginTop: 4,
@@ -371,19 +389,28 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
           <div style={{
             ...card({ padding: "16px 20px", marginBottom: 16 }),
             display: "flex", alignItems: "center", gap: 18,
-            borderLeft: "4px solid #1a6b1a",
+            borderLeft: "4px solid #1b5e20",
           }}>
             <div style={{
               width: 52, height: 52, borderRadius: 10,
-              background: "#1a6b1a", color: "#fff",
+              background: "#1b5e20", color: "#fff",
               display: "flex", alignItems: "center", justifyContent: "center",
               fontSize: 18, fontWeight: 700, flexShrink: 0, letterSpacing: 1,
             }}>
               {initials}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 16, color: "#1a202c", marginBottom: 3 }}>
+              <div style={{ fontWeight: 700, fontSize: 16, color: "#1a202c", marginBottom: 3, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 {formData.supplierName || "—"}
+                {isMainLatest && (
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, color: "#1b5e20",
+                    background: "#e8f5e9", border: "1px solid #a5d6a7",
+                    borderRadius: 4, padding: "2px 7px", letterSpacing: 0.2,
+                  }}>
+                    (ผลประเมินล่าสุด{mainRole ? ` - ${mainRole}` : ""})
+                  </span>
+                )}
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 20px", fontSize: 12, color: "#718096" }}>
                 <span>Tax ID: <strong style={{ color: "#4a5568" }}>{formData.vendorCode || "—"}</strong></span>
@@ -399,7 +426,7 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
               <div style={{ fontSize: 11, color: "#718096", marginBottom: 4, fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase" }}>
                 {evalLabel} Evaluation
               </div>
-              <div style={{ fontSize: 28, fontWeight: 800, color: "#1a6b1a", lineHeight: 1 }}>
+              <div style={{ fontSize: 28, fontWeight: 800, color: "#1b5e20", lineHeight: 1 }}>
                 {totalScore.toFixed(1)}
               </div>
               <div style={{ fontSize: 11, color: "#a0aec0", marginBottom: 6 }}>/100</div>
@@ -603,6 +630,15 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
                   {evalHistory.map(h => {
                     const clickable = !!onViewHistoryEval;
                     const gColor = GRADE_MAP[h.grade] || "#a0aec0";
+                    const hDate = h.submittedAt ? new Date(h.submittedAt) : null;
+                    const hDateStr = hDate
+                      ? `${String(hDate.getDate()).padStart(2,"0")}/${String(hDate.getMonth()+1).padStart(2,"0")}/${hDate.getFullYear()}`
+                      : "—";
+                    // เป็น "ล่าสุด" ของ role นี้ ก็ต่อเมื่อไม่มีทั้ง main (role
+                    // เดียวกัน) และรายการอื่นใน role เดียวกันที่ใหม่กว่าอยู่
+                    const isThisLatest = !!h.role
+                      && latestByRole[h.role]?.evalId === h.evalId
+                      && !(mainRole === h.role && isMainLatest);
                     return (
                       <div
                         key={h.evalId}
@@ -618,6 +654,16 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
                           <span style={{ fontWeight: 600 }}>{EVAL_TYPE_LABEL[h.evalType] ?? h.evalType}</span>
                           {h.period ? <span style={{ color: "#718096" }}> · {h.period}</span> : null}
                           <span style={{ color: "#a0aec0" }}> · {h.role}</span>
+                          <span style={{ color: "#a0aec0" }}> · {hDateStr}</span>
+                          {isThisLatest && (
+                            <span style={{
+                              marginLeft: 6, fontSize: 10, fontWeight: 700, color: "#1b5e20",
+                              background: "#e8f5e9", border: "1px solid #a5d6a7",
+                              borderRadius: 4, padding: "1px 6px", letterSpacing: 0.2,
+                            }}>
+                              (ผลประเมินล่าสุด - {h.role})
+                            </span>
+                          )}
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                           <span style={{ fontSize: 12, color: "#4a5568" }}>{Number(h.totalScore ?? 0).toFixed(1)}</span>
