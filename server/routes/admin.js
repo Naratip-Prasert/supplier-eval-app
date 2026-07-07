@@ -98,6 +98,10 @@ router.post('/upload/pre-post', upload.single('file'), async (req, res) => {
   if (rows.length === 0) return res.status(400).json({ message: 'ไฟล์ไม่มีข้อมูล' });
 
   const client = await pool.connect();
+  // Declared here (not inside try) so the catch block below can still see
+  // it — a batchId created before a later row throws must still be marked
+  // 'error' instead of staying stuck at 'processing' forever.
+  let batchId;
   try {
     await client.query('BEGIN');
 
@@ -112,7 +116,7 @@ router.post('/upload/pre-post', upload.single('file'), async (req, res) => {
       INSERT INTO supplier_upload_batches (uploaded_by, batch_type, filename, row_count, status)
       VALUES ($1, 'pre_post_eval', $2, $3, 'processing') RETURNING id
     `, [uploaderId, req.file.originalname, rows.length]);
-    const batchId = batchResult.rows[0].id;
+    batchId = batchResult.rows[0].id;
 
     const summary = { processed: 0, skipped: 0, pre_eval: 0, post_eval: 0, warnings: [] };
     const invitationTasks = []; // collect for email after commit
@@ -293,6 +297,10 @@ router.post('/upload/periodic', upload.single('file'), async (req, res) => {
   if (rows.length === 0) return res.status(400).json({ message: 'ไฟล์ไม่มีข้อมูล' });
 
   const client = await pool.connect();
+  // Declared here (not inside try) so the catch block below can still see
+  // it — a batchId created before a later row throws must still be marked
+  // 'error' instead of staying stuck at 'processing' forever.
+  let batchId;
   try {
     await client.query('BEGIN');
 
@@ -305,7 +313,7 @@ router.post('/upload/periodic', upload.single('file'), async (req, res) => {
       INSERT INTO supplier_upload_batches (uploaded_by, batch_type, filename, row_count, status)
       VALUES ($1, $2, $3, $4, 'processing') RETURNING id
     `, [uploaderId, evalType, req.file.originalname, rows.length]);
-    const batchId = batchResult.rows[0].id;
+    batchId = batchResult.rows[0].id;
 
     const dueDate = addDays(new Date(), 7);
     // Tag with the calendar year so the SAME supplier's half_year/yearly
@@ -429,6 +437,10 @@ router.post('/upload/periodic', upload.single('file'), async (req, res) => {
     res.status(201).json({ message: 'อัพโหลดสำเร็จ', batchId, ...summary });
   } catch (err) {
     await client.query('ROLLBACK');
+    if (typeof batchId !== 'undefined') {
+      await pool.query(`UPDATE supplier_upload_batches SET status='error', error_msg=$1 WHERE id=$2`,
+        [err.message, batchId]).catch(() => {});
+    }
     console.error('POST /api/admin/upload/periodic error:', err);
     res.status(500).json({ message: 'อัพโหลดไม่สำเร็จ', error: err.message });
   } finally {

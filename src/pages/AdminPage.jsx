@@ -2,7 +2,7 @@
 //  pages/AdminPage.jsx  —  Admin management portal
 // ============================================================
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Header } from "../components";
+import { Header, useClickOutside } from "../components";
 import { authFetch } from "../utils/api";
 import TasksPage from "./TasksPage";
 import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter, todayRangeFilter } from "../utils/dateFilter";
@@ -81,17 +81,23 @@ export default function AdminPage({ authUser, onBack, onViewEvaluation, onViewUp
     });
   }, []);
 
+  // เช็ค r.ok ก่อนแปลง JSON เสมอ — ไม่งั้น error body ของ server (เช่น 500)
+  // จะถูกตีความเป็นข้อมูลจริงแล้วค่อยถูก Array.isArray กรองทิ้งเป็น [] เงียบๆ
+  // ผู้ใช้จะเห็นว่า "ไม่มีข้อมูล" ทั้งที่จริงคือ server error
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [empRes, sesRes] = await Promise.all([
-        authFetch("/api/employees").then(r => r.json()),
-        authFetch("/api/sessions").then(r => r.json()),
+      const [empR, sesR] = await Promise.all([
+        authFetch("/api/employees"),
+        authFetch("/api/sessions"),
       ]);
+      if (!empR.ok || !sesR.ok) throw new Error(`โหลดข้อมูลไม่สำเร็จ (${empR.status}/${sesR.status})`);
+      const [empRes, sesRes] = await Promise.all([empR.json(), sesR.json()]);
       setEmployees(Array.isArray(empRes) ? empRes : []);
       setSessions(Array.isArray(sesRes) ? sesRes : []);
     } catch (e) {
+      console.error("[AdminPage] fetchAll error:", e);
       setError("โหลดข้อมูลไม่สำเร็จ");
     } finally {
       setLoading(false);
@@ -476,14 +482,7 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId, entryDateFi
   const [filterOpen,        setFilterOpen]        = useState(false);
   const filterPanelRef = useRef(null);
 
-  useEffect(() => {
-    if (!filterOpen) return;
-    function onClickOutside(e) {
-      if (filterPanelRef.current && !filterPanelRef.current.contains(e.target)) setFilterOpen(false);
-    }
-    document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
-  }, [filterOpen]);
+  useClickOutside(filterPanelRef, filterOpen, () => setFilterOpen(false));
 
   if (selectedSessionId) {
     return (

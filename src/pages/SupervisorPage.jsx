@@ -21,7 +21,7 @@ function daysDiff(dateStr) {
 }
 
 export default function SupervisorPage({ authUser, onBack, onViewEvaluation }) {
-  const { showConfirm, ModalEl } = useModal();
+  const { showAlert, showConfirm, ModalEl } = useModal();
   const [tab,     setTab]     = useState("queue");
   const [queue,   setQueue]   = useState([]);
   const [history, setHistory] = useState([]);
@@ -52,16 +52,23 @@ export default function SupervisorPage({ authUser, onBack, onViewEvaluation }) {
   const [viewLoading, setViewLoading] = useState(false);
   const [viewError,   setViewError]   = useState(null);
 
+  // เช็ค r.ok ก่อนเสมอ — ไม่งั้น server error จริงจะโชว์เป็น "คิวว่าง" แทนที่
+  // จะบอก error ที่แท้จริง
   const fetchData = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const [qRes, hRes] = await Promise.all([
-        authFetch("/api/supervisor/queue").then(r => r.json()),
-        authFetch("/api/supervisor/history").then(r => r.json()),
+      const [qR, hR] = await Promise.all([
+        authFetch("/api/supervisor/queue"),
+        authFetch("/api/supervisor/history"),
       ]);
+      if (!qR.ok || !hR.ok) throw new Error(`โหลดข้อมูลไม่สำเร็จ (${qR.status}/${hR.status})`);
+      const [qRes, hRes] = await Promise.all([qR.json(), hR.json()]);
       setQueue(Array.isArray(qRes) ? qRes : []);
       setHistory(Array.isArray(hRes) ? hRes : []);
-    } catch { setError("โหลดข้อมูลไม่สำเร็จ"); }
+    } catch (e) {
+      console.error("[SupervisorPage] fetchData error:", e);
+      setError("โหลดข้อมูลไม่สำเร็จ");
+    }
     finally { setLoading(false); }
   }, []);
 
@@ -149,7 +156,7 @@ export default function SupervisorPage({ authUser, onBack, onViewEvaluation }) {
 
   async function handleDecision(sessionId, action) {
     if (action === "return" && !notes.trim()) {
-      alert("กรุณาระบุหมายเหตุสำหรับการส่งคืน");
+      await showAlert("กรุณาระบุหมายเหตุสำหรับการส่งคืน");
       return;
     }
     const confirmed = await showConfirm(

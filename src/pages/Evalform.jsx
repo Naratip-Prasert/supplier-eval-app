@@ -7,140 +7,12 @@ import { Header, GreenButton, useModal } from "../components";
 import { getCriteria, isPostEvalType, LEVEL_COLORS, GRADE_MAP, GRADE_GUIDE, getGrade, findEsgSectionIndex, splitEsgGroups, getDisplayCriteriaFrom, FUNCTION_MODULES, FUNCTION_SECTION_WEIGHT } from "../constants";
 import { useCriteriaOverrides, useFunctionOverrides } from "../context/CriteriaContext";
 import { applyOverrides } from "../utils/criteriaOverlay";
+import { r2, getAhpMain, getAhpLocal, assignEsgSubGroupWeights, initWeights } from "../utils/evalWeightMath";
 import { AlertTriangle, FileText, Plus, Trash2 } from "lucide-react";
 
 const LEVEL_LABELS       = ["ต้องปรับปรุง (Unsatisfactory)", "ต่ำกว่าเกณฑ์ (Below Standard)", "ผ่านเกณฑ์ (Satisfactory)", "ดี (Good)", "ดีเยี่ยม (Excellent)"];
 const LEVEL_SHORT_LABELS = ["ต้องปรับปรุง", "ต่ำกว่าเกณฑ์", "ผ่านเกณฑ์", "ดี", "ดีเยี่ยม"];
 const COLS = "52px 2.8fr 76px 1.1fr 1.1fr 1.1fr 1.1fr 1.1fr 84px 116px";
-
-// ---- helpers -----------------------------------------------
-
-const r2 = (n) => Math.round(n * 100) / 100;
-
-// ── AHP reference weights (from AHP_supplier.xlsx, display-only) ──
-const AHP_MAIN_W  = { '1': 38.65, '2': 21.21, '3': 21.21, '4': 11.98, '5': 6.94 };
-const AHP_LOCAL_W = {
-  '1.1': 53.90, '1.2': 29.73, '1.3': 16.38,
-  '2.1': 42.54, '2.2': 23.06, '2.3': 14.92, '2.4': 19.48,
-  '3.1': 33.33, '3.2': 33.33, '3.3': 16.67, '3.4': 16.67,
-  '4.1': 32.50, '4.2': 35.62, '4.3': 19.37, '4.4': 12.51,
-};
-function getAhpMain(section) {
-  const first = section.items.find(i => !i.divider);
-  if (!first) return null;
-  return AHP_MAIN_W[first.no.charAt(0)] ?? null;
-}
-function getAhpLocal(itemNo) {
-  if (!itemNo) return null;
-  if (AHP_LOCAL_W[itemNo] !== undefined) return AHP_LOCAL_W[itemNo];
-  const parts = itemNo.split('.');
-  if (parts.length >= 2) return AHP_LOCAL_W[parts[0] + '.' + parts[1]] ?? null;
-  return null;
-}
-
-
-// ESG sub-group dividers are labelled "ESG1 ...", "ESGF2 ...", etc. — the
-// trailing digit is the stable key used to key group-weight overrides,
-// independent of the HO/Factory "ESG" vs "ESGF" prefix.
-function esgGroupKey(label) {
-  return label?.match(/^(?:ESG|ESGF)(\d+)/i)?.[1] ?? null;
-}
-
-// Distribute ESG section weight across its items using `groupPct` (key =
-// esgGroupKey → % of section, e.g. {"1": 33.33, ...}), falling back to each
-// divider's own groupWeight, then to an equal 3-way split.
-//
-// The last group absorbs whatever's left of `sw` instead of computing its
-// own rounded share — three independently-rounded percentages (e.g.
-// 33.33/33.34/33.33% each rounded to 2dp) can individually round up, so
-// summing them can overshoot sw by a cent or two even though each GROUP's
-// own items correctly sum to that group's share. That 0.01 leftover then
-// shows up as the eval form's total sticking at "100.01% ≠ 100%" forever.
-function assignEsgSubGroupWeights(sectionItems, sw, items, groupPct) {
-  const groups = [];
-  let curKey = null, curFallbackPct = null, curItems = [];
-  const pushGroup = () => {
-    if (curItems.length) groups.push({ key: curKey, fallbackPct: curFallbackPct, items: curItems });
-    curItems = [];
-  };
-  sectionItems.forEach(item => {
-    if (item.divider) {
-      if (item.level === 2) { pushGroup(); curKey = esgGroupKey(item.label); curFallbackPct = item.groupWeight ?? null; }
-      return;
-    }
-    curItems.push(item);
-  });
-  pushGroup();
-
-  let rem = sw;
-  groups.forEach((g, gi) => {
-    let absW;
-    if (gi === groups.length - 1) {
-      absW = Math.max(0, rem);
-    } else {
-      const pct = (groupPct && g.key && groupPct[g.key] != null) ? groupPct[g.key] : (g.fallbackPct ?? (100 / groups.length));
-      absW = r2((pct / 100) * sw);
-      rem -= absW;
-    }
-    const each = r2(absW / g.items.length);
-    let itemRem = absW;
-    g.items.forEach((it, i) => {
-      if (i === g.items.length - 1) items[it.no] = r2(Math.max(0, itemRem));
-      else { items[it.no] = each; itemRem -= each; }
-    });
-  });
-}
-
-function initWeights(criteria) {
-  const sections = {};
-  const items    = {};
-  criteria.forEach((section, si) => {
-    const sw = section.weight ?? 0;
-    sections[si] = sw;
-    const realItems = section.items.filter((i) => !i.divider);
-
-    // ESG section: has level-2 sub-group dividers → distribute by groupWeight
-    const hasSubGroups = section.items.some(i => i.divider && i.level === 2 && i.groupWeight != null);
-    if (hasSubGroups) {
-      assignEsgSubGroupWeights(section.items, sw, items);
-      return;
-    }
-
-    const constantSum = realItems.reduce((s, i) => s + (i.weight ?? 0), 0);
-
-    // 1. DB weights: items sum ≈ section weight → use directly (parameter page overrides)
-    if (realItems.every(i => i.weight != null) && Math.abs(constantSum - sw) < 0.1) {
-      realItems.forEach(item => { items[item.no] = item.weight; });
-
-    // 2. AHP proportions: use AHP_LOCAL_W percentages when available for all items
-    } else if (realItems.length > 0 && realItems.every(i => getAhpLocal(i.no) != null)) {
-      const ahpSum = realItems.reduce((s, i) => s + getAhpLocal(i.no), 0);
-      let iRem = sw;
-      realItems.forEach((item, ii) => {
-        if (ii === realItems.length - 1) { items[item.no] = Math.max(0, r2(iRem)); }
-        else { const w = r2(sw * getAhpLocal(item.no) / ahpSum); items[item.no] = w; iRem -= w; }
-      });
-
-    // 3. Proportional from item.weight (handles constants.js weights on different scale)
-    } else if (constantSum > 0) {
-      let iRem = sw;
-      realItems.forEach((item, ii) => {
-        if (ii === realItems.length - 1) { items[item.no] = Math.max(0, r2(iRem)); }
-        else { const w = r2((item.weight / constantSum) * sw); items[item.no] = w; iRem -= w; }
-      });
-
-    // 4. Equal distribution fallback
-    } else {
-      const itemEach = realItems.length > 0 ? r2(sw / realItems.length) : 0;
-      let iRem = sw;
-      realItems.forEach((item, ii) => {
-        if (ii === realItems.length - 1) { items[item.no] = Math.max(0, r2(iRem)); }
-        else { items[item.no] = itemEach; iRem -= itemEach; }
-      });
-    }
-  });
-  return { sections, items };
-}
 
 // ---- main component ----------------------------------------
 
@@ -171,7 +43,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
 
   // Part2 "Function module" — same idea as the ESG selector above, generalized
   // to 8 choices (M1-M7 + custom). The Function section always sits right
-  // before ESG in CRITERIA (see getDisplayCriteria), so its index is exactly
+  // before ESG in CRITERIA (see getDisplayCriteriaFrom), so its index is exactly
   // esgSectionIndex and ESG itself shifts to esgSectionIndex + 1.
   const functionSectionIndex = esgSectionIndex;
   const esgSectionIndexInCriteria = esgSectionIndex === -1 ? -1 : esgSectionIndex + 1;
@@ -239,7 +111,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
 
       if (chosenCodes.length > 0 && !alreadyWeighted) {
         // NOTE: esgSectionIndexInCriteria, not esgSectionIndex — the Function
-        // section is always spliced in right before ESG (see getDisplayCriteria),
+        // section is always spliced in right before ESG (see getDisplayCriteriaFrom),
         // so ESG's real slot in ws.sections is shifted by 1. Using the
         // unshifted index here was reading the Function section's weight (25)
         // instead of ESG's (15), causing totals like 110% instead of 100%.
@@ -1041,14 +913,21 @@ function ModuleSelector({ value, onChange }) {
 }
 
 function CustomModuleBuilder({ items, onChange }) {
+  // ใช้ functional update (onChange = setCustomItems ของ parent) แทนการ
+  // คำนวณ array ใหม่จาก items (prop) ตรงๆ — ถ้าเรียก addItem ติดกันเร็วมาก
+  // (เช่นดับเบิลคลิกโดยไม่ตั้งใจ) ก่อน React re-render ทั้งสองครั้งจะอ่าน
+  // items.length จาก snapshot เดิมเหมือนกัน ทำให้ item ที่ 2 code ซ้ำกับที่ 1
+  // และการเรียกครั้งหลังจะทับการเรียกครั้งแรกทิ้งไปเลย (เพราะ setState
+  // แทนที่ทั้ง array ไม่ใช่ merge) — functional update กันปัญหานี้ได้เพราะ
+  // React การันตีว่าจะรันต่อจาก state ล่าสุดจริงเสมอ
   const addItem = () => {
-    onChange([...items, { no: `CUSTOM.${items.length + 1}`, title: "", levels: ["", "", ""], levelValues: [1, 3, 5] }]);
+    onChange(prev => [...prev, { no: `CUSTOM.${prev.length + 1}`, title: "", levels: ["", "", ""], levelValues: [1, 3, 5] }]);
   };
   const removeItem = (idx) => {
-    onChange(items.filter((_, i) => i !== idx).map((it, i) => ({ ...it, no: `CUSTOM.${i + 1}` })));
+    onChange(prev => prev.filter((_, i) => i !== idx).map((it, i) => ({ ...it, no: `CUSTOM.${i + 1}` })));
   };
   const updateItem = (idx, patch) => {
-    onChange(items.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
+    onChange(prev => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
   };
   const inputStyle = {
     width: "100%", fontSize: 12.5, padding: "6px 9px", borderRadius: 6,

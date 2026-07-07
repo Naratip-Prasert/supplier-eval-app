@@ -45,8 +45,12 @@ app.get("/", (req, res) => {
   res.json({ message: "Supplier Eval API is running" });
 });
 
-// Login has no other brute-force protection (no lockout, no CAPTCHA) —
-// cap attempts per IP so password-guessing can't be scripted unbounded.
+// Login (and re-confirming your own password via verify-password) has no
+// other brute-force protection (no lockout, no CAPTCHA) — cap attempts per
+// IP so password-guessing can't be scripted unbounded. verify-password
+// requires an already-valid JWT, so the risk is lower than /login, but a
+// stolen/short-lived token would otherwise let someone guess the real
+// password with unlimited attempts through that endpoint.
 const { rateLimit } = require('express-rate-limit');
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -56,6 +60,7 @@ const loginLimiter = rateLimit({
   message: { message: 'พยายามเข้าสู่ระบบบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่' },
 });
 app.use('/api/auth/login', loginLimiter);
+app.use('/api/auth/verify-password', loginLimiter);
 
 app.use('/api/auth',        require('./routes/auth'));          // public
 app.use('/api/evaluations', requireAuth, require('./routes/evaluations'));
@@ -96,51 +101,15 @@ pool.connect()
     // so a fresh install ends up with the right shape) remain.
     //
     // evaluations_role_check: this block is its sole source of truth.
+    // (The trigger function/trigger used to be created here too, but every
+    // startup redefines it 3 times in a row via CREATE OR REPLACE — only
+    // the last definition further down ever matters at runtime. Removed
+    // the first two dead redefinitions; only the constraint remains here.)
     await client.query(`
       ALTER TABLE evaluations DROP CONSTRAINT IF EXISTS evaluations_role_check;
       ALTER TABLE evaluations
         ADD CONSTRAINT evaluations_role_check
         CHECK (role IN ('USER', 'GCP', 'ADMIN'));
-
-      CREATE OR REPLACE FUNCTION recalculate_session_final_score()
-      RETURNS TRIGGER AS $func$
-      DECLARE
-        v_session_id UUID;
-        v_user_score DECIMAL;
-        v_gcp_score  DECIMAL;
-        v_final      DECIMAL;
-        v_grade      VARCHAR(5);
-      BEGIN
-        v_session_id := NEW.session_id;
-        SELECT total_score INTO v_user_score
-          FROM evaluations
-         WHERE session_id = v_session_id AND role = 'USER' AND status = 'saved';
-        SELECT total_score INTO v_gcp_score
-          FROM evaluations
-         WHERE session_id = v_session_id AND role = 'GCP' AND status = 'saved';
-        IF v_user_score IS NOT NULL AND v_gcp_score IS NOT NULL THEN
-          v_final := ROUND((v_user_score + v_gcp_score) / 2.0, 2);
-          SELECT grade INTO v_grade
-            FROM grade_thresholds
-           WHERE ROUND(v_final, 1) >= min_score AND ROUND(v_final, 1) <= max_score
-           LIMIT 1;
-          UPDATE evaluation_sessions
-             SET final_score = v_final, final_grade = v_grade,
-                 status = 'completed', completed_at = NOW()
-           WHERE id = v_session_id;
-        ELSE
-          UPDATE evaluation_sessions
-             SET status = 'in_progress'
-           WHERE id = v_session_id AND status = 'pending';
-        END IF;
-        RETURN NEW;
-      END;
-      $func$ LANGUAGE plpgsql;
-
-      DROP TRIGGER IF EXISTS trg_recalculate_score ON evaluations;
-      CREATE TRIGGER trg_recalculate_score
-        AFTER INSERT OR UPDATE ON evaluations
-        FOR EACH ROW EXECUTE FUNCTION recalculate_session_final_score();
     `).catch(err => console.warn('role migration warning:', err.message));
 
     // Backfill: sessions that already have both USER+GCP saved evaluations but are still pending/in_progress
@@ -219,48 +188,9 @@ pool.connect()
         CHECK (status IN ('pending','in_progress','pending_review','completed','returned'))
     `).catch(err => console.warn('sessions constraint migration warning:', err.message));
 
-    // Update trigger: both saved → pending_review (not completed directly)
-    await client.query(`
-      CREATE OR REPLACE FUNCTION recalculate_session_final_score()
-      RETURNS TRIGGER AS $func$
-      DECLARE
-        v_session_id UUID;
-        v_user_score DECIMAL;
-        v_gcp_score  DECIMAL;
-        v_final      DECIMAL;
-        v_grade      VARCHAR(5);
-      BEGIN
-        v_session_id := NEW.session_id;
-        SELECT total_score INTO v_user_score
-          FROM evaluations
-         WHERE session_id = v_session_id AND role = 'USER' AND status = 'saved';
-        SELECT total_score INTO v_gcp_score
-          FROM evaluations
-         WHERE session_id = v_session_id AND role = 'GCP' AND status = 'saved';
-        IF v_user_score IS NOT NULL AND v_gcp_score IS NOT NULL THEN
-          v_final := ROUND((v_user_score + v_gcp_score) / 2.0, 2);
-          SELECT grade INTO v_grade
-            FROM grade_thresholds
-           WHERE ROUND(v_final, 1) >= min_score AND ROUND(v_final, 1) <= max_score
-           LIMIT 1;
-          UPDATE evaluation_sessions
-             SET final_score = v_final, final_grade = v_grade,
-                 status = 'pending_review'
-           WHERE id = v_session_id AND status NOT IN ('completed','returned');
-        ELSE
-          UPDATE evaluation_sessions
-             SET status = 'in_progress'
-           WHERE id = v_session_id AND status = 'pending';
-        END IF;
-        RETURN NEW;
-      END;
-      $func$ LANGUAGE plpgsql;
-
-      DROP TRIGGER IF EXISTS trg_recalculate_score ON evaluations;
-      CREATE TRIGGER trg_recalculate_score
-        AFTER INSERT OR UPDATE ON evaluations
-        FOR EACH ROW EXECUTE FUNCTION recalculate_session_final_score();
-    `).catch(err => console.warn('trigger migration warning:', err.message));
+    // (A second dead redefinition of recalculate_session_final_score used to
+    // live here — removed; see note above the constraint block earlier in
+    // this file. Only the definition below is ever live at runtime.)
 
     // Fix: a 'returned' session could never come back to 'pending_review'
     // after re-submission, because the guard above excluded 'returned' —

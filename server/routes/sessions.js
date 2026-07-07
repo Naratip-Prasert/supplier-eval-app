@@ -7,6 +7,19 @@
 const router = require('express').Router();
 const pool   = require('../db');
 
+// ทั้งสอง route นี้เผยผลคะแนน/session ของ "ทุก" supplier ในระบบ — เดิมพึ่ง
+// แค่ว่าหน้า UI (AdminPage/SupervisorPage) ไม่โชว์เมนูนี้ให้ role อื่นเห็น
+// แต่ backend เองไม่เคยเช็ค role เลย ใครก็ตามที่มี JWT ที่ login แล้ว (role
+// อะไรก็ได้) เรียก API ตรงๆ ก็ดึงข้อมูลทุก supplier ได้หมด — ต่างจาก
+// /api/evaluations/:id และ /by-vendor ที่ตั้งใจเปิดให้ทุก role ดูได้
+// (พนักงานประเมิน supplier ไหนก็ได้อยู่แล้วตามดีไซน์เดิมของแอป)
+router.use((req, res, next) => {
+  if (!['ADMIN', 'SUPERVISOR'].includes(req.user?.role)) {
+    return res.status(403).json({ message: 'สิทธิ์ไม่เพียงพอ (ต้องการ ADMIN หรือ SUPERVISOR)' });
+  }
+  next();
+});
+
 // GET /api/sessions
 // Full evaluation history — each session row includes summary
 // for both BU and GCP evaluations (req 6).

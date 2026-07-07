@@ -20,6 +20,10 @@ export const DEPT_JOB_MAP = {
 
 export const PRODUCT_TYPE_OPTIONS = ["สินค้า", "บริการ", "สินค้าและบริการ"];
 
+// ป้ายกำกับทิศทางเรียงลำดับตามวันครบกำหนด — ใช้ร่วมกันใน LandingPage และ
+// TasksPage (เดิม copy ซ้ำกันเป๊ะทั้งสองไฟล์)
+export const DUE_DATE_SORT_LABEL = { asc: "ครบกำหนดเร็วสุดก่อน", desc: "ครบกำหนดช้าสุดก่อน" };
+
 export const PRE_PERIOD_OPTIONS = [
   "New Supplier / ผู้ขายรายใหม่",
 ];
@@ -1683,28 +1687,6 @@ function buildFunctionSection(moduleCode, customItems) {
   return { section: `${mod.label}`, weight: FUNCTION_SECTION_WEIGHT, items: mod.items };
 }
 
-export function getScoredCriteria(evalType, scores, moduleCode, customItems) {
-  const criteria = getCriteria(evalType);
-  const esgIdx   = findEsgSectionIndex(criteria);
-  if (esgIdx === -1 || !scores) return criteria;
-  const core = criteria.map((section, si) => {
-    if (si !== esgIdx) return section;
-    const groups  = splitEsgGroups(section.items);
-    const hoHit      = groups.ho.some((i) => !i.divider && scores[i.no] != null);
-    const factoryHit = groups.factory.some((i) => !i.divider && scores[i.no] != null);
-    const chosen = hoHit && factoryHit ? [...groups.ho, ...groups.factory]
-      : hoHit ? groups.ho
-      : factoryHit ? groups.factory
-      : [];
-    return { ...section, items: chosen };
-  });
-  const functionSection = buildFunctionSection(moduleCode, customItems);
-  if (!functionSection) return core;
-  return [...core.slice(0, esgIdx), functionSection, ...core.slice(esgIdx)];
-}
-
-// Returns CRITERIA with the ESG section's items narrowed down to just the
-// chosen facility type (`esgTarget`: "ho" | "factory" | null/undefined),
 // Combined function section — all M1-M7 items in one flat section with
 // module dividers between groups. Used when no specific moduleCode is set
 // (the new "คะแนนร่วม" mode) and as fallback for backward-compat displays.
@@ -1714,21 +1696,6 @@ export function buildCombinedFunctionSection() {
     ...mod.items,
   ]);
   return { section: "Function (คะแนนร่วม)", weight: FUNCTION_SECTION_WEIGHT, items };
-}
-
-export function getDisplayCriteria(evalType, esgTarget, moduleCode, customItems) {
-  const criteria = getCriteria(evalType);
-  const esgIdx   = findEsgSectionIndex(criteria);
-  if (esgIdx === -1) return criteria;
-  const core = criteria.map((section, si) => {
-    if (si !== esgIdx) return section;
-    const groups = splitEsgGroups(section.items);
-    const chosen = esgTarget === "factory" ? groups.factory : esgTarget === "ho" ? groups.ho : [];
-    return { ...section, items: chosen };
-  });
-  const functionSection = buildFunctionSection(moduleCode, customItems)
-    ?? { section: "Function", weight: FUNCTION_SECTION_WEIGHT, items: [] };
-  return [...core.slice(0, esgIdx), functionSection, ...core.slice(esgIdx)];
 }
 
 export function getGrade(score) {

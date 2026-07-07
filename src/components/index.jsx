@@ -5,6 +5,20 @@
 import { useState, useEffect, useRef } from "react";
 import { Eye, EyeOff, AlertTriangle, HelpCircle } from "lucide-react";
 
+// ------ useClickOutside ----------------------------------------
+// ปิด dropdown/popover เมื่อคลิกข้างนอกกล่อง — pattern นี้ถูก copy ซ้ำแยก
+// กันหลายที่ (ProfileDropdown, filter panel, export menu ฯลฯ) รวมเป็น hook
+// เดียวใช้ร่วมกัน
+export function useClickOutside(ref, active, onOutside) {
+  useEffect(() => {
+    if (!active) return;
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) onOutside(); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+}
+
 // ------ Logo --------------------------------------------------
 // Flat badge icon: ascending bars (performance) + a trend line up to a
 // highlighted point — no real brand asset exists for this project yet,
@@ -42,9 +56,12 @@ export function Clock() {
 export function Header({ subtitle, backLabel, onBack, titleOverride, user, onLogout, profilePic }) {
   return (
     <div className="app-header" style={{
-      background: "#1a6b1a", color: "#fff", padding: "10px 20px",
+      position: "relative", overflow: "hidden",
+      background: "linear-gradient(115deg, #1b7a1f 0%, #146318 55%, #0d4d0d 100%)",
+      color: "#fff", padding: "16px 24px",
       display: "flex", alignItems: "center", justifyContent: "space-between",
       gap: 12, flexWrap: "wrap",
+      boxShadow: "0 3px 14px rgba(0,0,0,0.18)",
     }}>
       <style>{`
         /* Both sides are flexShrink:0 by design (title/back button must
@@ -57,7 +74,18 @@ export function Header({ subtitle, backLabel, onBack, titleOverride, user, onLog
           .app-header-right .app-header-clock { display: none; }
         }
       `}</style>
-      <div className="app-header-left" style={{ display: "flex", alignItems: "center", gap: 14, flex: 1, minWidth: 0 }}>
+      {/* Decorative backdrop — faint dot grid + a soft glow, kept low-opacity
+          so it reads as texture rather than competing with the header text */}
+      <div aria-hidden style={{
+        position: "absolute", inset: 0, pointerEvents: "none",
+        backgroundImage: "radial-gradient(rgba(255,255,255,0.08) 1.4px, transparent 1.4px)",
+        backgroundSize: "18px 18px",
+      }} />
+      <div aria-hidden style={{
+        position: "absolute", top: "-60%", right: "-6%", width: 260, height: 260,
+        borderRadius: "50%", background: "rgba(255,255,255,0.08)", pointerEvents: "none",
+      }} />
+      <div className="app-header-left" style={{ position: "relative", display: "flex", alignItems: "center", gap: 14, flex: 1, minWidth: 0 }}>
         {onBack && (
           <button
             onClick={onBack}
@@ -71,24 +99,25 @@ export function Header({ subtitle, backLabel, onBack, titleOverride, user, onLog
             {backLabel || "← กลับหน้าหลัก"}
           </button>
         )}
-        <Logo size={28} />
+        <Logo size={32} />
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 15, letterSpacing: 1 }}>
+          <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 17, letterSpacing: 1.2 }}>
             {titleOverride || "SPES"}
           </div>
           {subtitle && (
-            <div style={{ fontSize: 11, color: "#a5d6a7", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <div style={{ fontSize: 11, color: "#c8e6c9", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {subtitle}
             </div>
           )}
         </div>
       </div>
-      <div className="app-header-right" style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
+      <div className="app-header-right" style={{ position: "relative", display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
         {user && (
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{
-              width: 34, height: 34, borderRadius: "50%",
-              border: "2px solid rgba(255,255,255,0.6)",
+              width: 36, height: 36, borderRadius: "50%",
+              border: "2px solid rgba(255,255,255,0.65)",
+              boxShadow: "0 1px 6px rgba(0,0,0,0.25)",
               overflow: "hidden", flexShrink: 0,
               background: "rgba(255,255,255,0.2)",
               display: "flex", alignItems: "center", justifyContent: "center",
@@ -101,7 +130,7 @@ export function Header({ subtitle, backLabel, onBack, titleOverride, user, onLog
             </div>
             <div style={{ textAlign: "right", lineHeight: 1.3 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{user.fullName}</div>
-              <div style={{ fontSize: 11, color: "#a5d6a7" }}>{user.role} · {user.department}</div>
+              <div style={{ fontSize: 11, color: "#c8e6c9" }}>{user.role} · {user.department}</div>
             </div>
           </div>
         )}

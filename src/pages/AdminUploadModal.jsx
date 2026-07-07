@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { Upload, X, FileSpreadsheet, Calendar, CheckCircle, AlertTriangle, ChevronRight } from "lucide-react";
 import { authFetch } from "../utils/api";
@@ -45,6 +45,10 @@ export default function AdminUploadModal({ onClose }) {
   const [fileError,  setFileError]  = useState(null);
   const fileRef = useRef();
 
+  // กัน setState หลัง component unmount (เช่นปิด modal ระหว่าง upload ยังไม่เสร็จ)
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
   function handleFileSelect(f) {
     if (!f) return;
     setResult(null);
@@ -75,6 +79,9 @@ export default function AdminUploadModal({ onClose }) {
         setPreview(rows.slice(0, 6));
       } catch { setPreview(null); }
     };
+    // ไฟล์อ่านไม่ได้จริงๆ (เสีย/สิทธิ์ถูกปฏิเสธ ฯลฯ) ต้องบอก error ให้เห็น
+    // ไม่งั้น modal จะค้างไม่มี preview แล้วก็ไม่มีข้อความอะไรบอกว่าทำไม
+    reader.onerror = () => setFileError("ไม่สามารถอ่านไฟล์ได้ ลองเลือกไฟล์ใหม่อีกครั้ง");
     reader.readAsArrayBuffer(f);
   }
 
@@ -93,11 +100,11 @@ export default function AdminUploadModal({ onClose }) {
       const res  = await authFetch(url, { method: "POST", body: fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Upload failed");
-      setResult({ ok: true, ...data });
+      if (mountedRef.current) setResult({ ok: true, ...data });
     } catch (e) {
-      setResult({ ok: false, message: e.message });
+      if (mountedRef.current) setResult({ ok: false, message: e.message });
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   }
 

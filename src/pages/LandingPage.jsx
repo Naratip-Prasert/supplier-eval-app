@@ -3,20 +3,21 @@
 // ============================================================
 
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
-import { useModal } from "../components";
+import { useModal, useClickOutside } from "../components";
 import { TimelineStepper } from "../components/TimelineStepper";
 import { FilterChips, toggleInSet } from "../components/FilterChips";
-import { PaginationBar } from "./TasksPage";
+import { Field, ReadBox, TextInput, StyledSelect } from "../components/FormFields";
+import { PaginationBar } from "../components/PaginationBar";
 import { authFetch } from "../utils/api";
 import { isOverdue } from "../utils/date";
 import {
   Info, Loader2, AlertCircle, User, LogOut,
   ChevronDown, ClipboardList, Search, CheckCircle2,
-  FileText, BarChart3, ArrowRight, Building2,
+  FileText, BarChart3, ArrowRight,
   SlidersHorizontal, CalendarRange, ArrowDownUp, X, RefreshCw,
 } from "lucide-react";
 
-import { PRODUCT_TYPE_OPTIONS, EVAL_PERIOD_OPTIONS, PRE_PERIOD_OPTIONS } from "../constants";
+import { PRODUCT_TYPE_OPTIONS, EVAL_PERIOD_OPTIONS, PRE_PERIOD_OPTIONS, DUE_DATE_SORT_LABEL as SORT_LABEL } from "../constants";
 
 const PRODUCT_MAP   = { "สินค้า": "goods", "บริการ": "services", "สินค้าและบริการ": "both" };
 const PRODUCT_LABEL = { goods: "สินค้า", services: "บริการ", both: "สินค้าและบริการ" };
@@ -28,19 +29,13 @@ const TASK_EVAL_TYPE_LABEL = {
 const TASK_TYPE_FILTER_LABEL = {
   pre_eval: "Pre-Eval", post_eval: "Post-Eval", half_year: "Half-Year", yearly: "Yearly",
 };
-const SORT_LABEL = { asc: "ครบกำหนดเร็วสุดก่อน", desc: "ครบกำหนดช้าสุดก่อน" };
 const TASK_PAGE_SIZE = 8;
 
 // ── Profile dropdown ─────────────────────────────────────────
 function ProfileDropdown({ user, profilePic, themeColor, onProfile, onHistory, onLogout }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
-  useEffect(() => {
-    if (!open) return;
-    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [open]);
+  useClickOutside(ref, open, () => setOpen(false));
 
   const initials = (user.fullName || "?").split(" ").map(w => w[0] ?? "").join("").slice(0, 2).toUpperCase();
 
@@ -114,98 +109,6 @@ function ProfileDropdown({ user, profilePic, themeColor, onProfile, onHistory, o
 }
 
 // ── Field wrapper ─────────────────────────────────────────────
-function Field({ label, required, hint, children }) {
-  return (
-    <div>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 7 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>{label}</span>
-        {required && <span style={{ color: "#ef4444", fontSize: 13 }}>*</span>}
-        {hint && <span style={{ fontSize: 11, color: "#9ca3af" }}>{hint}</span>}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-// ── Read-only display box ─────────────────────────────────────
-function ReadBox({ value, placeholder, locked }) {
-  return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: 8,
-      background: locked ? "#f3f4f6" : "#f9fafb",
-      border: `1.5px solid ${locked ? "#d1d5db" : "#e5e7eb"}`,
-      borderRadius: 9, padding: "9px 14px", minHeight: 42,
-      color: value ? "#111827" : "#9ca3af", fontSize: 14,
-    }}>
-      {locked && <Building2 size={14} style={{ color: "#9ca3af", flexShrink: 0 }} />}
-      <span>{value || <em style={{ fontStyle: "normal" }}>{placeholder}</em>}</span>
-      {locked && value && <CheckCircle2 size={14} style={{ color: "#22c55e", marginLeft: "auto", flexShrink: 0 }} />}
-    </div>
-  );
-}
-
-// ── Text input ────────────────────────────────────────────────
-function TextInput({ value, onChange, onBlur, placeholder, themeColor }) {
-  const [focused, setFocused] = useState(false);
-  return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: 8,
-      border: `1.5px solid ${focused ? themeColor : "#d1d5db"}`,
-      borderRadius: 9, background: "#fff", padding: "0 14px",
-      boxShadow: focused ? `0 0 0 3px ${themeColor}18` : "none",
-      transition: "border-color 0.15s, box-shadow 0.15s",
-    }}>
-      <Search size={14} style={{ color: focused ? themeColor : "#9ca3af", flexShrink: 0, transition: "color 0.15s" }} />
-      <input
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        onBlur={() => { setFocused(false); onBlur?.(); }}
-        onFocus={() => setFocused(true)}
-        placeholder={placeholder}
-        style={{
-          flex: 1, border: "none", outline: "none", background: "transparent",
-          fontSize: 14, fontFamily: "Sarabun, sans-serif", color: "#111827",
-          padding: "9px 0", minHeight: 42,
-        }}
-      />
-    </div>
-  );
-}
-
-// ── Styled native select ──────────────────────────────────────
-function StyledSelect({ value, onChange, options, placeholder, themeColor }) {
-  const [focused, setFocused] = useState(false);
-  return (
-    <div style={{ position: "relative" }}>
-      <select
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        style={{
-          width: "100%", appearance: "none", WebkitAppearance: "none",
-          border: `1.5px solid ${focused ? themeColor : "#d1d5db"}`,
-          borderRadius: 9, background: "#fff", padding: "9px 36px 9px 14px",
-          fontSize: 14, fontFamily: "Sarabun, sans-serif", color: value ? "#111827" : "#9ca3af",
-          boxShadow: focused ? `0 0 0 3px ${themeColor}18` : "none",
-          transition: "border-color 0.15s, box-shadow 0.15s",
-          cursor: "pointer", outline: "none", minHeight: 42,
-        }}
-      >
-        <option value="" disabled>{placeholder || "-- เลือก --"}</option>
-        {options.map(opt => (
-          <option key={opt} value={opt}>{opt}</option>
-        ))}
-      </select>
-      <ChevronDown size={15} style={{
-        position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)",
-        color: focused ? themeColor : "#9ca3af", pointerEvents: "none",
-        transition: "color 0.15s",
-      }} />
-    </div>
-  );
-}
-
 // ── Main ─────────────────────────────────────────────────────
 export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, onProfile, onHistory, onBack, initialTaskTab }) {
   const { showAlert, ModalEl } = useModal();
@@ -241,14 +144,7 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
 
   useEffect(() => { setTaskPage(1); }, [taskTab, taskTypeFilter, taskDateFrom, taskDateTo, taskSearch, taskSortDir]);
 
-  useEffect(() => {
-    if (!taskFilterOpen) return;
-    function onClickOutside(e) {
-      if (taskFilterPanelRef.current && !taskFilterPanelRef.current.contains(e.target)) setTaskFilterOpen(false);
-    }
-    document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
-  }, [taskFilterOpen]);
+  useClickOutside(taskFilterPanelRef, taskFilterOpen, () => setTaskFilterOpen(false));
 
   // Unlike /my-tasks (to-do list only, drops a task once submitted), this
   // keeps tracking a task after the user has submitted their part, so they
@@ -331,19 +227,27 @@ export default function LandingPage({ authUser, profilePic, onSubmit, onLogout, 
     setTaskDateTo("");
   }
 
+  // กันกรณี lookup รอบเก่ายังไม่ตอบกลับแล้วมาทับผลลัพธ์ของรอบใหม่ล่าสุด —
+  // เช่นพิมพ์แก้ vendor code เร็วๆ แล้ว blur หลายครั้งติดกัน request แรกอาจ
+  // ตอบกลับช้ากว่า request หลังและมาทับสถานะที่ถูกต้องของ code ปัจจุบัน
+  const lookupSeq = useRef(0);
   const lookupVendor = async (code) => {
     if (!code.trim()) return "idle";
+    const mySeq = ++lookupSeq.current;
     setVendorLookup({ status: "loading", data: null });
     try {
       const res = await authFetch(`/api/suppliers/${encodeURIComponent(code.trim())}`);
+      if (mySeq !== lookupSeq.current) return "stale";
       if (res.status === 404) { setVendorLookup({ status: "notfound", data: null }); return "notfound"; }
       if (!res.ok)            { setVendorLookup({ status: "error",    data: null }); return "error"; }
       const data = await res.json();
+      if (mySeq !== lookupSeq.current) return "stale";
       setVendorLookup({ status: "found", data });
       setSupplierName(data.supplierName || "");
       setProductType(data.productType || "");
       return "found";
     } catch {
+      if (mySeq !== lookupSeq.current) return "stale";
       setVendorLookup({ status: "error", data: null });
       return "error";
     }

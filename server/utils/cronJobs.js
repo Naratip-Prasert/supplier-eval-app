@@ -9,11 +9,10 @@ const {
 } = require('./emailService');
 
 // ── Daily job: 08:00 Asia/Bangkok ─────────────────────────────
-function startCronJobs() {
-  cron.schedule('0 8 * * *', runDailyEmailJobs, { timezone: 'Asia/Bangkok' });
-  console.log('✅ Cron jobs started (daily 08:00 Bangkok)');
-}
-
+// runDailyEmailJobs itself is the base version, wrapped below by
+// runDailyEmailJobsWithPostEval (which adds post_eval/pre_eval-retry
+// invitations) — only the wrapped version is ever scheduled, via
+// startCronJobsFull exported below as `startCronJobs`.
 async function runDailyEmailJobs() {
   console.log('[cron] running daily email jobs...');
   await sendReminderEmails();

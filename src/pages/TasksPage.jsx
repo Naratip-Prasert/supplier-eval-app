@@ -6,12 +6,14 @@
 //  (UploadHistoryPage) — it's a log, not part of running tasks.
 // ============================================================
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { Header, useModal } from "../components";
+import { Header, useModal, useClickOutside } from "../components";
+import { PaginationBar } from "../components/PaginationBar";
 import { authFetch } from "../utils/api";
 import { isOverdue } from "../utils/date";
+import { DUE_DATE_SORT_LABEL as SORT_LABEL } from "../constants";
 import {
   ArrowLeft, RefreshCw, AlertCircle, Search, Upload, Send, Pencil, Trash2, X, Check,
-  ChevronLeft, ChevronRight, ArrowDownUp, MailCheck, Square, CheckSquare, Lock, History, CalendarRange,
+  ArrowDownUp, MailCheck, Square, CheckSquare, Lock, History, CalendarRange,
   SlidersHorizontal,
 } from "lucide-react";
 import AdminUploadModal from "./AdminUploadModal";
@@ -29,7 +31,6 @@ const EVAL_TYPE_LABEL = {
   post_eval: "Post 90d", half_year: "Half-Year", yearly: "Yearly",
 };
 const PAGE_SIZE = 10;
-const SORT_LABEL = { asc: "ครบกำหนดเร็วสุดก่อน", desc: "ครบกำหนดช้าสุดก่อน" };
 
 export default function TasksPage({ onBack, onUploadHistory, embedded = false }) {
   const { showAlert, showConfirm, ModalEl } = useModal();
@@ -60,17 +61,22 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
   const [filterOpen,      setFilterOpen]      = useState(false);
   const filterPanelRef = useRef(null);
 
+  // เช็ค r.ok ก่อนเสมอ — เดิมใช้ .catch(() => []) เงียบๆ ทำให้ server error
+  // จริง (401/500) กลายเป็น "ไม่มีงาน" แทนที่จะบอก error ที่แท้จริง
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [taskRes, empRes] = await Promise.all([
-        authFetch("/api/admin/tasks").then(r => r.json()).catch(() => []),
-        authFetch("/api/employees").then(r => r.json()).catch(() => []),
+      const [taskR, empR] = await Promise.all([
+        authFetch("/api/admin/tasks"),
+        authFetch("/api/employees"),
       ]);
+      if (!taskR.ok || !empR.ok) throw new Error(`โหลดข้อมูลไม่สำเร็จ (${taskR.status}/${empR.status})`);
+      const [taskRes, empRes] = await Promise.all([taskR.json(), empR.json()]);
       setTasks(Array.isArray(taskRes) ? taskRes : []);
       setEmployees(Array.isArray(empRes) ? empRes.filter(e => e.isActive) : []);
-    } catch {
+    } catch (e) {
+      console.error("[TasksPage] fetchAll error:", e);
       setError("โหลดข้อมูลไม่สำเร็จ");
     } finally {
       setLoading(false);
@@ -91,14 +97,7 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
   useEffect(() => { setPage(1); setSelected(new Set()); }, [mainTab, statusFilter, typeFilter, search, dateFrom, dateTo, dateFilter, sortDir]);
 
   // Close the filter popover when clicking outside of it
-  useEffect(() => {
-    if (!filterOpen) return;
-    function onClickOutside(e) {
-      if (filterPanelRef.current && !filterPanelRef.current.contains(e.target)) setFilterOpen(false);
-    }
-    document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
-  }, [filterOpen]);
+  useClickOutside(filterPanelRef, filterOpen, () => setFilterOpen(false));
 
   async function handleRemind(taskId, supplierName) {
     const ok = await showConfirm(`ส่งอีเมล Reminder ไปยังผู้รับผิดชอบของ "${supplierName}" ใช่ไหม?`, "ยืนยันส่ง Reminder");
@@ -167,7 +166,11 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
     setEditingId(t.id);
     setEditDraft({
       assignedEmail: t.assignedEmail || "",
-      dueDate:       new Date(t.dueDate).toISOString().slice(0, 10),
+      // dueDate เป็นแค่ "วันที่ปฏิทิน" ใส่ timestamp UTC เที่ยงคืนปลอมๆ มา
+      // (Postgres DATE column) — ตัด string ตรงๆ แทนการพันผ่าน new Date()
+      // แล้ว toISOString() ไม่งั้นจะแปลงผ่าน timezone เครื่อง ทำให้ได้วันที่
+      // เพี้ยนไป 1 วันสำหรับผู้ใช้ที่อยู่ก่อน UTC (เช่นเวลาไทย UTC+7 ตอนดึกๆ)
+      dueDate: t.dueDate.slice(0, 10),
     });
   }
 
@@ -876,30 +879,3 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
   );
 }
 
-// ── Shared pagination control (also used by UploadHistoryPage) ──
-export function PaginationBar({ page, totalPages, total, pageSize, onPrev, onNext }) {
-  const from = (page - 1) * pageSize + 1;
-  const to   = Math.min(page * pageSize, total);
-  return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10, fontSize: 12, color: "#888" }}>
-      <span>แสดง {from}-{to} จาก {total} รายการ</span>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <button
-          onClick={onPrev}
-          disabled={page <= 1}
-          style={{ display: "flex", alignItems: "center", background: "#fff", border: "1px solid #ddd", borderRadius: 6, padding: "4px 8px", cursor: "pointer", opacity: page <= 1 ? 0.5 : 1 }}
-        >
-          <ChevronLeft size={14} />
-        </button>
-        <span>หน้า {page} / {totalPages}</span>
-        <button
-          onClick={onNext}
-          disabled={page >= totalPages}
-          style={{ display: "flex", alignItems: "center", background: "#fff", border: "1px solid #ddd", borderRadius: 6, padding: "4px 8px", cursor: "pointer", opacity: page >= totalPages ? 0.5 : 1 }}
-        >
-          <ChevronRight size={14} />
-        </button>
-      </div>
-    </div>
-  );
-}

@@ -105,7 +105,14 @@ router.post('/', async (req, res) => {
 
     // 3. BU permission check — disabled for now (all users can evaluate any supplier)
 
-    // USER, GCP, ADMIN are all valid roles for evaluation submissions
+    // USER, GCP, ADMIN are all valid roles for evaluation submissions —
+    // anything else (e.g. SUPERVISOR submitting through the legacy
+    // manual-entry path with no taskSessionId) silently gets recast to
+    // USER below. Log it so a misattributed submitter is at least
+    // traceable instead of vanishing without a trace.
+    if (!['USER', 'GCP', 'ADMIN'].includes(employee.role)) {
+      console.warn(`[evaluations] role "${employee.role}" ไม่ใช่ role มาตรฐานสำหรับส่งผลประเมิน — บันทึกเป็น USER แทน (employeeId=${employee.id})`);
+    }
     let evalRole = ['USER', 'GCP', 'ADMIN'].includes(employee.role) ? employee.role : 'USER';
 
     let sessionId;
@@ -610,7 +617,7 @@ router.get('/:id', async (req, res) => {
          d.name_th        AS "department",
          j.name_th        AS "jobTitle",
          s.vendor_code    AS "vendorCode",
-         sup.supplier_name AS "supplierName",
+         s.supplier_name  AS "supplierName",
          es.eval_type     AS "evalType",
          es.period,
          ev.product_type  AS "productType",
@@ -623,8 +630,7 @@ router.get('/:id', async (req, res) => {
        LEFT JOIN departments   d   ON d.id   = emp.department_id
        LEFT JOIN job_titles    j   ON j.id   = emp.job_title_id
        JOIN evaluation_sessions es  ON es.id  = ev.session_id
-       JOIN suppliers          sup ON sup.id  = es.supplier_id
-       LEFT JOIN suppliers     s   ON s.id    = es.supplier_id
+       JOIN suppliers          s   ON s.id    = es.supplier_id
        WHERE ev.id = $1`,
       [req.params.id]
     );

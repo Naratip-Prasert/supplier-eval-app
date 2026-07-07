@@ -2,9 +2,9 @@
 //  pages/ResultPage.jsx
 // ============================================================
 
-import { useState, useEffect, useRef, Fragment } from "react";
+import { useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
-import { Header, GreenButton, useModal } from "../components";
+import { Header, GreenButton, useModal, useClickOutside } from "../components";
 import { isPostEvalType, GRADE_MAP, GRADE_GUIDE, getCriteria, getScoredCriteriaFrom } from "../constants";
 import { useCriteriaOverrides, useFunctionOverrides } from "../context/CriteriaContext";
 import { applyOverrides } from "../utils/criteriaOverlay";
@@ -77,14 +77,25 @@ export default function ResultPage({ formData, result, user, profilePic, onBack,
   const [doneErrMsg,  setDoneErrMsg]  = useState("");
   const [showExport, setShowExport] = useState(false);
   const exportRef = useRef(null);
+  // ปิด dropdown เมื่อคลิกข้างนอก (เดิม exportRef ถูก attach ไว้เฉยๆ ไม่มี
+  // listener ใช้งานจริง — ปิดได้แค่กดปุ่มซ้ำเท่านั้น)
+  useClickOutside(exportRef, showExport, () => setShowExport(false));
 
   const [evalHistory, setEvalHistory] = useState([]);
   useEffect(() => {
     if (!formData.vendorCode) return;
+    // กันกรณี fetch รอบเก่ายังไม่ตอบกลับแล้วมาทับผลลัพธ์ของ vendor/evalId
+    // ปัจจุบัน — ถ้า effect นี้ถูกยกเลิก (dep เปลี่ยนหรือ component unmount)
+    // ก่อนที่ fetch จะเสร็จ ไม่ต้อง setState ทับของใหม่
+    let cancelled = false;
     authFetch(`/api/evaluations/by-vendor/${encodeURIComponent(formData.vendorCode)}`)
       .then(r => r.ok ? r.json() : [])
-      .then(rows => setEvalHistory(Array.isArray(rows) ? rows.filter(r => r.evalId !== result.evalId) : []))
-      .catch(() => setEvalHistory([]));
+      .then(rows => {
+        if (cancelled) return;
+        setEvalHistory(Array.isArray(rows) ? rows.filter(r => r.evalId !== result.evalId) : []);
+      })
+      .catch(() => { if (!cancelled) setEvalHistory([]); });
+    return () => { cancelled = true; };
   }, [formData.vendorCode, result.evalId]);
 
   const handleBackToEval = async () => {

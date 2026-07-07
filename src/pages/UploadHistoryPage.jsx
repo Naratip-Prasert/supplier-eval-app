@@ -7,7 +7,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { Header } from "../components";
 import { authFetch } from "../utils/api";
 import { ArrowLeft, RefreshCw, AlertCircle, Search, ArrowDownUp, CalendarRange, X } from "lucide-react";
-import { PaginationBar } from "./TasksPage";
+import { PaginationBar } from "../components/PaginationBar";
 
 const PAGE_SIZE = 10;
 const SORT_LABEL = { asc: "อัพโหลดเก่าสุดก่อน", desc: "อัพโหลดล่าสุดก่อน" };

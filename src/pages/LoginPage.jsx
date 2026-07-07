@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Logo, GreenInput, PasswordInput, GreenButton } from "../components";
-
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_BASE } from "../utils/api";
 
 // Flat, few-color illustration — a clipboard being checked off with a
 // star/badge result, echoing "supplier evaluation" without needing a

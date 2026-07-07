@@ -7,7 +7,7 @@ import { Header } from "../components";
 import { authFetch } from "../utils/api";
 import {
   ClipboardList, Loader2, AlertCircle, ChevronRight,
-  Search, SlidersHorizontal, X, TrendingUp,
+  Search, SlidersHorizontal, X,
 } from "lucide-react";
 
 const GRADE_COLOR = {
@@ -21,18 +21,12 @@ const GRADE_COLOR = {
 const EVAL_LABEL = { pre_eval: "Pre", post_eval: "Post", half_year: "Half-Year", yearly: "Yearly" };
 const PRODUCT_LABEL = { goods: "สินค้า", services: "บริการ", both: "สินค้า+บริการ" };
 
-function formatDate(iso) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  return d.toLocaleDateString("th-TH", { day: "2-digit", month: "short", year: "numeric" })
-    + " " + d.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
-}
-
 // Date-only, no time — used for the dedicated "วันที่" column/badge. Don't
-// derive this from formatDate() via .split(" ")[0]: Thai month abbreviations
-// have a trailing dot but no embedded space issue, the date+time STRING
-// itself has multiple space-separated parts (day / month / year / time),
-// so splitting on " " silently truncates to just the day number.
+// derive this by splitting a combined date+time string on " ": Thai month
+// abbreviations have a trailing dot but no embedded space issue, but the
+// date+time string itself has multiple space-separated parts (day / month
+// / year / time), so splitting on " " silently truncates to just the day
+// number — format the date-only string directly instead.
 function formatDateOnly(iso) {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("th-TH", { day: "2-digit", month: "short", year: "numeric" });
