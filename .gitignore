@@ -25,7 +25,11 @@ dist-ssr
 
 # Backend
 .env
-server/node_modules
+backend/node_modules
+
+# Loose stdout/stderr captures from ad-hoc `node server.js > out 2> err` runs
+server_out.txt
+server_err.txt
 
 # Office Document & Temporary files (เช่น SPE_Presentation.pptx, ~$SPE_Presentation.pptx)
 *.pptx

@@ -75,17 +75,17 @@ is the average of the two once both are in.
 | Runtime | Node.js |
 | Framework | Express 5 |
 | Driver | `pg` (raw SQL, no ORM) |
-| Auth | JWT (`jsonwebtoken`), `bcrypt` for password hashing |
-| Middleware | `cors`, `express.json`, `express-rate-limit`, `dotenv` |
+| Auth | JWT (`jsonwebtoken`) in an httpOnly cookie, `bcrypt` for password hashing |
+| Middleware | `cors`, `express.json`, `cookie-parser`, `express-rate-limit`, `dotenv` |
 | Scheduled jobs | `node-cron` |
-| Entry point | `server/server.js` |
+| Entry point | `backend/server.js` |
 
 ### Database
 | Item | Value |
 |---|---|
 | Engine | PostgreSQL (developed against Neon, a managed Postgres) |
 | Schema source of truth | [`database/schema.sql`](./database/schema.sql) |
-| Migrations | Idempotent `ALTER TABLE ... IF NOT EXISTS` blocks run on every server boot (`server/server.js`) — there is no separate migration runner/history table |
+| Migrations | Idempotent `ALTER TABLE ... IF NOT EXISTS` blocks run on every server boot (`backend/server.js`) — there is no separate migration runner/history table |
 
 ### Other libraries
 | Library | Purpose |
@@ -106,7 +106,7 @@ is the average of the two once both are in.
 ```
 Browser (localhost:5173)
         │
-        │  fetch + Bearer JWT
+        │  fetch + httpOnly cookie (credentials: 'include')
         ▼
 Express API (localhost:5000)
         │
@@ -117,29 +117,30 @@ PostgreSQL (Neon)
 
 ### Auth flow
 1. `POST /api/auth/login` with `{ identifier, password }` (`identifier` = employee_id or email)
-2. Server looks up the employee, verifies the password with bcrypt, signs a JWT containing `{ empId, fullName, role, email, department, jobTitle }`
-3. Frontend stores the token in `localStorage` (`spe_token`) and decodes it client-side (base64url, see `App.jsx#getStoredUser`) to restore the session on reload
-4. Every subsequent request goes through `server/middleware/authMiddleware.js`, which verifies the JWT signature and attaches `req.user`
-5. There is currently no self-service registration or password reset — accounts are provisioned by an ADMIN (or the one-time bootstrap `ADMIN-001` account created on first server boot)
+2. Server looks up the employee, verifies the password with bcrypt, signs a JWT containing `{ empId, fullName, role, email, department, jobTitle }`, and sets it as an **httpOnly cookie** (`spe_token`, `backend/utils/cookieOptions.js`) — the raw token is never present in the response body or reachable from frontend JS
+3. Frontend calls `GET /api/auth/me` on load to restore the session (there's nothing for it to decode client-side anymore); `POST /api/auth/logout` clears the cookie
+4. Every subsequent request goes through `backend/middleware/authMiddleware.js`, which reads the JWT from the cookie, verifies its signature, and attaches `req.user`
+5. Mutating requests must also carry an `X-Requested-With` header (added automatically by `frontend/src/utils/api.js#authFetch`) — a CSRF guard in `backend/server.js`, since a plain cross-site `<form>` POST can't set custom headers
+6. There is currently no self-service registration or password reset — accounts are provisioned by an ADMIN (or the one-time bootstrap `ADMIN-001` account created on first server boot)
 
 ### Request flow (submit an evaluation)
 1. `EvalForm` collects scores → `Resultpage.jsx` calls `POST /api/evaluations` with `{ vendorCode, evalType, period, productType, sessionId, scores }` (the acting employee is taken from the JWT, not the request body)
 2. Server validates the employee/supplier/session, computes `totalScore`/`grade` server-side, inserts `evaluations` + `evaluation_scores` rows
 3. A DB trigger (`trg_recalculate_score`) fires on insert: once both USER and GCP rows exist for the session, it averages their scores and flips the session to `pending_review`
-4. Supervisor approves/returns via `server/routes/supervisor.js`, flipping the session to `completed` or `returned`
+4. Supervisor approves/returns via `backend/routes/supervisor.js`, flipping the session to `completed` or `returned`
 
 ### Port map
 | Service | Port | Command |
 |---|---|---|
-| Frontend (Vite) | 5173 | `npm run dev` (project root) |
-| Backend (Express) | 5000 | `npm run dev` or `npm start` (`server/`) |
+| Frontend (Vite) | 5173 | `npm run dev` (`frontend/`) |
+| Backend (Express) | 5000 | `npm run dev` or `npm start` (`backend/`) |
 
 ---
 
 ## 4. Database Schema
 
 Full DDL lives in [`database/schema.sql`](./database/schema.sql) — keep that
-file in sync with any future `ALTER TABLE` added to `server/server.js`'s boot
+file in sync with any future `ALTER TABLE` added to `backend/server.js`'s boot
 migration block. Summary of the core tables:
 
 | Table | Purpose |
@@ -150,7 +151,7 @@ migration block. Summary of the core tables:
 | `evaluation_tasks` | One assignment (USER or GCP) within a session; tracks the invitation/reminder/overdue/thank-you email lifecycle |
 | `evaluations` | One person's submitted scoring (`status`: `draft` \| `saved`), one row per session per role |
 | `evaluation_scores` | Per-criterion score + weight backing each `evaluations` row |
-| `evaluation_sub_criteria` / `score_level_descriptions` | The scoring rubric, seeded from `src/constants.js` on every boot |
+| `evaluation_sub_criteria` / `score_level_descriptions` | The scoring rubric, seeded from `shared/criteria-data.json` on every boot |
 | `supervisor_reviews` | One row per approve/return decision — a session can have several across return→resubmit cycles |
 | `supplier_upload_batches` | One row per admin Excel upload |
 | `email_logs` | Send-status record for every email the app sends |
@@ -164,7 +165,7 @@ Notable constraints:
 
 ## 5. API Reference
 
-**Base URL:** `http://localhost:5000` · all routes except `POST /api/auth/login` require `Authorization: Bearer <token>`.
+**Base URL:** `http://localhost:5000` · all routes except `POST /api/auth/login` require the `spe_token` httpOnly cookie (set by login, sent automatically via `credentials: 'include'`) plus an `X-Requested-With` header on mutating requests.
 
 ### Auth (`/api/auth`)
 | Method | Path | Notes |
@@ -254,7 +255,7 @@ Notable constraints:
 
 ## 7. Frontend Components
 
-Shared components live in `src/components/index.jsx` (plus `FilterChips.jsx`
+Shared components live in `frontend/src/components/index.jsx` (plus `FilterChips.jsx`
 and `TimelineStepper.jsx` alongside it).
 
 | Component | Description |
@@ -272,7 +273,7 @@ and `TimelineStepper.jsx` alongside it).
 
 ## 8. Scoring Logic
 
-### Formula (`computeScoreAndGrade`, `server/routes/evaluations.js`)
+### Formula (`computeScoreAndGrade`, `backend/routes/evaluations.js`)
 
 ```
 weightedScore(item) = (selectedLevel / maxLevel) × item.weight
@@ -287,7 +288,7 @@ The total is computed **only** from criteria that actually get persisted to
 `evaluation_scores` — this guarantees `total_score` is always reconstructable
 from `SUM(weighted_score)/SUM(weight)*100` over the stored rows.
 
-### Grade thresholds (`grade_thresholds` table / `getGrade()` in `src/constants.js`)
+### Grade thresholds (`grade_thresholds` table / `getGrade()` in `frontend/src/constants.js`)
 
 | Grade | Score range |
 |---|---|
@@ -297,7 +298,7 @@ from `SUM(weighted_score)/SUM(weight)*100` over the stored rows.
 | D | 60 – 69.9 |
 | F | < 60 |
 
-### Criteria sets (`src/constants.js`)
+### Criteria sets (`frontend/src/constants.js`)
 - `PRE_CRITERIA` — 5 sections (Quality, Cost, Delivery, Financial Stability, ESG), used for `pre_eval`
 - `POST_CRITERIA` — 6 sections (Pricing & Value, Quality, Delivery, Service & Responsiveness, Financial Standing, ESG), used for `post_eval`/`half_year`/`yearly`
 - `getCriteria(evalType)` picks the right set; `isPostEvalType(evalType)` is the switch
@@ -307,7 +308,7 @@ from `SUM(weighted_score)/SUM(weight)*100` over the stored rows.
 
 ## 9. Email & Scheduled Jobs
 
-`server/utils/cronJobs.js` runs daily at 08:00 Asia/Bangkok via `node-cron`:
+`backend/utils/cronJobs.js` runs daily at 08:00 Asia/Bangkok via `node-cron`:
 
 | Job | Trigger |
 |---|---|
@@ -320,7 +321,7 @@ from `SUM(weighted_score)/SUM(weight)*100` over the stored rows.
 All date checks use `<=`/`>=` ranges guarded by a `*_sent_at IS NULL` column,
 not exact-date equality — a missed cron run self-heals on the next run
 instead of permanently skipping a notification. Every send (success or
-failure) is logged to `email_logs` via `server/utils/emailService.js`.
+failure) is logged to `email_logs` via `backend/utils/emailService.js`.
 
 ---
 
@@ -337,34 +338,38 @@ Triggered from the **Export ▾** dropdown on the Result page (`Resultpage.jsx`)
 
 ## 11. Environment Configuration
 
-See `.env.example` (frontend) and `server/.env.example` (backend) for the
-full, current list of variables — both are placeholders only, safe to copy.
+See `frontend/.env.example` and `backend/.env.example` for the full, current
+list of variables — both are placeholders only, safe to copy.
 
 | File | Key variables |
 |---|---|
-| `.env` | `VITE_API_URL` |
-| `server/.env` | `DATABASE_URL`, `DATABASE_SSL`, `PORT`, `FRONTEND_URL`, `JWT_SECRET`, `RESEND_API_KEY`, `EMAIL_FROM` |
+| `frontend/.env` | `VITE_API_URL` |
+| `backend/.env` | `DATABASE_URL`, `DATABASE_SSL`, `PORT`, `FRONTEND_URL`, `JWT_SECRET`, `RESEND_API_KEY`, `EMAIL_FROM`, `NODE_ENV` |
 
-`server/.env` is gitignored and must never be committed.
+Both `.env` files are gitignored and must never be committed. `NODE_ENV`
+additionally controls the auth cookie's `Secure`/`SameSite` flags and whether
+CORS accepts bare `localhost` origins (see §3 Auth flow) — set it to
+`production` on the real deployment.
 
 ---
 
 ## 12. Local Development Setup
 
 ```bash
-# 1. Frontend deps (project root)
+# 1. Frontend deps
+cd frontend
 npm install
 cp .env.example .env          # set VITE_API_URL
 
 # 2. Backend deps
-cd server
+cd backend
 npm install
 cp .env.example .env          # set DATABASE_URL, JWT_SECRET, RESEND_API_KEY, ...
 
 # 3. Start backend (terminal 1)
 npm run dev                   # http://localhost:5000 — schema/seed run automatically on boot
 
-# 4. Start frontend (terminal 2, project root)
+# 4. Start frontend (terminal 2)
 npm run dev                   # http://localhost:5173
 ```
 

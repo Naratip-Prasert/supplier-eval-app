@@ -1,15 +1,19 @@
 'use strict';
-const express = require('express'); // express เป็น framework ที่ทำให้ node.js รับ http request ได้ง่าย
-const cors    = require('cors'); // เช็คว่าโดเมนที่เรียกเข้ามา ได้รับอนุญาตให้ดึงข้อมูลจาก API ของเราไหม
+const express      = require('express'); // express เป็น framework ที่ทำให้ node.js รับ http request ได้ง่าย
+const cors         = require('cors'); // เช็คว่าโดเมนที่เรียกเข้ามา ได้รับอนุญาตให้ดึงข้อมูลจาก API ของเราไหม
+const cookieParser = require('cookie-parser');
 
 const pool = require('./db'); // ./db already calls dotenv.config() — no need to call it again here
 
 const app  = express(); //สร้าง Express Application — app คือ object หลักที่เราจะ config ทุกอย่างลงไป
 const PORT = process.env.PORT || 5000;
+const isProd = process.env.NODE_ENV === 'production';
 
 // Production origins come from FRONTEND_URL (comma-separated if there's more
 // than one, e.g. a Vercel preview + the production domain) — local dev
-// origins (any localhost port) are always allowed alongside them.
+// origins (any localhost port) are always allowed alongside them, but only
+// outside production (a prod deploy should never accept a bare localhost
+// Origin header).
 const allowedOrigins = (process.env.FRONTEND_URL || '')
   .split(',')
   .map(s => s.trim())
@@ -17,12 +21,29 @@ const allowedOrigins = (process.env.FRONTEND_URL || '')
 
 app.use(cors({ // app.use(...) คือการเพิ่ม middleware - บอก express ว่าใช้ cor middleware กับทุก req
   origin: (origin, cb) => {  //กำหนด function ตรวจสอบ origin
-    if (!origin || /^http:\/\/localhost:\d+$/.test(origin) || allowedOrigins.includes(origin)) cb(null, true);
+    const isDevLocalhost = !isProd && /^http:\/\/localhost:\d+$/.test(origin);
+    if (!origin || isDevLocalhost || allowedOrigins.includes(origin)) cb(null, true);
     else cb(new Error('Not allowed by CORS'));
   },
   credentials: true,
 }));
 app.use(express.json({ limit: '8mb' })); //บอก Express ให้แปลง JSON ที่ส่งมาใน request body เป็น JavaScript object อัตโนมัติ
+app.use(cookieParser());
+
+// Blocks CSRF against the two multer/multipart upload routes below — those
+// use a CORS "simple" content-type (multipart/form-data) that skips the
+// preflight our strict-origin CORS check would otherwise rely on. A plain
+// cross-site <form> POST can't set a custom header, so requiring one here
+// forces the same origin-check gate onto every mutating request that the
+// JSON routes already get for free (application/json isn't CORS-simple).
+function requireCustomHeader(req, res, next) {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  if (!req.headers['x-requested-with']) {
+    return res.status(403).json({ message: 'Forbidden' });
+  }
+  next();
+}
+app.use(requireCustomHeader);
 
 // ── Request logger ────────────────────────────────────────────
 app.use((req, res, next) => { // เพิ่ม middleware ที่จะรันกับทุก request — รับ parameter 3 ตัวเสมอ: req (request), res (response), next (ฟังก์ชันที่บอกให้ไปต่อ)
@@ -121,7 +142,7 @@ pool.connect()
     // install — keep schema.sql in sync if the shape changes again.
     const { seedCriteriaFromConstants } = require('./utils/seedCriteriaFromConstants');
     await seedCriteriaFromConstants(client)
-      .then(() => console.log('✅ evaluation_sub_criteria seeded from src/constants.js'))
+      .then(() => console.log('✅ evaluation_sub_criteria seeded from shared/criteria-data.json'))
       .catch(err => console.warn('criteria seed warning:', err.message));
 
     // Create default ADMIN account if none exists. The bootstrap password

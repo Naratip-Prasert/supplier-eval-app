@@ -5,7 +5,7 @@
 //  instead of constants.js directly, so admin changes take effect
 //  without a code deploy.
 // ============================================================
-import { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { createContext, useContext, useState, useCallback } from "react";
 import { authFetch } from "../utils/api";
 import { buildOverrideMap, buildFunctionOverrideMap } from "../utils/criteriaOverlay";
 
@@ -24,7 +24,6 @@ export function CriteriaProvider({ children }) {
   const [funcMapPost, setFuncMapPost] = useState(null);
 
   const reload = useCallback(async () => {
-    if (!localStorage.getItem('spe_token')) return; // not logged in yet
     try {
       // Function modules are configured separately per Pre/Post track (each
       // track's Core+ESG total differs, so each needs its own Function
@@ -44,7 +43,9 @@ export function CriteriaProvider({ children }) {
     }
   }, []);
 
-  useEffect(() => { reload(); }, [reload]);
+  // No longer auto-fires on mount: since auth is now an httpOnly cookie the
+  // provider can't check client-side, App.jsx calls reload() itself (via
+  // useCriteriaReload) once it knows the user is actually logged in.
 
   return (
     <CriteriaContext.Provider value={{ preMap, postMap, funcMapPre, funcMapPost, reload }}>

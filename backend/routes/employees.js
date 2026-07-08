@@ -5,6 +5,7 @@
 const router = require('express').Router();
 const pool   = require('../db');
 const jwt    = require('jsonwebtoken');
+const { AUTH_COOKIE, cookieOptions } = require('../utils/cookieOptions');
 
 // ── GET /api/employees  (ADMIN only) ─────────────────────────
 router.get('/', async (req, res) => {
@@ -99,7 +100,8 @@ router.patch('/me', async (req, res) => {
     const newToken = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '8h' });
 
     console.log(`[employees] อัปเดตโปรไฟล์: ${req.user.empId}`);
-    res.json({ message: 'บันทึกสำเร็จ', token: newToken, user: payload });
+    res.cookie(AUTH_COOKIE, newToken, cookieOptions);
+    res.json({ message: 'บันทึกสำเร็จ', user: payload });
   } catch (err) {
     console.error('PATCH /api/employees/me error:', err);
     res.status(500).json({ message: 'บันทึกไม่สำเร็จ', error: err.message });

@@ -362,7 +362,7 @@ SELECT ev.role, ev.total_score, ev.grade, ev.status,
 
 ## Environment Variables
 
-### Backend (`server/.env`)
+### Backend (`backend/.env`)
 ```env
 DATABASE_URL=postgresql://user:password@host:5432/supplier_eval
 PORT=5000

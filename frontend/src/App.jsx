@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { authFetch } from "./utils/api";
 import { getCriteria } from "./constants";
+import { useCriteriaReload } from "./context/CriteriaContext";
 import PortalPage         from "./pages/PortalPage";
 import LandingPage        from "./pages/LandingPage";
 import EvalForm           from "./pages/Evalform";
@@ -119,43 +120,12 @@ function EvalHistoryLoader({ evalId, user, profilePic, onBack, onViewHistoryEval
   );
 }
 
-// JWTs are base64URL-encoded (uses '-'/'_' instead of '+'/'/', no padding) —
-// passing that straight to atob() throws "not correctly encoded" whenever
-// the payload happens to contain '-' or '_' (common — it's 2 of the 64
-// base64 symbols), which silently logged real users out on every page
-// reload where their token's bytes triggered it. Converting to standard
-// base64 first, and decoding through escape/decodeURIComponent, also
-// fixes Thai (UTF-8) names coming out as mojibake.
-function decodeJwtPayload(token) {
-  const base64url = token.split(".")[1];
-  const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
-  const binary = atob(padded);
-  const json = decodeURIComponent(
-    binary.split("").map(c => "%" + c.charCodeAt(0).toString(16).padStart(2, "0")).join("")
-  );
-  return JSON.parse(json);
-}
-
-function getStoredUser() {
-  try {
-    const token = localStorage.getItem("spe_token");
-    if (!token) return null;
-    const payload = decodeJwtPayload(token);
-    if (payload.exp * 1000 < Date.now()) {
-      localStorage.removeItem("spe_token");
-      return null;
-    }
-    if (payload.role === 'BU') payload.role = 'USER';
-    return payload;
-  } catch {
-    return null;
-  }
-}
-
 export default function App() {
-  const [user,           setUser]           = useState(() => getStoredUser());
-  const [page,           setPage]           = useState(() => getStoredUser() ? "portal" : "landing");
+  // The JWT now lives in an httpOnly cookie the frontend can't read or
+  // decode itself — session state comes from asking the backend who we are.
+  const [user,           setUser]           = useState(null);
+  const [authChecked,    setAuthChecked]    = useState(false);
+  const [page,           setPage]           = useState("landing");
   const [formData,       setFormData]       = useState({});
   const [result,         setResult]         = useState(null);
   const [evalSavedState, setEvalSavedState] = useState(null);
@@ -165,6 +135,20 @@ export default function App() {
   const [adminSessionId, setAdminSessionId] = useState(null);
   const [adminInitialTab, setAdminInitialTab] = useState(null);
   const [landingInitialTab, setLandingInitialTab] = useState("active");
+  const reloadCriteria = useCriteriaReload();
+
+  // Restore the session on load — the JWT lives in an httpOnly cookie we
+  // can't read, so ask the backend who (if anyone) it belongs to.
+  useEffect(() => {
+    authFetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => {
+        setUser(d.user);
+        setPage("portal");
+      })
+      .catch(() => {})
+      .finally(() => setAuthChecked(true));
+  }, []);
 
   useEffect(() => {
     if (!user) { setProfilePic(null); return; }
@@ -174,21 +158,32 @@ export default function App() {
       .catch(() => {});
   }, [user?.empId]);
 
+  // Criteria overrides need a live session — fetch once we actually know
+  // the user is logged in, instead of the provider guessing from a
+  // (no-longer-readable) localStorage token.
+  useEffect(() => {
+    if (user) reloadCriteria();
+  }, [user?.empId, reloadCriteria]);
+
   // ── Auth handlers ─────────────────────────────────────────────
-  const handleLogin = (token, userData) => {
-    localStorage.setItem("spe_token", token);
+  const handleLogin = (userData) => {
     setUser(userData);
     setPage("portal");
   };
 
   const handleLogout = () => {
-    localStorage.removeItem("spe_token");
+    authFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     setUser(null);
     setFormData({});
     setResult(null);
     setEvalSavedState(null);
     setPage("portal");
   };
+
+  // ── Waiting on the initial session check ─────────────────────
+  if (!authChecked) {
+    return null;
+  }
 
   // ── Not logged in: show auth pages ───────────────────────────
   if (!user) {
@@ -281,8 +276,7 @@ export default function App() {
       <ProfilePage
         authUser={user}
         onBack={() => setPage("portal")}
-        onProfileUpdate={(token, userData, pic) => {
-          localStorage.setItem("spe_token", token);
+        onProfileUpdate={(userData, pic) => {
           setUser(userData);
           if (pic !== undefined) setProfilePic(pic);
         }}

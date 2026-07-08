@@ -60,7 +60,7 @@ export default function ProfilePage({ authUser, onBack, onProfileUpdate }) {
         const data = await res.json();
         if (!res.ok) { setError(data.message || "บันทึกไม่สำเร็จ"); return; }
         setProfilePic(dataUrl);
-        onProfileUpdate(data.token, data.user, dataUrl);
+        onProfileUpdate(data.user, dataUrl);
       } catch {
         setError("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้");
       } finally {

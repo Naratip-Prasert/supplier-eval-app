@@ -4,6 +4,7 @@ const pool    = require('../db');
 const bcrypt  = require('bcrypt');
 const jwt     = require('jsonwebtoken');
 const requireAuth = require('../middleware/authMiddleware');
+const { AUTH_COOKIE, cookieOptions } = require('../utils/cookieOptions');
 
 // ── POST /api/auth/login ──────────────────────────────────────
 router.post('/login', async (req, res) => {
@@ -49,11 +50,25 @@ router.post('/login', async (req, res) => {
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '8h' });
 
     console.log(`[auth] เข้าสู่ระบบ: ${emp.employee_id} (${emp.role})`);
-    res.json({ token, user: payload });
+    res.cookie(AUTH_COOKIE, token, cookieOptions);
+    res.json({ user: payload });
   } catch (err) {
     console.error('[auth] login error:', err);
     res.status(500).json({ message: 'เกิดข้อผิดพลาด', error: err.message });
   }
+});
+
+// ── POST /api/auth/logout ─────────────────────────────────────
+router.post('/logout', (req, res) => {
+  res.clearCookie(AUTH_COOKIE, { ...cookieOptions, maxAge: undefined });
+  res.json({ message: 'ออกจากระบบแล้ว' });
+});
+
+// ── GET /api/auth/me ───────────────────────────────────────────
+// Lets the frontend restore/verify the session on load without ever being
+// able to read the (httpOnly) cookie or decode the JWT itself.
+router.get('/me', requireAuth, (req, res) => {
+  res.json({ user: req.user });
 });
 
 // ── POST /api/auth/verify-password ───────────────────────────

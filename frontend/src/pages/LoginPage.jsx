@@ -56,12 +56,15 @@ export default function LoginPage({ onLogin }) {
     try {
       const res = await fetch(`${API_BASE}/api/auth/login`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        // Required by the backend's global CSRF guard (see utils/api.js#authFetch,
+        // which this raw fetch mirrors since no session cookie exists yet).
+        headers: { "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest" },
         body: JSON.stringify({ identifier: identifier.trim(), password }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "เข้าสู่ระบบไม่สำเร็จ");
-      onLogin(data.token, data.user);
+      onLogin(data.user);
     } catch (err) {
       setError(err.message);
     } finally {

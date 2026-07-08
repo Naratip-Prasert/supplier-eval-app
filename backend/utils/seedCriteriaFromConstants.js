@@ -1,10 +1,11 @@
 'use strict';
 // ============================================================
 //  utils/seedCriteriaFromConstants.js
-//  Mirrors src/constants.js (PRE_CRITERIA / POST_CRITERIA) into
-//  evaluation_main_criteria / evaluation_sub_criteria / score_level_descriptions
-//  so server-side scoring (routes/evaluations.js) has every criterion
-//  the frontend form actually renders.
+//  Mirrors shared/criteria-data.json (PRE_CRITERIA / POST_CRITERIA /
+//  FUNCTION_MODULES — also consumed directly by frontend/src/constants.js)
+//  into evaluation_main_criteria / evaluation_sub_criteria /
+//  score_level_descriptions so server-side scoring (routes/evaluations.js)
+//  has every criterion the frontend form actually renders.
 //  Uses DO NOTHING — only inserts rows that don't exist yet, never
 //  overwrites admin customisations (name/weight/levels edited via UI).
 //
@@ -17,19 +18,7 @@
 //      separately per track since each track's Core+ESG total differs, so
 //      each needs its own Function weight to independently reach 100%.
 // ============================================================
-const fs = require('fs');
-const path = require('path');
-
-function loadConstants() {
-  const src = fs.readFileSync(path.join(__dirname, '../../src/constants.js'), 'utf8');
-  // Cut off at the first exported function — only PRE_CRITERIA/POST_CRITERIA
-  // (plain `export const` arrays) are needed above that point.
-  const onlyData = src.split(/export function/)[0];
-  const body = onlyData.replace(/export const/g, 'const') + '\nmodule.exports = { PRE_CRITERIA, POST_CRITERIA, FUNCTION_MODULES };';
-  const mod = { exports: {} };
-  new Function('module', 'exports', body)(mod, mod.exports);
-  return mod.exports;
-}
+const { PRE_CRITERIA, POST_CRITERIA, FUNCTION_MODULES } = require('../../shared/criteria-data.json');
 
 async function seedSet(client, sections, criteriaSet, codePrefix) {
   let coreIndex = 0;
@@ -107,7 +96,6 @@ function functionWeightFor(criteria) {
 }
 
 async function seedCriteriaFromConstants(client) {
-  const { PRE_CRITERIA, POST_CRITERIA, FUNCTION_MODULES } = loadConstants();
   await seedSet(client, PRE_CRITERIA, 'pre_eval', 'PRE');
   await seedSet(client, POST_CRITERIA, 'post_eval', 'POST');
   const preFuncW  = functionWeightFor(PRE_CRITERIA);
