@@ -109,7 +109,7 @@ async function sendThankyouEmail(task, supplier) {
   return send(task.assigned_email, `[SPE] ขอบคุณสำหรับการประเมิน: ${supplier.supplier_name}`, html, { taskId: task.id, emailType: 'thankyou' });
 }
 
-// ── 5. Supervisor notification (ทั้ง BU+GCP submit แล้ว) ───────
+// ── 5. Supervisor notification (ทั้ง USER+GCP submit แล้ว) ───────
 async function sendSupervisorNotifyEmail(supervisorEmail, supervisorName, session, reviewDue) {
   const dueStr = new Date(reviewDue).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
   const html = wrap('รอการอนุมัติผลประเมิน', `
@@ -126,7 +126,7 @@ async function sendSupervisorNotifyEmail(supervisorEmail, supervisorName, sessio
   return send(supervisorEmail, `[SPE] รออนุมัติ: ผลประเมิน ${session.supplier_name}`, html, { emailType: 'supervisor_notify' });
 }
 
-// ── 6. Supervisor result → GCP + BU ───────────────────────────
+// ── 6. Supervisor result → GCP + USER ───────────────────────────
 async function sendSupervisorResultEmail(toEmail, toName, supplier, status, notes) {
   const isApproved = status === 'approved';
   const titleTh = isApproved ? 'ผลการประเมินได้รับการอนุมัติ' : 'ผลการประเมินถูกส่งคืน';

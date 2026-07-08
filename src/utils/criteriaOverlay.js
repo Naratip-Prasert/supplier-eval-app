@@ -10,6 +10,7 @@
 //  This avoids displayOrder collisions when admin adds sections between
 //  existing CORE sections and ESG.
 // ============================================================
+import { esgGroupKey } from "./evalWeightMath";
 
 // Build a lookup map keyed by category code.
 export function buildOverrideMap(dbSections) {
@@ -35,6 +36,7 @@ export function buildOverrideMap(dbSections) {
       totalWeight:  sec.totalWeight,
       displayOrder: sec.displayOrder,
       groupWeights: sec.groupWeights ?? null,
+      groupLabels:  sec.groupLabels ?? null,
       items:        itemMap,
       inactiveCodes,
     };
@@ -57,6 +59,7 @@ export function buildFunctionOverrideMap(dbSections) {
     const key = m[1].toLowerCase();
     map[key] = {
       totalWeight: sec.totalWeight,
+      nameTh:      sec.nameTh,
       items: (sec.items ?? [])
         .filter(it => it.isActive !== false)
         .map(it => ({
@@ -75,6 +78,121 @@ export function buildFunctionOverrideMap(dbSections) {
 // Detect if a constants.js section is the ESG section (has divider items).
 function isEsgSection(section) {
   return !!(section.items?.some(i => i.divider));
+}
+
+// Group key for an item code = the code with its trailing ".N" stripped
+// (e.g. "ESG1.11" → "ESG1", "ESGF3.2" → "ESGF3"). Used to slot admin-added
+// items next to their numeric siblings instead of dumping them at the very
+// end of the section — for ESG specifically, the section holds BOTH the
+// HO group (ESG1-3) and the Factory group (ESGF1-3) back-to-back, so
+// "end of section" actually means "end of the Factory group", landing a
+// newly-added HO-side item (e.g. ESG1.11) inside the Factory list instead
+// of after its real siblings (ESG1.1-1.10).
+function itemGroupKey(code) {
+  return code?.replace(/\.\d+$/, '') ?? code;
+}
+
+// Insert each extra (DB-only, admin-added) item right after the last
+// existing item sharing its group key; falls back to appending at the end
+// when no sibling is found (brand-new group). For a brand-new ESG group on
+// the HO side (code doesn't start with the Factory "ESGF" prefix), "the
+// end" means the end of the HO region specifically (right before the
+// Factory level-1 divider) — appending at the very end of the whole array
+// would otherwise land it inside splitEsgGroups()'s Factory slice.
+function insertByGroup(baseItems, extraItems) {
+  const result = [...baseItems];
+  extraItems.forEach(extra => {
+    const key = itemGroupKey(extra.no);
+    let insertAt = -1;
+    for (let i = result.length - 1; i >= 0; i--) {
+      if (!result[i].divider && itemGroupKey(result[i].no) === key) { insertAt = i; break; }
+    }
+    if (insertAt !== -1) { result.splice(insertAt + 1, 0, extra); return; }
+
+    const isFactoryCode = /^ESGF/i.test(extra.no ?? '');
+    if (!isFactoryCode) {
+      const factoryDividerIdx = result.findIndex(it => it.divider && it.level === 1 && /โรงงาน/.test(it.label ?? ''));
+      if (factoryDividerIdx !== -1) { result.splice(factoryDividerIdx, 0, extra); return; }
+    }
+    result.push(extra);
+  });
+  return result;
+}
+
+// Reconciles admin-configured ESG sub-groups (Environment/Social/Governance
+// by default, but admin can rename/add/remove) against the merged items
+// array. `groupWeights` keys are the source of truth for which groups exist
+// ONCE an admin has saved it at least once — null means "never touched",
+// so all of constants.js's hardcoded groups apply unchanged (today's
+// behavior, zero risk for anyone who's never used this feature).
+function reconcileEsgGroups(items, groupWeights, groupLabels) {
+  if (!groupWeights) return items;
+  const existingKeys = new Set(Object.keys(groupWeights));
+
+  // 1. Drop spans (level-2 divider + its items, up to the next divider) for
+  //    any group key no longer in groupWeights (admin removed it) — and
+  //    patch the label of any kept divider from groupLabels.
+  const kept = [];
+  let dropping = false;
+  items.forEach(item => {
+    if (item.divider) {
+      dropping = false;
+      if (item.level === 2) {
+        const grp = esgGroupKey(item.label);
+        if (grp && !existingKeys.has(grp)) { dropping = true; return; }
+        if (grp && groupLabels?.[grp]) {
+          const prefix = item.label?.match(/^(ESGF?\d+)/i)?.[1] ?? '';
+          const { th, en } = groupLabels[grp];
+          kept.push({ ...item, label: `${prefix}  ${th ?? ''}${en ? ` / ${en}` : ''}`.trimEnd() });
+          return;
+        }
+      }
+      kept.push(item);
+      return;
+    }
+    if (!dropping) kept.push(item);
+  });
+
+  // 2. Synthesize a divider for any groupWeights key whose items exist
+  //    (arrived via insertByGroup as admin-added items) but has no divider
+  //    yet — a brand-new group. Checked separately per HO ("ESG{n}.") and
+  //    Factory ("ESGF{n}.") side, since a new group can have items on
+  //    either or both.
+  const keysWithDivider = new Set(
+    kept.filter(it => it.divider && it.level === 2).map(it => esgGroupKey(it.label)).filter(Boolean)
+  );
+  let result = kept;
+  [...existingKeys].filter(k => !keysWithDivider.has(k)).forEach(grp => {
+    ['ESG', 'ESGF'].forEach(prefix => {
+      const re = new RegExp(`^${prefix}${grp}\\.`, 'i');
+      const firstIdx = result.findIndex(it => !it.divider && re.test(it.no ?? ''));
+      if (firstIdx === -1) return; // no items for this group on this side
+      const gl = groupLabels?.[grp];
+      const label = gl
+        ? `${prefix}${grp}  ${gl.th ?? ''}${gl.en ? ` / ${gl.en}` : ''}`.trimEnd()
+        : `${prefix}${grp}  กลุ่มที่เพิ่มใหม่`;
+      result = [
+        ...result.slice(0, firstIdx),
+        { divider: true, level: 2, label, groupWeight: Number(groupWeights[grp]) },
+        ...result.slice(firstIdx),
+      ];
+    });
+  });
+  return result;
+}
+
+// Safety net: a level-2 divider immediately followed by another divider (or
+// end of array) has zero real items under it — e.g. every item in a group
+// got individually soft-deleted one at a time without going through group
+// removal. assignEsgSubGroupWeights() would divide the group's weight by
+// zero items, so drop any divider left in that state. Runs unconditionally
+// (not gated by groupWeights) since this can happen from plain item deletes.
+function dropEmptyEsgDividers(items) {
+  return items.filter((item, i) => {
+    if (!(item.divider && item.level === 2)) return true;
+    const next = items[i + 1];
+    return !!next && !next.divider;
+  });
 }
 
 // Apply overrides to a constants.js criteria array (PRE_CRITERIA or POST_CRITERIA).
@@ -143,13 +261,18 @@ export function applyOverrides(baseCriteria, overrideMap) {
         levelValues: ovItem.levelValues   ?? undefined,
       }));
 
+    let mergedItems = insertByGroup(patchedItems, extraItems);
+    if (isEsg) {
+      mergedItems = dropEmptyEsgDividers(reconcileEsgGroups(mergedItems, ov.groupWeights, ov.groupLabels));
+    }
+
     return {
       order: ov.displayOrder ?? (si + 1),
       section: {
         ...section,
         section: ov.nameTh      ?? section.section,
         weight:  ov.totalWeight ?? section.weight,
-        items: [...patchedItems, ...extraItems],
+        items: mergedItems,
       },
     };
   });

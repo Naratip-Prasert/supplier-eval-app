@@ -35,7 +35,7 @@ CREATE TABLE job_titles (
 
 -- ============================================================
 -- 3. EMPLOYEES — master employee/login table
---    role: USER (BU evaluator) | GCP (buyer) | ADMIN | SUPERVISOR
+--    role: USER (business-unit evaluator) | GCP (buyer) | ADMIN | SUPERVISOR
 -- ============================================================
 CREATE TABLE employees (
   id                   UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -90,8 +90,8 @@ CREATE INDEX idx_suppliers_supplier_name  ON suppliers(supplier_name);
 
 -- ============================================================
 -- 5. EMPLOYEE_SUPPLIER_PERMISSIONS
---    Which BU employees can evaluate which suppliers
---    (currently unenforced — see evaluations.js "BU permission
+--    Which USER employees can evaluate which suppliers
+--    (currently unenforced — see evaluations.js "USER permission
 --    check — disabled for now")
 -- ============================================================
 CREATE TABLE employee_supplier_permissions (
@@ -109,14 +109,19 @@ CREATE INDEX idx_permissions_supplier ON employee_supplier_permissions(supplier_
 -- ============================================================
 -- 6. EVALUATION_CATEGORIES — top-level groupings: Quality, Delivery, etc.
 -- ============================================================
-CREATE TABLE evaluation_categories (
+CREATE TABLE evaluation_main_criteria (
   id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   code          VARCHAR(20) UNIQUE NOT NULL,
   name_th       VARCHAR(200) NOT NULL,
   name_en       VARCHAR(200),
   total_weight  DECIMAL(5,2) NOT NULL DEFAULT 0,
   display_order INTEGER     NOT NULL,
-  created_at    TIMESTAMPTZ DEFAULT NOW()
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  is_active     BOOLEAN     DEFAULT TRUE,
+  group_weights JSONB,                              -- ESG only: {"1": 33.33, "2": 33.33, "3": 33.34, ...}
+                                                      -- key set = which ESG sub-groups exist once saved once
+  group_labels  JSONB                                -- ESG only: {"1": {"th": "...", "en": "..."}, ...}
+                                                      -- overrides constants.js's default group label/text
 );
 
 -- ============================================================
@@ -125,9 +130,9 @@ CREATE TABLE evaluation_categories (
 --    (src/constants.js) since both reuse the same code numbers
 --    (e.g. "1.1") for different criteria.
 -- ============================================================
-CREATE TABLE evaluation_criteria (
+CREATE TABLE evaluation_sub_criteria (
   id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  category_id     UUID        NOT NULL REFERENCES evaluation_categories(id) ON DELETE CASCADE,
+  category_id     UUID        NOT NULL REFERENCES evaluation_main_criteria(id) ON DELETE CASCADE,
   code            VARCHAR(20) NOT NULL,
   name_th         VARCHAR(400) NOT NULL,
   name_en         VARCHAR(400),
@@ -137,6 +142,7 @@ CREATE TABLE evaluation_criteria (
   is_active       BOOLEAN     DEFAULT TRUE,
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   criteria_set    VARCHAR(10) NOT NULL DEFAULT 'legacy',
+  level_values    JSONB,                              -- custom level→score map (e.g. [1,3,5]); NULL = default 1-5
   UNIQUE (criteria_set, code)
 );
 
@@ -145,7 +151,7 @@ CREATE TABLE evaluation_criteria (
 -- ============================================================
 CREATE TABLE score_level_descriptions (
   id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  criterion_id  UUID        NOT NULL REFERENCES evaluation_criteria(id) ON DELETE CASCADE,
+  criterion_id  UUID        NOT NULL REFERENCES evaluation_sub_criteria(id) ON DELETE CASCADE,
   level         INTEGER     NOT NULL CHECK (level BETWEEN 1 AND 5),
   description   TEXT        NOT NULL,
   UNIQUE (criterion_id, level)
@@ -295,7 +301,7 @@ CREATE INDEX idx_evaluations_status     ON evaluations(status);
 CREATE TABLE evaluation_scores (
   id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   evaluation_id   UUID        NOT NULL REFERENCES evaluations(id) ON DELETE CASCADE,
-  criterion_id    UUID        NOT NULL REFERENCES evaluation_criteria(id),
+  criterion_id    UUID        NOT NULL REFERENCES evaluation_sub_criteria(id),
   weight          DECIMAL(5,2) NOT NULL,
   score           INTEGER     CHECK (score BETWEEN 1 AND 5),  -- NULL = not yet filled
   note            TEXT,
@@ -385,9 +391,9 @@ CREATE TRIGGER trg_scores_updated_at
   BEFORE UPDATE ON evaluation_scores
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
-CREATE TRIGGER trg_cat_weights_updated_at
-  BEFORE UPDATE ON evaluation_category_weights
-  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+-- (trg_cat_weights_updated_at removed — it targeted evaluation_category_weights,
+-- a table that was already dropped; running this CREATE TRIGGER against a
+-- fresh DB from this file would fail with "relation does not exist")
 
 -- Recalculate session final_score once BOTH USER and GCP evals are
 -- saved. Sets the session to 'pending_review' (supervisor approval

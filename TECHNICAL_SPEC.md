@@ -150,7 +150,7 @@ migration block. Summary of the core tables:
 | `evaluation_tasks` | One assignment (USER or GCP) within a session; tracks the invitation/reminder/overdue/thank-you email lifecycle |
 | `evaluations` | One person's submitted scoring (`status`: `draft` \| `saved`), one row per session per role |
 | `evaluation_scores` | Per-criterion score + weight backing each `evaluations` row |
-| `evaluation_criteria` / `score_level_descriptions` | The scoring rubric, seeded from `src/constants.js` on every boot |
+| `evaluation_sub_criteria` / `score_level_descriptions` | The scoring rubric, seeded from `src/constants.js` on every boot |
 | `supervisor_reviews` | One row per approve/return decision — a session can have several across return→resubmit cycles |
 | `supplier_upload_batches` | One row per admin Excel upload |
 | `email_logs` | Send-status record for every email the app sends |
@@ -222,7 +222,7 @@ Notable constraints:
 | GET | `/` | List |
 | GET | `/validate` | Check a vendor code exists (used by the manual-entry form) |
 | GET / POST / PATCH | `/`, `/:vendorCode` | ADMIN only for create/update |
-| GET | `/:vendorCode/permission` | Permission check for a BU employee (currently unenforced — see [Limitations](#14-known-limitations--roadmap)) |
+| GET | `/:vendorCode/permission` | Permission check for a USER employee (currently unenforced — see [Limitations](#14-known-limitations--roadmap)) |
 
 ### Criteria (`/api/criteria`)
 | Method | Path | Notes |
@@ -393,7 +393,7 @@ save it, there is no self-service reset.
 | No self-service password reset | Removed pending future SSO integration — until then, a lost admin password has no recovery path |
 | `JWT_SECRET` strength | Not enforced/rotated automatically — use a long random value in any real deployment |
 | `xlsx` dependency vulnerability | `npm audit` reports a known prototype-pollution/ReDoS issue in SheetJS with no upstream fix yet; mitigated only by trusting the admin uploader |
-| Supplier permission check unenforced | `employee_supplier_permissions` exists but `evaluations.js` explicitly skips the check ("BU permission check — disabled for now") |
+| Supplier permission check unenforced | `employee_supplier_permissions` exists but `evaluations.js` explicitly skips the check ("USER permission check — disabled for now") |
 | `evaluation_tasks`/`supervisor_reviews` FKs are `NO ACTION`, not `CASCADE` | Deleting a session requires deleting its tasks/reviews first (the admin delete routes already do this) |
 
 ---

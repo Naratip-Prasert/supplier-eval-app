@@ -1735,7 +1735,7 @@ export function getDisplayCriteriaFrom(baseCriteria, esgTarget, moduleCode, cust
   let functionSection;
   if (funcOverride?.items && moduleCode && moduleCode !== "custom") {
     const mod = FUNCTION_MODULES[moduleCode];
-    functionSection = { section: `${mod?.label ?? moduleCode.toUpperCase()}`, weight: funcOverride.totalWeight ?? funcW, items: funcOverride.items };
+    functionSection = { section: mod?.label ?? funcOverride.nameTh ?? moduleCode.toUpperCase(), weight: funcOverride.totalWeight ?? funcW, items: funcOverride.items };
   } else {
     functionSection = buildFunctionSection(moduleCode, customItems, funcW)
       ?? { section: "Function", weight: funcW, items: [] };
@@ -1761,7 +1761,7 @@ export function getScoredCriteriaFrom(baseCriteria, scores, moduleCode, customIt
   let functionSection;
   if (funcOverride?.items && moduleCode && moduleCode !== "custom") {
     const mod = FUNCTION_MODULES[moduleCode];
-    functionSection = { section: `${mod?.label ?? moduleCode.toUpperCase()}`, weight: funcOverride.totalWeight ?? funcW, items: funcOverride.items };
+    functionSection = { section: mod?.label ?? funcOverride.nameTh ?? moduleCode.toUpperCase(), weight: funcOverride.totalWeight ?? funcW, items: funcOverride.items };
   } else {
     // Prefer module-specific section (old saved results); fall back to combined
     functionSection = buildFunctionSection(moduleCode, customItems, funcW)

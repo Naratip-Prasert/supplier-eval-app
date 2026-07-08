@@ -37,7 +37,7 @@ router.get('/', async (req, res) => {
           ? pool.query(
               `SELECT id, code, name_th AS "nameTh", name_en AS "nameEn",
                       total_weight AS "totalWeight", display_order AS "displayOrder"
-                 FROM evaluation_categories
+                 FROM evaluation_main_criteria
                 WHERE code LIKE $1 AND (is_active = TRUE OR is_active IS NULL)
                 ORDER BY substring(code from '${funcCodePrefix}(\\d+)')::integer, code`,
               [`${funcCodePrefix}%`]
@@ -45,7 +45,7 @@ router.get('/', async (req, res) => {
           : pool.query(
               `SELECT id, code, name_th AS "nameTh", name_en AS "nameEn",
                       total_weight AS "totalWeight", display_order AS "displayOrder"
-                 FROM evaluation_categories
+                 FROM evaluation_main_criteria
                 WHERE code = $1 AND (is_active = TRUE OR is_active IS NULL)`,
               [`${funcCodePrefix}${et.replace(/^m/i, '')}`]
             ),
@@ -58,7 +58,7 @@ router.get('/', async (req, res) => {
                       display_order AS "displayOrder",
                       is_active AS "isActive",
                       level_values AS "levelValues"
-                 FROM evaluation_criteria
+                 FROM evaluation_sub_criteria
                 WHERE criteria_set ~ $1
                 ORDER BY substring(criteria_set from '^${funcSetPrefix}(\\d+)')::integer, display_order`,
               [`^${funcSetPrefix}[0-9]+$`]
@@ -71,7 +71,7 @@ router.get('/', async (req, res) => {
                       display_order AS "displayOrder",
                       is_active AS "isActive",
                       level_values AS "levelValues"
-                 FROM evaluation_criteria
+                 FROM evaluation_sub_criteria
                 WHERE criteria_set = $1
                 ORDER BY display_order`,
               [`${funcSetPrefix}${et.replace(/^m/i, '').toLowerCase()}`]
@@ -90,8 +90,8 @@ router.get('/', async (req, res) => {
         pool.query(
           `SELECT id, code, name_th AS "nameTh", name_en AS "nameEn",
                   total_weight AS "totalWeight", display_order AS "displayOrder",
-                  group_weights AS "groupWeights"
-             FROM evaluation_categories
+                  group_weights AS "groupWeights", group_labels AS "groupLabels"
+             FROM evaluation_main_criteria
             WHERE code LIKE $1 AND (is_active = TRUE OR is_active IS NULL)
             ORDER BY display_order, code`,
           [criteriaSet === 'post_eval' ? 'POST-%' : 'PRE-%']
@@ -104,7 +104,7 @@ router.get('/', async (req, res) => {
                   display_order AS "displayOrder",
                   is_active AS "isActive",
                   level_values AS "levelValues"
-             FROM evaluation_criteria
+             FROM evaluation_sub_criteria
             WHERE criteria_set = $1
             ORDER BY display_order, code`,
           [criteriaSet]
@@ -148,6 +148,7 @@ router.get('/', async (req, res) => {
       totalWeight:  parseFloat(cat.totalWeight),
       displayOrder: cat.displayOrder,
       groupWeights: cat.groupWeights ?? null,
+      groupLabels:  cat.groupLabels ?? null,
       items:        criteriaByCategory[cat.id] ?? [],
     }));
 
@@ -167,11 +168,11 @@ router.delete('/categories/:id', requireAdmin, async (req, res) => {
   try {
     await client.query('BEGIN');
     await client.query(
-      `UPDATE evaluation_criteria SET is_active = FALSE WHERE category_id = $1`,
+      `UPDATE evaluation_sub_criteria SET is_active = FALSE WHERE category_id = $1`,
       [id]
     );
     const result = await client.query(
-      `UPDATE evaluation_categories SET is_active = FALSE WHERE id = $1 RETURNING id`,
+      `UPDATE evaluation_main_criteria SET is_active = FALSE WHERE id = $1 RETURNING id`,
       [id]
     );
     if (result.rowCount === 0) { await client.query('ROLLBACK'); return res.status(404).json({ message: 'ไม่พบข้อมูล' }); }
@@ -189,18 +190,19 @@ router.delete('/categories/:id', requireAdmin, async (req, res) => {
 // ── PATCH /api/criteria/categories/:id ───────────────────────
 router.patch('/categories/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
-  const { nameTh, totalWeight, groupWeights } = req.body;
+  const { nameTh, totalWeight, groupWeights, groupLabels } = req.body;
   const updates = [];
   const values  = [];
   let   idx     = 1;
   if (nameTh       !== undefined) { updates.push(`name_th = $${idx++}`);       values.push(nameTh); }
   if (totalWeight  !== undefined) { updates.push(`total_weight = $${idx++}`);  values.push(Number(totalWeight)); }
   if (groupWeights !== undefined) { updates.push(`group_weights = $${idx++}`); values.push(groupWeights === null ? null : JSON.stringify(groupWeights)); }
+  if (groupLabels  !== undefined) { updates.push(`group_labels = $${idx++}`);  values.push(groupLabels  === null ? null : JSON.stringify(groupLabels)); }
   if (updates.length === 0) return res.status(400).json({ message: 'ไม่มีข้อมูลที่ต้องอัปเดต' });
   values.push(id);
   try {
     const result = await pool.query(
-      `UPDATE evaluation_categories SET ${updates.join(', ')} WHERE id = $${idx} RETURNING id`,
+      `UPDATE evaluation_main_criteria SET ${updates.join(', ')} WHERE id = $${idx} RETURNING id`,
       values
     );
     if (result.rowCount === 0) return res.status(404).json({ message: 'ไม่พบข้อมูล' });
@@ -231,7 +233,7 @@ router.post('/categories', requireAdmin, async (req, res) => {
       // Reactivate an inactive FUNC-{PRE|POST}-M{n} if one exists, otherwise create next sequential
       const inactiveRes = await client.query(
         `SELECT id, code, display_order AS "displayOrder"
-           FROM evaluation_categories
+           FROM evaluation_main_criteria
           WHERE code LIKE $1 AND is_active = FALSE
           ORDER BY substring(code from '${funcPrefix}(\\d+)')::integer
           LIMIT 1`,
@@ -240,11 +242,11 @@ router.post('/categories', requireAdmin, async (req, res) => {
       if (inactiveRes.rows.length > 0) {
         const row = inactiveRes.rows[0];
         await client.query(
-          `UPDATE evaluation_categories SET is_active=TRUE, name_th=$1, total_weight=$2 WHERE id=$3`,
+          `UPDATE evaluation_main_criteria SET is_active=TRUE, name_th=$1, total_weight=$2 WHERE id=$3`,
           [nameTh.trim(), Number(totalWeight) || 0, row.id]
         );
         await client.query(
-          `UPDATE evaluation_criteria SET is_active=TRUE WHERE category_id=$1`,
+          `UPDATE evaluation_sub_criteria SET is_active=TRUE WHERE category_id=$1`,
           [row.id]
         );
         await client.query('COMMIT');
@@ -252,7 +254,7 @@ router.post('/categories', requireAdmin, async (req, res) => {
       }
       // No inactive row — generate next sequential code
       const { rows } = await client.query(
-        `SELECT code FROM evaluation_categories WHERE code LIKE $1 ORDER BY code`,
+        `SELECT code FROM evaluation_main_criteria WHERE code LIKE $1 ORDER BY code`,
         [`${funcPrefix}%`]
       );
       const nums = rows.map(r => { const m = r.code.match(new RegExp(`^${funcPrefix}(\\d+)$`, 'i')); return m ? parseInt(m[1], 10) : 0; }).filter(Boolean);
@@ -263,7 +265,7 @@ router.post('/categories', requireAdmin, async (req, res) => {
       // Reactivate first inactive category with this prefix if one exists
       const inactiveRes = await client.query(
         `SELECT id, code, display_order AS "displayOrder"
-           FROM evaluation_categories
+           FROM evaluation_main_criteria
           WHERE code LIKE $1 AND is_active = FALSE
           ORDER BY display_order
           LIMIT 1`,
@@ -272,11 +274,11 @@ router.post('/categories', requireAdmin, async (req, res) => {
       if (inactiveRes.rows.length > 0) {
         const row = inactiveRes.rows[0];
         await client.query(
-          `UPDATE evaluation_categories SET is_active=TRUE, name_th=$1, total_weight=$2 WHERE id=$3`,
+          `UPDATE evaluation_main_criteria SET is_active=TRUE, name_th=$1, total_weight=$2 WHERE id=$3`,
           [nameTh.trim(), Number(totalWeight) || 0, row.id]
         );
         await client.query(
-          `UPDATE evaluation_criteria SET is_active=TRUE WHERE category_id=$1`,
+          `UPDATE evaluation_sub_criteria SET is_active=TRUE WHERE category_id=$1`,
           [row.id]
         );
         await client.query('COMMIT');
@@ -286,7 +288,7 @@ router.post('/categories', requireAdmin, async (req, res) => {
       let n = 1;
       while (true) {
         code = `${prefix}${n}`;
-        const { rowCount } = await client.query('SELECT 1 FROM evaluation_categories WHERE code=$1', [code]);
+        const { rowCount } = await client.query('SELECT 1 FROM evaluation_main_criteria WHERE code=$1', [code]);
         if (rowCount === 0) break;
         n++;
       }
@@ -300,13 +302,13 @@ router.post('/categories', requireAdmin, async (req, res) => {
       // Find ESG's current display_order, shift ESG up, slot new CORE in its place.
       const esgCode = prefix.startsWith('PRE') ? 'PRE-ESG' : 'POST-ESG';
       const esgRes = await client.query(
-        `SELECT display_order FROM evaluation_categories WHERE code = $1`,
+        `SELECT display_order FROM evaluation_main_criteria WHERE code = $1`,
         [esgCode]
       );
       if (esgRes.rows.length > 0) {
         const esgOrder = esgRes.rows[0].display_order;
         await client.query(
-          `UPDATE evaluation_categories SET display_order = display_order + 1 WHERE code = $1`,
+          `UPDATE evaluation_main_criteria SET display_order = display_order + 1 WHERE code = $1`,
           [esgCode]
         );
         nextOrder = esgOrder;
@@ -314,7 +316,7 @@ router.post('/categories', requireAdmin, async (req, res) => {
         // No ESG found — fall back to MAX+1 across the family
         const orderLikePat = prefix.startsWith('PRE') ? 'PRE-%' : 'POST-%';
         const orderRes = await client.query(
-          `SELECT COALESCE(MAX(display_order),0)+1 AS next FROM evaluation_categories WHERE code LIKE $1`,
+          `SELECT COALESCE(MAX(display_order),0)+1 AS next FROM evaluation_main_criteria WHERE code LIKE $1`,
           [orderLikePat]
         );
         nextOrder = parseInt(orderRes.rows[0].next);
@@ -325,13 +327,13 @@ router.post('/categories', requireAdmin, async (req, res) => {
         : prefix.startsWith('POST') ? 'POST-%'
         : `${prefix}%`;
       const orderRes = await client.query(
-        `SELECT COALESCE(MAX(display_order),0)+1 AS next FROM evaluation_categories WHERE code LIKE $1`,
+        `SELECT COALESCE(MAX(display_order),0)+1 AS next FROM evaluation_main_criteria WHERE code LIKE $1`,
         [orderLikePat]
       );
       nextOrder = parseInt(orderRes.rows[0].next);
     }
     const result = await client.query(
-      `INSERT INTO evaluation_categories (code, name_th, total_weight, display_order, is_active)
+      `INSERT INTO evaluation_main_criteria (code, name_th, total_weight, display_order, is_active)
        VALUES ($1,$2,$3,$4,TRUE)
        RETURNING id, code, name_th AS "nameTh", total_weight AS "totalWeight", display_order AS "displayOrder"`,
       [code, nameTh.trim(), Number(totalWeight) || 0, nextOrder]
@@ -356,13 +358,39 @@ router.post('/items', requireAdmin, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const orderRes = await client.query(
-      'SELECT COALESCE(MAX(display_order), 0) + 1 AS next FROM evaluation_criteria WHERE category_id = $1',
-      [categoryId]
+    // New items land right after their numeric siblings (group = code with
+    // the trailing ".N" stripped, e.g. "ESG1.11" groups with "ESG1.1"-
+    // "ESG1.10"), not always at the very end of the category — the ESG
+    // category holds BOTH the HO group (ESG1-3) and Factory group (ESGF1-3)
+    // back-to-back, so "end of category" means "end of the Factory list",
+    // landing a new HO-side item inside the Factory group instead of right
+    // after its real siblings. Falls back to append-at-end when no sibling
+    // shares the group (brand-new group/module — same as previous behavior).
+    const newCode  = String(code).trim();
+    const groupKey = newCode.replace(/\.\d+$/, '');
+    const siblingsRes = await client.query(
+      `SELECT display_order AS "displayOrder" FROM evaluation_sub_criteria
+        WHERE category_id = $1 AND is_active = TRUE AND code ~ ('^' || $2 || '\\.[0-9]+$')
+        ORDER BY display_order DESC LIMIT 1`,
+      [categoryId, groupKey]
     );
-    const nextOrder = orderRes.rows[0].next;
+    let nextOrder;
+    if (siblingsRes.rows.length > 0) {
+      nextOrder = siblingsRes.rows[0].displayOrder + 1;
+      await client.query(
+        `UPDATE evaluation_sub_criteria SET display_order = display_order + 1
+          WHERE category_id = $1 AND display_order >= $2`,
+        [categoryId, nextOrder]
+      );
+    } else {
+      const orderRes = await client.query(
+        'SELECT COALESCE(MAX(display_order), 0) + 1 AS next FROM evaluation_sub_criteria WHERE category_id = $1',
+        [categoryId]
+      );
+      nextOrder = orderRes.rows[0].next;
+    }
     const insertRes = await client.query(
-      `INSERT INTO evaluation_criteria
+      `INSERT INTO evaluation_sub_criteria
          (category_id, code, name_th, default_weight, display_order, is_active, criteria_set)
        VALUES ($1, $2, $3, $4, $5, true, $6)
        ON CONFLICT (criteria_set, code) DO UPDATE
@@ -371,7 +399,7 @@ router.post('/items', requireAdmin, async (req, res) => {
              category_id=EXCLUDED.category_id,
              display_order=EXCLUDED.display_order
        RETURNING id`,
-      [categoryId, String(code).trim(), String(nameTh).trim(), Number(defaultWeight) || 0, nextOrder, criteriaSet]
+      [categoryId, newCode, String(nameTh).trim(), Number(defaultWeight) || 0, nextOrder, criteriaSet]
     );
     const newId = insertRes.rows[0].id;
     const defaultLevels = Array.isArray(levels) && levels.length > 0
@@ -401,7 +429,7 @@ router.delete('/items/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query(
-      'UPDATE evaluation_criteria SET is_active = FALSE WHERE id = $1 RETURNING id',
+      'UPDATE evaluation_sub_criteria SET is_active = FALSE WHERE id = $1 RETURNING id',
       [id]
     );
     if (result.rowCount === 0) return res.status(404).json({ message: 'ไม่พบข้อมูล' });
@@ -428,7 +456,7 @@ router.patch('/items/:id', requireAdmin, async (req, res) => {
   values.push(id);
   try {
     const result = await pool.query(
-      `UPDATE evaluation_criteria SET ${updates.join(', ')} WHERE id = $${idx} RETURNING id`,
+      `UPDATE evaluation_sub_criteria SET ${updates.join(', ')} WHERE id = $${idx} RETURNING id`,
       values
     );
     if (result.rowCount === 0) return res.status(404).json({ message: 'ไม่พบข้อมูล' });
@@ -451,7 +479,7 @@ router.patch('/items/:id/levels', requireAdmin, async (req, res) => {
     await client.query('BEGIN');
     if (levelValues !== undefined) {
       await client.query(
-        'UPDATE evaluation_criteria SET level_values = $1 WHERE id = $2',
+        'UPDATE evaluation_sub_criteria SET level_values = $1 WHERE id = $2',
         [levelValues === null ? null : JSON.stringify(levelValues), id]
       );
     }
@@ -485,7 +513,7 @@ router.put('/reorder', requireAdmin, async (req, res) => {
     await client.query('BEGIN');
     for (const { id, displayOrder } of order) {
       await client.query(
-        'UPDATE evaluation_categories SET display_order = $1 WHERE id = $2',
+        'UPDATE evaluation_main_criteria SET display_order = $1 WHERE id = $2',
         [displayOrder, id]
       );
     }
@@ -524,7 +552,7 @@ router.post('/seed', requireAdmin, async (req, res) => {
       let catId;
       if (reset) {
         const catRes = await client.query(
-          `INSERT INTO evaluation_categories (code, name_th, total_weight, display_order)
+          `INSERT INTO evaluation_main_criteria (code, name_th, total_weight, display_order)
            VALUES ($1, $2, $3, $4)
            ON CONFLICT (code) DO UPDATE
              SET name_th=$2, total_weight=$3, display_order=$4
@@ -534,7 +562,7 @@ router.post('/seed', requireAdmin, async (req, res) => {
         catId = catRes.rows[0].id;
       } else {
         const catRes = await client.query(
-          `INSERT INTO evaluation_categories (code, name_th, total_weight, display_order)
+          `INSERT INTO evaluation_main_criteria (code, name_th, total_weight, display_order)
            VALUES ($1, $2, $3, $4)
            ON CONFLICT (code) DO NOTHING
            RETURNING id`,
@@ -542,7 +570,7 @@ router.post('/seed', requireAdmin, async (req, res) => {
         );
         catId = catRes.rows[0]
           ? catRes.rows[0].id
-          : (await client.query('SELECT id FROM evaluation_categories WHERE code=$1', [section.code])).rows[0].id;
+          : (await client.query('SELECT id FROM evaluation_main_criteria WHERE code=$1', [section.code])).rows[0].id;
       }
 
       for (let i = 0; i < (section.items ?? []).length; i++) {
@@ -554,7 +582,7 @@ router.post('/seed', requireAdmin, async (req, res) => {
         let critId;
         if (reset) {
           const critRes = await client.query(
-            `INSERT INTO evaluation_criteria
+            `INSERT INTO evaluation_sub_criteria
                (category_id, code, name_th, default_weight, display_order, is_active, criteria_set, level_values)
              VALUES ($1, $2, $3, $4, $5, true, $6, $7)
              ON CONFLICT (criteria_set, code) DO UPDATE
@@ -569,7 +597,7 @@ router.post('/seed', requireAdmin, async (req, res) => {
           newCritIds.push(critId); // reset: replace levels for all
         } else {
           const critRes = await client.query(
-            `INSERT INTO evaluation_criteria
+            `INSERT INTO evaluation_sub_criteria
                (category_id, code, name_th, default_weight, display_order, is_active, criteria_set, level_values)
              VALUES ($1, $2, $3, $4, $5, true, $6, $7)
              ON CONFLICT (criteria_set, code) DO NOTHING

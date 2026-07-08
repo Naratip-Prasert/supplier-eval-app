@@ -1,4 +1,4 @@
-# Database Documentation — Supplier Performance Evaluation System (SPE)
+# Database Documentation — Supplier Performance Evaluation System (SPES)
 
 > PostgreSQL Schema v2.0 (Migrated from MongoDB)  
 > Provider: Neon.tech (Free Tier, ap-southeast-1)
@@ -15,8 +15,8 @@
    - [employees](#33-employees)
    - [suppliers](#34-suppliers)
    - [employee_supplier_permissions](#35-employee_supplier_permissions)
-   - [evaluation_categories](#36-evaluation_categories)
-   - [evaluation_criteria](#37-evaluation_criteria)
+   - [evaluation_main_criteria](#36-evaluation_main_criteria)
+   - [evaluation_sub_criteria](#37-evaluation_sub_criteria)
    - [score_level_descriptions](#38-score_level_descriptions)
    - [evaluation_sessions](#39-evaluation_sessions)
    - [evaluations](#310-evaluations)
@@ -39,8 +39,8 @@
 | กลุ่ม | ตาราง | หน้าที่ |
 |-------|-------|---------|
 | **Master Data** | `departments`, `job_titles`, `employees`, `suppliers` | ข้อมูลอ้างอิงหลักของระบบ |
-| **Permission** | `employee_supplier_permissions` | ควบคุมว่า BU คนไหนประเมิน Supplier ได้บ้าง |
-| **Evaluation Config** | `evaluation_categories`, `evaluation_criteria`, `score_level_descriptions`, `grade_thresholds` | โครงสร้างแบบประเมินและเกณฑ์การให้คะแนน |
+| **Permission** | `employee_supplier_permissions` | ควบคุมว่า USER คนไหนประเมิน Supplier ได้บ้าง |
+| **Evaluation Config** | `evaluation_main_criteria`, `evaluation_sub_criteria`, `score_level_descriptions`, `grade_thresholds` | โครงสร้างแบบประเมินและเกณฑ์การให้คะแนน |
 | **Evaluation Data** | `evaluation_sessions`, `evaluations`, `evaluation_scores`, `evaluation_category_weights` | ข้อมูลการประเมินจริง (รวมการปรับน้ำหนักรายประเมิน) |
 
 ---
@@ -57,7 +57,7 @@ employees ◄──────────────────┘ (job_titl
     │ has many
     ▼ (N)
 employee_supplier_permissions ────────► suppliers
-    (BU only; GCP bypasses this table)      │
+    (USER only; GCP bypasses this table)      │
                                             │ (1)
                                             │ has many
                                             ▼ (N)
@@ -65,7 +65,7 @@ employee_supplier_permissions ────────► suppliers
                                             │ (1)
                                             │ has many
                                             ▼ (N)
-                                       evaluations (BU | GCP)
+                                       evaluations (USER | GCP)
                                             │ (1)
                                             │ has many
                                             ▼ (N)
@@ -73,11 +73,11 @@ employee_supplier_permissions ────────► suppliers
                                             │ (N)
                                             │ references
                                             ▼ (1)
-                                    evaluation_criteria
+                                    evaluation_sub_criteria
                                             │ (N)
                                             │ belongs to
                                             ▼ (1)
-                                   evaluation_categories
+                                   evaluation_main_criteria
                                             │ (1)          │ (1)
                                             │ has many     │ has many
                                             ▼ (N)          ▼ (N)
@@ -127,7 +127,7 @@ grade_thresholds  (standalone lookup — used by trigger)
 
 ### 3.3 `employees`
 
-**หน้าที่**: ตาราง master พนักงานทั้งหมด ใช้ validate รหัสพนักงานก่อนเริ่มประเมิน และระบุ role ว่าเป็น BU หรือ GCP
+**หน้าที่**: ตาราง master พนักงานทั้งหมด ใช้ validate รหัสพนักงานก่อนเริ่มประเมิน และระบุ role ว่าเป็น USER หรือ GCP
 
 | Column | Type | Constraint | คำอธิบาย |
 |--------|------|-----------|----------|
@@ -136,7 +136,7 @@ grade_thresholds  (standalone lookup — used by trigger)
 | `full_name` | VARCHAR(200) | NOT NULL | ชื่อ-นามสกุล |
 | `department_id` | UUID | FK → `departments.id` | แผนกที่สังกัด (SET NULL ถ้าแผนกถูกลบ) |
 | `job_title_id` | UUID | FK → `job_titles.id` | ตำแหน่งงาน (SET NULL ถ้าตำแหน่งถูกลบ) |
-| `role` | VARCHAR(10) | CHECK IN ('BU','GCP','ADMIN') | บทบาท: BU = ผู้ใช้งาน, GCP = เจ้าหน้าที่จัดซื้อ |
+| `role` | VARCHAR(10) | CHECK IN ('USER','GCP','ADMIN') | บทบาท: USER = ผู้ใช้งาน, GCP = เจ้าหน้าที่จัดซื้อ |
 | `is_active` | BOOLEAN | DEFAULT TRUE | ยังทำงานอยู่หรือไม่ |
 | `created_at` | TIMESTAMPTZ | DEFAULT NOW() | วันที่สร้าง |
 | `updated_at` | TIMESTAMPTZ | DEFAULT NOW() | วันที่แก้ไขล่าสุด (auto-update ด้วย trigger) |
@@ -169,13 +169,13 @@ grade_thresholds  (standalone lookup — used by trigger)
 
 ### 3.5 `employee_supplier_permissions`
 
-**หน้าที่**: ตาราง Junction (Many-to-Many) ควบคุมสิทธิ์ว่า BU คนไหนสามารถประเมิน Supplier ใดได้บ้าง  
+**หน้าที่**: ตาราง Junction (Many-to-Many) ควบคุมสิทธิ์ว่า USER คนไหนสามารถประเมิน Supplier ใดได้บ้าง  
 GCP ไม่ต้องใช้ตารางนี้ — GCP ประเมินได้ทุก Supplier
 
 | Column | Type | Constraint | คำอธิบาย |
 |--------|------|-----------|----------|
 | `id` | UUID | PK | Auto-generated |
-| `employee_id` | UUID | FK → `employees.id` ON DELETE CASCADE | พนักงาน BU |
+| `employee_id` | UUID | FK → `employees.id` ON DELETE CASCADE | พนักงาน USER |
 | `supplier_id` | UUID | FK → `suppliers.id` ON DELETE CASCADE | Supplier ที่มีสิทธิ์ประเมิน |
 | `granted_by` | UUID | FK → `employees.id` ON DELETE SET NULL | ผู้อนุมัติสิทธิ์ (ADMIN) |
 | `granted_at` | TIMESTAMPTZ | DEFAULT NOW() | วันที่ให้สิทธิ์ |
@@ -183,11 +183,11 @@ GCP ไม่ต้องใช้ตารางนี้ — GCP ประเ�
 
 **Indexes**: `employee_id`, `supplier_id`
 
-**Requirement ที่รองรับ**: Req 1 (BU สามารถประเมินได้เฉพาะ Supplier ที่ได้รับอนุญาต)
+**Requirement ที่รองรับ**: Req 1 (USER สามารถประเมินได้เฉพาะ Supplier ที่ได้รับอนุญาต)
 
 ---
 
-### 3.6 `evaluation_categories`
+### 3.6 `evaluation_main_criteria`
 
 **หน้าที่**: หมวดหมู่หลักของแบบประเมิน เช่น ด้านคุณภาพ, ด้านการส่งมอบ
 
@@ -203,14 +203,14 @@ GCP ไม่ต้องใช้ตารางนี้ — GCP ประเ�
 
 ---
 
-### 3.7 `evaluation_criteria`
+### 3.7 `evaluation_sub_criteria`
 
 **หน้าที่**: หัวข้อประเมินแต่ละข้อภายในหมวดหมู่ มี `default_weight` ที่ผู้ประเมินสามารถแก้ไขได้ในแต่ละรอบ
 
 | Column | Type | Constraint | คำอธิบาย |
 |--------|------|-----------|----------|
 | `id` | UUID | PK | Auto-generated |
-| `category_id` | UUID | FK → `evaluation_categories.id` ON DELETE CASCADE | หมวดหมู่ที่สังกัด |
+| `category_id` | UUID | FK → `evaluation_main_criteria.id` ON DELETE CASCADE | หมวดหมู่ที่สังกัด |
 | `code` | VARCHAR(20) | UNIQUE NOT NULL | รหัสหัวข้อ เช่น `1.1`, `2.2` |
 | `name_th` | VARCHAR(400) | NOT NULL | ชื่อหัวข้อภาษาไทย |
 | `name_en` | VARCHAR(400) | — | ชื่อหัวข้อภาษาอังกฤษ |
@@ -231,7 +231,7 @@ GCP ไม่ต้องใช้ตารางนี้ — GCP ประเ�
 | Column | Type | Constraint | คำอธิบาย |
 |--------|------|-----------|----------|
 | `id` | UUID | PK | Auto-generated |
-| `criterion_id` | UUID | FK → `evaluation_criteria.id` ON DELETE CASCADE | หัวข้อที่เป็นเจ้าของ |
+| `criterion_id` | UUID | FK → `evaluation_sub_criteria.id` ON DELETE CASCADE | หัวข้อที่เป็นเจ้าของ |
 | `level` | INTEGER | CHECK BETWEEN 1 AND 5 | ระดับคะแนน |
 | `description` | TEXT | NOT NULL | คำอธิบายระดับนั้น เช่น "ไม่มี Claim ในรอบประเมิน" |
 | — | — | UNIQUE(criterion_id, level) | แต่ละหัวข้อมีคำอธิบายได้แค่ 1 ต่อระดับ |
@@ -242,7 +242,7 @@ GCP ไม่ต้องใช้ตารางนี้ — GCP ประเ�
 
 ### 3.9 `evaluation_sessions`
 
-**หน้าที่**: หนึ่ง "รอบการประเมิน" ของ Supplier หนึ่งราย กลุ่ม BU evaluation + GCP evaluation เข้าไว้ด้วยกัน เพื่อคำนวณ `final_score` เป็นค่าเฉลี่ย
+**หน้าที่**: หนึ่ง "รอบการประเมิน" ของ Supplier หนึ่งราย กลุ่ม USER evaluation + GCP evaluation เข้าไว้ด้วยกัน เพื่อคำนวณ `final_score` เป็นค่าเฉลี่ย
 
 | Column | Type | Constraint | คำอธิบาย |
 |--------|------|-----------|----------|
@@ -251,12 +251,12 @@ GCP ไม่ต้องใช้ตารางนี้ — GCP ประเ�
 | `eval_type` | VARCHAR(20) | CHECK IN ('new_supplier','re_evaluation') | ประเภท: ซัพพลายเออร์ใหม่ / ประเมินซ้ำ |
 | `period` | VARCHAR(50) | — | รอบการประเมิน เช่น `Monthly`, `Quarterly` |
 | `status` | VARCHAR(20) | DEFAULT 'pending', CHECK IN ('pending','in_progress','completed') | สถานะ session |
-| `final_score` | DECIMAL(5,2) | — | คะแนนสุดท้าย = (BU score + GCP score) / 2 (คำนวณโดย trigger) |
+| `final_score` | DECIMAL(5,2) | — | คะแนนสุดท้าย = (USER score + GCP score) / 2 (คำนวณโดย trigger) |
 | `final_grade` | VARCHAR(5) | — | เกรดสุดท้าย A/B/C/D (คำนวณโดย trigger) |
 | `initiated_by` | UUID | FK → `employees.id` ON DELETE SET NULL | พนักงานที่เริ่ม session |
 | `created_at` | TIMESTAMPTZ | DEFAULT NOW() | วันที่สร้าง |
 | `updated_at` | TIMESTAMPTZ | DEFAULT NOW() | วันที่อัปเดตล่าสุด |
-| `completed_at` | TIMESTAMPTZ | — | วันที่ประเมินเสร็จสมบูรณ์ (ทั้ง BU + GCP saved) |
+| `completed_at` | TIMESTAMPTZ | — | วันที่ประเมินเสร็จสมบูรณ์ (ทั้ง USER + GCP saved) |
 
 **Indexes**: `supplier_id`, `status`, `eval_type`, `created_at DESC`
 
@@ -267,16 +267,16 @@ pending → in_progress → completed
    │      (เมื่อฝ่ายใดฝ่ายหนึ่ง save)
    │                    │
    └────────────────────┘
-              (เมื่อทั้ง BU + GCP save แล้ว trigger จะ update)
+              (เมื่อทั้ง USER + GCP save แล้ว trigger จะ update)
 ```
 
-**Requirement ที่รองรับ**: Req 3 (final score = average BU + GCP), Req 6 (history), Req 7 (new_supplier/re_evaluation)
+**Requirement ที่รองรับ**: Req 3 (final score = average USER + GCP), Req 6 (history), Req 7 (new_supplier/re_evaluation)
 
 ---
 
 ### 3.10 `evaluations`
 
-**หน้าที่**: บันทึกการประเมินของบุคคลหนึ่งคน (BU หรือ GCP) ใน session หนึ่ง  
+**หน้าที่**: บันทึกการประเมินของบุคคลหนึ่งคน (USER หรือ GCP) ใน session หนึ่ง  
 - `status = 'draft'` = ยังแก้ไขได้ (Req 4)  
 - `status = 'saved'` = ล็อคแล้ว หลัง confirm (Req 10)
 
@@ -285,7 +285,7 @@ pending → in_progress → completed
 | `id` | UUID | PK | Auto-generated |
 | `session_id` | UUID | FK → `evaluation_sessions.id` ON DELETE CASCADE | Session ที่สังกัด |
 | `employee_id` | UUID | FK → `employees.id` | พนักงานที่ประเมิน |
-| `role` | VARCHAR(10) | CHECK IN ('BU','GCP') | บทบาทในการประเมิน |
+| `role` | VARCHAR(10) | CHECK IN ('USER','GCP') | บทบาทในการประเมิน |
 | `product_type` | VARCHAR(20) | CHECK IN ('goods','services','both') | ประเภทสินค้า/บริการ |
 | `status` | VARCHAR(10) | DEFAULT 'draft', CHECK IN ('draft','saved') | สถานะ |
 | `total_score` | DECIMAL(5,2) | — | คะแนนรวม 0-100 (คำนวณจาก evaluation_scores) |
@@ -293,7 +293,7 @@ pending → in_progress → completed
 | `submitted_at` | TIMESTAMPTZ | — | เวลาที่กด save จริง |
 | `created_at` | TIMESTAMPTZ | DEFAULT NOW() | วันที่สร้าง |
 | `updated_at` | TIMESTAMPTZ | DEFAULT NOW() | วันที่อัปเดต |
-| — | — | UNIQUE(session_id, role) | 1 session มีได้แค่ 1 BU eval + 1 GCP eval |
+| — | — | UNIQUE(session_id, role) | 1 session มีได้แค่ 1 USER eval + 1 GCP eval |
 
 **Indexes**: `session_id`, `employee_id`, `status`
 
@@ -309,7 +309,7 @@ pending → in_progress → completed
 |--------|------|-----------|----------|
 | `id` | UUID | PK | Auto-generated |
 | `evaluation_id` | UUID | FK → `evaluations.id` ON DELETE CASCADE | การประเมินที่สังกัด |
-| `criterion_id` | UUID | FK → `evaluation_criteria.id` | หัวข้อประเมิน |
+| `criterion_id` | UUID | FK → `evaluation_sub_criteria.id` | หัวข้อประเมิน |
 | `weight` | DECIMAL(5,2) | NOT NULL | น้ำหนักที่ตกลงกันในรอบนี้ (อาจต่างจาก default) |
 | `score` | INTEGER | CHECK BETWEEN 1 AND 5 | คะแนน (NULL = ยังไม่ได้กรอก) |
 | `note` | TEXT | — | หมายเหตุ/ความเห็นเพิ่มเติม |
@@ -334,26 +334,26 @@ weighted_score = CASE WHEN score IS NOT NULL
 
 ### 3.12 `evaluation_category_weights`
 
-**หน้าที่**: น้ำหนักของหมวดหมู่หลัก (major topic) ที่ BU หรือ GCP ตกลงใช้ในการประเมินแต่ละรอบ  
+**หน้าที่**: น้ำหนักของหมวดหมู่หลัก (major topic) ที่ USER หรือ GCP ตกลงใช้ในการประเมินแต่ละรอบ  
 เทียบกับ `evaluation_scores.weight` ที่ทำหน้าที่เดียวกันแต่สำหรับหัวข้อย่อย (sub-criteria)  
-ค่า `evaluation_categories.total_weight` ยังคงเป็นค่า default ที่ใช้อ้างอิง
+ค่า `evaluation_main_criteria.total_weight` ยังคงเป็นค่า default ที่ใช้อ้างอิง
 
 | Column | Type | Constraint | คำอธิบาย |
 |--------|------|-----------|----------|
 | `id` | UUID | PK | Auto-generated |
 | `evaluation_id` | UUID | FK → `evaluations.id` ON DELETE CASCADE | การประเมินที่สังกัด |
-| `category_id` | UUID | FK → `evaluation_categories.id` | หมวดหมู่ที่ปรับน้ำหนัก |
+| `category_id` | UUID | FK → `evaluation_main_criteria.id` | หมวดหมู่ที่ปรับน้ำหนัก |
 | `weight` | DECIMAL(5,2) | NOT NULL | น้ำหนักที่ตกลงใช้จริง (%) ในการประเมินรอบนี้ |
 | `created_at` | TIMESTAMPTZ | DEFAULT NOW() | วันที่สร้าง |
 | `updated_at` | TIMESTAMPTZ | DEFAULT NOW() | วันที่อัปเดต |
 | — | — | UNIQUE(evaluation_id, category_id) | แต่ละ evaluation มีได้ 1 weight ต่อ category |
 
 **ความสัมพันธ์กับตารางอื่น**:
-- `evaluation_categories.total_weight` = ค่า default (baseline)
-- `evaluation_category_weights.weight` = ค่าที่ BU/GCP ตกลงใช้จริงต่อรอบประเมิน
+- `evaluation_main_criteria.total_weight` = ค่า default (baseline)
+- `evaluation_category_weights.weight` = ค่าที่ USER/GCP ตกลงใช้จริงต่อรอบประเมิน
 - คู่กับ `evaluation_scores.weight` ที่ทำหน้าที่เดียวกันในระดับหัวข้อย่อย
 
-**Requirement ที่รองรับ**: ความต้องการปรับน้ำหนักหมวดหมู่หลักโดย BU และ GCP ต่อรอบประเมิน
+**Requirement ที่รองรับ**: ความต้องการปรับน้ำหนักหมวดหมู่หลักโดย USER และ GCP ต่อรอบประเมิน
 
 ---
 
@@ -399,10 +399,10 @@ job_titles (1) ──────── (N) employees           (via employee_su
                                                           evaluation_scores
                                                                     │ (N)
                                                                     ▼ (1)
-                                                         evaluation_criteria
+                                                         evaluation_sub_criteria
                                                                     │ (N)
                                                                     ▼ (1)
-                                                        evaluation_categories
+                                                        evaluation_main_criteria
                                                                     │ (1)
                                                                     ▼ (N)
                                                       score_level_descriptions
@@ -419,14 +419,14 @@ grade_thresholds ◄──── (used by trigger to map score → grade)
 | `employees` | `employee_supplier_permissions` | One-to-Many |
 | `suppliers` | `employee_supplier_permissions` | One-to-Many |
 | `suppliers` | `evaluation_sessions` | One-to-Many |
-| `evaluation_sessions` | `evaluations` | One-to-Many (max 2: BU + GCP) |
+| `evaluation_sessions` | `evaluations` | One-to-Many (max 2: USER + GCP) |
 | `employees` | `evaluations` | One-to-Many |
 | `evaluations` | `evaluation_scores` | One-to-Many |
-| `evaluation_criteria` | `evaluation_scores` | One-to-Many |
-| `evaluation_categories` | `evaluation_criteria` | One-to-Many |
-| `evaluation_criteria` | `score_level_descriptions` | One-to-Many (exactly 5) |
+| `evaluation_sub_criteria` | `evaluation_scores` | One-to-Many |
+| `evaluation_main_criteria` | `evaluation_sub_criteria` | One-to-Many |
+| `evaluation_sub_criteria` | `score_level_descriptions` | One-to-Many (exactly 5) |
 | `evaluations` | `evaluation_category_weights` | One-to-Many (one per category) |
-| `evaluation_categories` | `evaluation_category_weights` | One-to-Many |
+| `evaluation_main_criteria` | `evaluation_category_weights` | One-to-Many |
 
 ---
 
@@ -453,7 +453,7 @@ $$ LANGUAGE plpgsql;
 
 ### 5.2 `recalculate_session_final_score()` — Final Score Trigger
 
-**วัตถุประสงค์**: คำนวณ `final_score` และ `final_grade` ของ session อัตโนมัติ เมื่อทั้ง BU และ GCP save การประเมินแล้ว
+**วัตถุประสงค์**: คำนวณ `final_score` และ `final_grade` ของ session อัตโนมัติ เมื่อทั้ง USER และ GCP save การประเมินแล้ว
 
 **ทำงานเมื่อ**: `AFTER UPDATE OF status ON evaluations` และ `NEW.status = 'saved'`
 
@@ -461,10 +461,10 @@ $$ LANGUAGE plpgsql;
 
 ```
 เมื่อ evaluations.status เปลี่ยนเป็น 'saved':
-  1. ดึง total_score ของ BU ใน session เดียวกัน (ถ้า saved)
+  1. ดึง total_score ของ USER ใน session เดียวกัน (ถ้า saved)
   2. ดึง total_score ของ GCP ใน session เดียวกัน (ถ้า saved)
   
-  ถ้า BU saved และ GCP saved:
+  ถ้า USER saved และ GCP saved:
     final_score = ROUND((bu_score + gcp_score) / 2, 2)
     final_grade = lookup จาก grade_thresholds
     session.status = 'completed'
@@ -475,7 +475,7 @@ $$ LANGUAGE plpgsql;
 ```
 
 **ตัวอย่าง**:
-- BU total_score = 75.00
+- USER total_score = 75.00
 - GCP total_score = 83.00
 - final_score = (75 + 83) / 2 = **79.00** → Grade **B**
 
@@ -486,7 +486,7 @@ $$ LANGUAGE plpgsql;
 | ตาราง | Index | Column(s) | วัตถุประสงค์ |
 |-------|-------|-----------|------------|
 | `employees` | `idx_employees_employee_id` | `employee_id` | ค้นหาพนักงานด้วยรหัส (Req 2, 11) |
-| `employees` | `idx_employees_role` | `role` | Filter BU / GCP |
+| `employees` | `idx_employees_role` | `role` | Filter USER / GCP |
 | `suppliers` | `idx_suppliers_vendor_code` | `vendor_code` | ค้นหา Supplier ด้วย Vendor Code (Req 8) |
 | `suppliers` | `idx_suppliers_supplier_name` | `supplier_name` | ค้นหาด้วยชื่อ |
 | `employee_supplier_permissions` | `idx_permissions_employee` | `employee_id` | ดูสิทธิ์ของพนักงาน (Req 1) |
@@ -527,7 +527,7 @@ GET /api/suppliers
         ▼
 GET /api/suppliers/:vendorCode/permission?employeeId=
   └─ ถ้า role = GCP → อนุญาตเสมอ
-  └─ ถ้า role = BU → ตรวจ employee_supplier_permissions
+  └─ ถ้า role = USER → ตรวจ employee_supplier_permissions
         │
         ▼
 GET /api/criteria
@@ -544,11 +544,11 @@ POST /api/evaluations
   1. Validate employee → supplier → permission
   2. หา session ที่ยังไม่ complete หรือสร้างใหม่
   3. INSERT evaluations (status='draft' ก่อน)
-  4. INSERT evaluation_category_weights (น้ำหนักหมวดที่ BU/GCP ตกลงใช้)
+  4. INSERT evaluation_category_weights (น้ำหนักหมวดที่ USER/GCP ตกลงใช้)
   5. INSERT evaluation_scores (ทุก criterion พร้อม weight ที่ปรับแล้ว)
   6. UPDATE evaluations.status = 'saved'
      └─ TRIGGER recalculate_session_final_score() ทำงาน
-        └─ ถ้าครบทั้ง BU + GCP:
+        └─ ถ้าครบทั้ง USER + GCP:
            UPDATE evaluation_sessions SET final_score, final_grade, status='completed'
 ```
 
@@ -560,13 +560,13 @@ POST /api/evaluations
         ▼
 GET /api/sessions?vendorCode=SUP-001&status=completed
   └─ JOIN: evaluation_sessions → suppliers
-  └─ JOIN: evaluations (BU + GCP ของแต่ละ session)
+  └─ JOIN: evaluations (USER + GCP ของแต่ละ session)
   └─ Return: รายการ sessions พร้อม final_score, final_grade, วันที่
         │
         ▼
 GET /api/sessions/:id
-  └─ JOIN: evaluations → evaluation_scores → evaluation_criteria
-  └─ Return: รายละเอียดคะแนนรายหัวข้อของทั้ง BU และ GCP
+  └─ JOIN: evaluations → evaluation_scores → evaluation_sub_criteria
+  └─ Return: รายละเอียดคะแนนรายหัวข้อของทั้ง USER และ GCP
 ```
 
 ### 7.3 Flow การคำนวณคะแนน
@@ -578,7 +578,7 @@ GET /api/sessions/:id
 
 total_score = (Σ weighted_scores / Σ weights) × 100
 
-final_score = (BU total_score + GCP total_score) / 2
+final_score = (USER total_score + GCP total_score) / 2
 
 final_grade = lookup จาก grade_thresholds
               (A: 81-100, B: 61-80, C: 51-60, D: 0-50)
@@ -608,13 +608,13 @@ total_score = (53.00 / 70) × 100 = **75.71** → Grade **B**
 | `grade_thresholds` | 4 | A, B, C, D |
 | `departments` | 4 | จัดซื้อ, การเงิน, วิศวะ, อื่นๆ |
 | `job_titles` | 4 | จัดซื้อวัสดุสำนักงาน, IT, วัตถุดิบ, อื่นๆ |
-| `employees` | 6 | EMP-001 ถึง EMP-004 (BU), GCP-001 ถึง GCP-002 (GCP) |
+| `employees` | 6 | EMP-001 ถึง EMP-004 (USER), GCP-001 ถึง GCP-002 (GCP) |
 | `suppliers` | 5 | SUP-001 ถึง SUP-005 |
 | `employee_supplier_permissions` | — | GCP ทุกคนประเมินได้ทุก Supplier, EMP-001/002 → SUP-001/002/003, EMP-003/004 → SUP-004/005 |
-| `evaluation_categories` | 2 | CAT1 (Quality 40%), CAT2 (Delivery 30%) — ค่า default baseline |
-| `evaluation_criteria` | 6 | 1.1, 1.2, 1.3, 1.4, 2.1, 2.2 |
+| `evaluation_main_criteria` | 2 | CAT1 (Quality 40%), CAT2 (Delivery 30%) — ค่า default baseline |
+| `evaluation_sub_criteria` | 6 | 1.1, 1.2, 1.3, 1.4, 2.1, 2.2 |
 | `score_level_descriptions` | 30 | 5 ระดับ × 6 หัวข้อ |
-| `evaluation_category_weights` | — | ไม่มี seed — สร้างต่อการประเมิน (BU/GCP กำหนดค่าเองในแต่ละรอบ) |
+| `evaluation_category_weights` | — | ไม่มี seed — สร้างต่อการประเมิน (USER/GCP กำหนดค่าเองในแต่ละรอบ) |
 
 ---
 
@@ -622,14 +622,14 @@ total_score = (53.00 / 70) × 100 = **75.71** → Grade **B**
 
 | Rule | Implementation |
 |------|---------------|
-| BU ประเมินได้เฉพาะ Supplier ที่ได้รับอนุญาต | `employee_supplier_permissions` + API permission check |
+| USER ประเมินได้เฉพาะ Supplier ที่ได้รับอนุญาต | `employee_supplier_permissions` + API permission check |
 | GCP ประเมินได้ทุก Supplier | `employees.role = 'GCP'` bypass permission table |
-| 1 Session มีได้แค่ 1 BU + 1 GCP evaluation | `UNIQUE(session_id, role)` ใน `evaluations` |
+| 1 Session มีได้แค่ 1 USER + 1 GCP evaluation | `UNIQUE(session_id, role)` ใน `evaluations` |
 | แต่ละหัวข้อมีคะแนนเดียวต่อการประเมิน | `UNIQUE(evaluation_id, criterion_id)` ใน `evaluation_scores` |
 | คะแนนต้องอยู่ระหว่าง 1-5 | `CHECK(score BETWEEN 1 AND 5)` |
 | น้ำหนักต้อง min <= max | `CHECK(min_score <= max_score)` ใน `grade_thresholds` |
 | แต่ละ evaluation มีน้ำหนัก category ได้ครั้งเดียวต่อหมวด | `UNIQUE(evaluation_id, category_id)` ใน `evaluation_category_weights` |
-| role ต้องเป็น BU, GCP, หรือ ADMIN | `CHECK(role IN ('BU','GCP','ADMIN'))` |
+| role ต้องเป็น USER, GCP, หรือ ADMIN | `CHECK(role IN ('USER','GCP','ADMIN'))` |
 | product_type ต้องเป็น goods, services, หรือ both | `CHECK(product_type IN (...))` |
 | session status ต้องเป็นค่าที่กำหนด | `CHECK(status IN ('pending','in_progress','completed'))` |
 | ลบ employee → permission ถูกลบตาม | `ON DELETE CASCADE` ใน `employee_supplier_permissions` |

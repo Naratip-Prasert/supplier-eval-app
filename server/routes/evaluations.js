@@ -103,7 +103,7 @@ router.post('/', async (req, res) => {
     }
     const supplier = supResult.rows[0];
 
-    // 3. BU permission check — disabled for now (all users can evaluate any supplier)
+    // 3. USER permission check — disabled for now (all users can evaluate any supplier)
 
     // USER, GCP, ADMIN are all valid roles for evaluation submissions —
     // anything else (e.g. SUPERVISOR submitting through the legacy
@@ -234,7 +234,7 @@ router.post('/', async (req, res) => {
     const codes = Object.keys(scores);
     const criteriaResult = await client.query(
       `SELECT id, code, default_weight
-         FROM evaluation_criteria
+         FROM evaluation_sub_criteria
         WHERE code = ANY($1) AND is_active = TRUE AND criteria_set = ANY($2)`,
       [codes, criteriaSets]
     );
@@ -259,7 +259,7 @@ router.post('/', async (req, res) => {
     // breakdown (found auditing live data: ~50% of saved evaluations had
     // this exact mismatch).
     // Custom module items ("อื่นๆ พิมพ์เอง") are deliberately never seeded into
-    // evaluation_criteria — they're per-evaluation, free-typed by the
+    // evaluation_sub_criteria — they're per-evaluation, free-typed by the
     // evaluator (title + level text), persisted via custom_module_items
     // instead of a shared catalog. Their codes (CUSTOM.n) must still count
     // toward total_score even though criteriaMap can't resolve them.
@@ -324,7 +324,7 @@ router.post('/', async (req, res) => {
       }).catch(e => console.warn('[evaluations] thankyou email error:', e.message));
     }
 
-    // After commit: check if both BU+GCP have submitted for this session
+    // After commit: check if both USER+GCP have submitted for this session
     // If yes → create supervisor_review and notify supervisors (fire-and-forget)
     pool.query(
       `SELECT COUNT(*) AS cnt FROM evaluations WHERE session_id = $1 AND status = 'saved'`,
@@ -651,8 +651,8 @@ router.get('/:id', async (req, res) => {
          evs.note,
          evs.weighted_score AS "weightedScore"
        FROM evaluation_scores evs
-       JOIN evaluation_criteria  ec  ON ec.id  = evs.criterion_id
-       JOIN evaluation_categories cat ON cat.id = ec.category_id
+       JOIN evaluation_sub_criteria  ec  ON ec.id  = evs.criterion_id
+       JOIN evaluation_main_criteria cat ON cat.id = ec.category_id
        WHERE evs.evaluation_id = $1
        ORDER BY ec.display_order`,
       [req.params.id]

@@ -47,7 +47,15 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
   // esgSectionIndex and ESG itself shifts to esgSectionIndex + 1.
   const functionSectionIndex = esgSectionIndex;
   const esgSectionIndexInCriteria = esgSectionIndex === -1 ? -1 : esgSectionIndex + 1;
-  const allModuleCodes = Object.values(FUNCTION_MODULES).flatMap((m) => m.items.map((i) => i.no));
+  // Codes must include DB-only modules/items (e.g. an admin-added M8, or an
+  // admin-added 5th item on an existing module) — sourcing this from
+  // FUNCTION_MODULES alone (constants.js, hardcoded M1-M7) silently dropped
+  // those, so switching modules never assigned weight to them nor purged
+  // their stale scores when switching away.
+  const allModuleCodes = Array.from(new Set([
+    ...Object.values(FUNCTION_MODULES).flatMap((m) => m.items.map((i) => i.no)),
+    ...(funcMap ? Object.values(funcMap).flatMap((m) => (m.items ?? []).map((i) => i.no)) : []),
+  ]));
 
   const [moduleCode, setModuleCode] = useState(() => savedState?.moduleCode ?? null);
   const [customItems, setCustomItems] = useState(() => savedState?.customItems ?? []);
@@ -144,10 +152,13 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
   const funcSectionWeight = funcOverride?.totalWeight ?? functionSectionWeightFrom(RAW_CRITERIA);
   useEffect(() => {
     if (functionSectionIndex === -1) return;
+    // Prefer funcOverride.items (DB — reflects admin-added items/modules,
+    // e.g. an added M3.5 or a brand-new M8) over the hardcoded constants.js
+    // list; fall back to constants only while the DB hasn't loaded yet.
     const currentCodes = moduleCode === "custom"
       ? customItems.map((i) => i.no)
-      : moduleCode && FUNCTION_MODULES[moduleCode]
-        ? FUNCTION_MODULES[moduleCode].items.map((i) => i.no)
+      : moduleCode
+        ? (funcOverride?.items?.map((i) => i.no) ?? FUNCTION_MODULES[moduleCode]?.items.map((i) => i.no) ?? [])
         : [];
     const otherFixedCodes = allModuleCodes.filter((c) => !currentCodes.includes(c));
 
@@ -189,7 +200,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
       }
       return { ...prev, sections: { ...prev.sections, [functionSectionIndex]: sw }, items: newItems };
     });
-  }, [moduleCode, customItems, funcSectionWeight]);
+  }, [moduleCode, customItems, funcSectionWeight, funcOverride]);
 
   const allItems        = CRITERIA.flatMap((s) => s.items.filter((i) => !i.divider));
   const answered        = allItems.filter((item) => scores[item.no] != null).length;
@@ -476,7 +487,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
                 ahpW={si === functionSectionIndex ? null : si === esgSectionIndexInCriteria ? 6.94 : getAhpMain(section)}
               />
               {si === functionSectionIndex && (
-                <ModuleSelector value={moduleCode} onChange={setModuleCode} />
+                <ModuleSelector value={moduleCode} onChange={setModuleCode} funcMap={funcMap} />
               )}
               {si === functionSectionIndex && moduleCode === "custom" && (
                 <CustomModuleBuilder items={customItems} onChange={setCustomItems} />
@@ -517,7 +528,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
                 ahpW={si === functionSectionIndex ? null : si === esgSectionIndexInCriteria ? 6.94 : getAhpMain(section)}
               />
               {si === functionSectionIndex && (
-                <ModuleSelector value={moduleCode} onChange={setModuleCode} />
+                <ModuleSelector value={moduleCode} onChange={setModuleCode} funcMap={funcMap} />
               )}
               {si === functionSectionIndex && moduleCode === "custom" && (
                 <CustomModuleBuilder items={customItems} onChange={setCustomItems} />
@@ -883,10 +894,28 @@ const MODULE_LABELS = {
   m5: "M5 · Raw Material / RM-PM",
   m6: "M6 · Warehouse / 3PL",
   m7: "M7 · IT / Software / Service",
-  custom: "อื่นๆ (กำหนดเอง)",
 };
 
-function ModuleSelector({ value, onChange }) {
+// Module choices must include any module admin added beyond M1-M7 (e.g. M8)
+// — building this list from the hardcoded MODULE_LABELS alone meant a new
+// module never appeared as a selectable pill here even though it existed
+// in the DB and Parameter page. funcMap keys are the source of truth for
+// which modules currently exist; MODULE_LABELS only supplies friendlier
+// names for the known ones. "custom" is always appended last.
+function buildModuleOptions(funcMap) {
+  const keys = new Set(Object.keys(MODULE_LABELS));
+  if (funcMap) Object.keys(funcMap).forEach((k) => keys.add(k));
+  const sorted = Array.from(keys).sort((a, b) => {
+    const na = parseInt(a.replace(/\D/g, ""), 10) || 0;
+    const nb = parseInt(b.replace(/\D/g, ""), 10) || 0;
+    return na - nb;
+  });
+  const options = sorted.map((k) => [k, MODULE_LABELS[k] ?? (funcMap?.[k]?.nameTh || k.toUpperCase())]);
+  options.push(["custom", "อื่นๆ (กำหนดเอง)"]);
+  return options;
+}
+
+function ModuleSelector({ value, onChange, funcMap }) {
   const pill = (active) => ({
     padding: "7px 14px", borderRadius: 20, fontSize: 12, fontWeight: 700,
     cursor: "pointer", border: active ? "1.5px solid #6b3fa0" : "1.5px solid #d8cce8",
@@ -902,7 +931,7 @@ function ModuleSelector({ value, onChange }) {
       <span style={{ fontSize: 13, fontWeight: 700, color: "#5b2d90", width: "100%" }}>
         เลือกโมดูลที่จะประเมิน (Part 2 — Function Module):
       </span>
-      {Object.entries(MODULE_LABELS).map(([code, label]) => (
+      {buildModuleOptions(funcMap).map(([code, label]) => (
         <button key={code} type="button" style={pill(value === code)} onClick={() => onChange(code)}>
           {label}
         </button>

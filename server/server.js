@@ -75,65 +75,11 @@ const { startCronJobs } = require('./utils/cronJobs');
 
 pool.connect()
   .then(async client => {
-    await client.query(
-      `ALTER TABLE employees ADD COLUMN IF NOT EXISTS profile_picture TEXT`
-    ).catch(() => {});
-
-    await client.query(
-      `ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS raw_scores JSONB`
-    ).catch(() => {});
-
-    // auth.js / the default-admin bootstrap below both need these columns,
-    // but no tracked migration ever created them — only present today
-    // because they were added directly on the live DB at some point.
-    await client.query(`
-      ALTER TABLE employees ADD COLUMN IF NOT EXISTS email VARCHAR(200) UNIQUE;
-      ALTER TABLE employees ADD COLUMN IF NOT EXISTS password_hash TEXT;
-      ALTER TABLE employees ADD COLUMN IF NOT EXISTS reset_token VARCHAR(100);
-      ALTER TABLE employees ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMPTZ;
-    `).catch(err => console.warn('employees auth columns migration warning:', err.message));
-
-    // 'BU' (employees/evaluations/evaluation_tasks roles) and 'new_supplier'
-    // (evaluation_sessions.eval_type) were fully retired — confirmed 0 rows
-    // left anywhere, and every CHECK constraint below already rejects those
-    // values, so nothing can ever reintroduce them. The one-time rename
-    // UPDATEs that used to live here are gone; only the constraints (needed
-    // so a fresh install ends up with the right shape) remain.
-    //
-    // evaluations_role_check: this block is its sole source of truth.
-    // (The trigger function/trigger used to be created here too, but every
-    // startup redefines it 3 times in a row via CREATE OR REPLACE — only
-    // the last definition further down ever matters at runtime. Removed
-    // the first two dead redefinitions; only the constraint remains here.)
-    await client.query(`
-      ALTER TABLE evaluations DROP CONSTRAINT IF EXISTS evaluations_role_check;
-      ALTER TABLE evaluations
-        ADD CONSTRAINT evaluations_role_check
-        CHECK (role IN ('USER', 'GCP', 'ADMIN'));
-    `).catch(err => console.warn('role migration warning:', err.message));
-
-    // Backfill: sessions that already have both USER+GCP saved evaluations but are still pending/in_progress
-    await client.query(`
-      UPDATE evaluation_sessions es
-         SET final_score  = sub.avg_score,
-             final_grade  = (SELECT grade FROM grade_thresholds
-                              WHERE ROUND(sub.avg_score, 1) >= min_score
-                                AND ROUND(sub.avg_score, 1) <= max_score
-                              LIMIT 1),
-             status       = 'completed',
-             completed_at = COALESCE(es.completed_at, NOW())
-        FROM (
-          SELECT session_id,
-                 ROUND(AVG(total_score)::NUMERIC, 2) AS avg_score
-            FROM evaluations
-           WHERE role IN ('USER', 'GCP') AND status = 'saved'
-           GROUP BY session_id
-          HAVING COUNT(DISTINCT role) >= 2
-        ) sub
-       WHERE es.id = sub.session_id AND es.status != 'completed'
-    `).catch(err => console.warn('session backfill warning:', err.message));
-
-    // Fix grade thresholds to match frontend getGrade() logic
+    // Reference data that must always be present and correct — kept as an
+    // idempotent UPSERT (not a one-time migration) because seed.sql's copy
+    // of this table is stale (old 4-grade scheme with no F, wrong score
+    // boundaries) and nothing else in the app ever writes these rows, so
+    // this UPSERT is the only thing keeping them right.
     await client.query(`
       INSERT INTO grade_thresholds (grade, min_score, max_score, label_th, label_en, color_hex)
       VALUES
@@ -150,319 +96,32 @@ pool.connect()
         color_hex = EXCLUDED.color_hex
     `).catch(err => console.warn('grade_thresholds migration warning:', err.message));
 
-    // ── New schema migrations (v3) ──────────────────────────────
-    // suppliers: extra columns from Upload_Template
+    // group_labels: per-ESG-subgroup label overrides (Thai/English), sibling
+    // to the existing group_weights column — lets an admin rename/add/remove
+    // ESG sub-groups (Environment/Social/Governance) from the Parameter page
+    // instead of those 3 groups being permanently hardcoded in constants.js.
     await client.query(`
-      ALTER TABLE suppliers
-        ADD COLUMN IF NOT EXISTS tax_id           VARCHAR(30),
-        ADD COLUMN IF NOT EXISTS category         VARCHAR(100),
-        ADD COLUMN IF NOT EXISTS function_owner   VARCHAR(100),
-        ADD COLUMN IF NOT EXISTS job_value_thb    DECIMAL(15,2),
-        ADD COLUMN IF NOT EXISTS pta_approve_date DATE,
-        ADD COLUMN IF NOT EXISTS buyer_name       VARCHAR(200),
-        ADD COLUMN IF NOT EXISTS buyer_email      VARCHAR(200),
-        ADD COLUMN IF NOT EXISTS evaluator_name   VARCHAR(200),
-        ADD COLUMN IF NOT EXISTS evaluator_email  VARCHAR(200)
-    `).catch(err => console.warn('suppliers migration warning:', err.message));
+      ALTER TABLE evaluation_main_criteria ADD COLUMN IF NOT EXISTS group_labels JSONB;
+    `).catch(err => console.warn('group_labels column migration warning:', err.message));
 
-    // employees_role_check: single source of truth for this constraint's
-    // value list (the rename migration above only drops it + updates data).
-    await client.query(`
-      ALTER TABLE employees DROP CONSTRAINT IF EXISTS employees_role_check;
-      ALTER TABLE employees
-        ADD CONSTRAINT employees_role_check
-        CHECK (role IN ('USER', 'GCP', 'ADMIN', 'SUPERVISOR'))
-    `).catch(err => console.warn('employees role migration warning:', err.message));
-
-    // evaluation_sessions_eval_type_check: sole source of truth for the
-    // value list ('new_supplier' was retired — see the note above).
-    await client.query(`
-      ALTER TABLE evaluation_sessions DROP CONSTRAINT IF EXISTS evaluation_sessions_eval_type_check;
-      ALTER TABLE evaluation_sessions
-        ADD CONSTRAINT evaluation_sessions_eval_type_check
-        CHECK (eval_type IN ('post_eval','pre_eval','half_year','yearly'));
-
-      ALTER TABLE evaluation_sessions DROP CONSTRAINT IF EXISTS evaluation_sessions_status_check;
-      ALTER TABLE evaluation_sessions
-        ADD CONSTRAINT evaluation_sessions_status_check
-        CHECK (status IN ('pending','in_progress','pending_review','completed','returned'))
-    `).catch(err => console.warn('sessions constraint migration warning:', err.message));
-
-    // (A second dead redefinition of recalculate_session_final_score used to
-    // live here — removed; see note above the constraint block earlier in
-    // this file. Only the definition below is ever live at runtime.)
-
-    // Fix: a 'returned' session could never come back to 'pending_review'
-    // after re-submission, because the guard above excluded 'returned' —
-    // that's the exact status the supervisor "return for re-evaluation"
-    // flow sets, so the whole cycle was a dead end. Only 'completed'
-    // (already approved) should stay protected from being overwritten.
-    await client.query(`
-      CREATE OR REPLACE FUNCTION recalculate_session_final_score()
-      RETURNS TRIGGER AS $func$
-      DECLARE
-        v_session_id UUID;
-        v_user_score DECIMAL;
-        v_gcp_score  DECIMAL;
-        v_final      DECIMAL;
-        v_grade      VARCHAR(5);
-      BEGIN
-        v_session_id := NEW.session_id;
-        SELECT total_score INTO v_user_score
-          FROM evaluations
-         WHERE session_id = v_session_id AND role = 'USER' AND status = 'saved';
-        SELECT total_score INTO v_gcp_score
-          FROM evaluations
-         WHERE session_id = v_session_id AND role = 'GCP' AND status = 'saved';
-        IF v_user_score IS NOT NULL AND v_gcp_score IS NOT NULL THEN
-          v_final := ROUND((v_user_score + v_gcp_score) / 2.0, 2);
-          SELECT grade INTO v_grade
-            FROM grade_thresholds
-           WHERE ROUND(v_final, 1) >= min_score AND ROUND(v_final, 1) <= max_score
-           LIMIT 1;
-          UPDATE evaluation_sessions
-             SET final_score = v_final, final_grade = v_grade,
-                 status = 'pending_review'
-           WHERE id = v_session_id AND status != 'completed';
-        ELSE
-          UPDATE evaluation_sessions
-             SET status = 'in_progress'
-           WHERE id = v_session_id AND status IN ('pending', 'returned');
-        END IF;
-        RETURN NEW;
-      END;
-      $func$ LANGUAGE plpgsql;
-
-      DROP TRIGGER IF EXISTS trg_recalculate_score ON evaluations;
-      CREATE TRIGGER trg_recalculate_score
-        AFTER INSERT OR UPDATE ON evaluations
-        FOR EACH ROW EXECUTE FUNCTION recalculate_session_final_score();
-    `).catch(err => console.warn('returned-status trigger fix warning:', err.message));
-
-    // New tables
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS supplier_upload_batches (
-        id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        uploaded_by  UUID REFERENCES employees(id),
-        batch_type   VARCHAR(20) CHECK (batch_type IN ('pre_post_eval','half_year','yearly')),
-        filename     VARCHAR(300),
-        row_count    INTEGER DEFAULT 0,
-        status       VARCHAR(20) DEFAULT 'processing' CHECK (status IN ('processing','done','error')),
-        error_msg    TEXT,
-        created_at   TIMESTAMPTZ DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS evaluation_tasks (
-        id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        batch_id             UUID REFERENCES supplier_upload_batches(id),
-        session_id           UUID REFERENCES evaluation_sessions(id),
-        supplier_id          UUID REFERENCES suppliers(id),
-        assigned_employee_id UUID REFERENCES employees(id),
-        assigned_email       VARCHAR(200) NOT NULL,
-        assigned_name        VARCHAR(200),
-        role                 VARCHAR(10) CHECK (role IN ('ADMIN','USER','GCP','SUPERVISOR')),
-        due_date             DATE NOT NULL,
-        status               VARCHAR(20) DEFAULT 'pending'
-                               CHECK (status IN ('pending','completed','overdue')),
-        invitation_sent_at   TIMESTAMPTZ,
-        reminder_sent_at     TIMESTAMPTZ,
-        overdue_sent_at      TIMESTAMPTZ,
-        thankyou_sent_at     TIMESTAMPTZ,
-        created_at           TIMESTAMPTZ DEFAULT NOW()
-      );
-      CREATE INDEX IF NOT EXISTS idx_tasks_session   ON evaluation_tasks(session_id);
-      CREATE INDEX IF NOT EXISTS idx_tasks_employee  ON evaluation_tasks(assigned_employee_id);
-      CREATE INDEX IF NOT EXISTS idx_tasks_due_date  ON evaluation_tasks(due_date);
-      CREATE INDEX IF NOT EXISTS idx_tasks_status    ON evaluation_tasks(status);
-
-      CREATE TABLE IF NOT EXISTS email_logs (
-        id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        task_id     UUID REFERENCES evaluation_tasks(id),
-        email_type  VARCHAR(30),
-        to_email    VARCHAR(200) NOT NULL,
-        subject     VARCHAR(300),
-        status      VARCHAR(10) DEFAULT 'sent',
-        error_msg   TEXT,
-        sent_at     TIMESTAMPTZ DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS supervisor_reviews (
-        id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        session_id     UUID NOT NULL REFERENCES evaluation_sessions(id),
-        supervisor_id  UUID REFERENCES employees(id),
-        status         VARCHAR(20) DEFAULT 'pending'
-                         CHECK (status IN ('pending','approved','returned')),
-        notes          TEXT,
-        review_due     TIMESTAMPTZ,
-        reviewed_at    TIMESTAMPTZ,
-        created_at     TIMESTAMPTZ DEFAULT NOW()
-      );
-      CREATE INDEX IF NOT EXISTS idx_supervisor_reviews_session ON supervisor_reviews(session_id);
-      CREATE INDEX IF NOT EXISTS idx_supervisor_reviews_status  ON supervisor_reviews(status);
-    `).catch(err => console.warn('new tables migration warning:', err.message));
-
-    // notified_at: lets the daily cron's notifySupervisors job use a
-    // sent-flag (like reminder_sent_at/overdue_sent_at) instead of a
-    // "created today" date window, so a missed cron run doesn't
-    // permanently skip notifying supervisors about a pending review.
-    await client.query(`
-      ALTER TABLE supervisor_reviews ADD COLUMN IF NOT EXISTS notified_at TIMESTAMPTZ
-    `).catch(err => console.warn('supervisor_reviews notified_at migration warning:', err.message));
-
-    // evaluation_tasks_role_check: sole source of truth for the value list
-    // ('BU' was retired — see the note near the top of this function).
-    await client.query(`
-      ALTER TABLE evaluation_tasks DROP CONSTRAINT IF EXISTS evaluation_tasks_role_check;
-      ALTER TABLE evaluation_tasks
-        ADD CONSTRAINT evaluation_tasks_role_check
-        CHECK (role IN ('ADMIN','USER','GCP','SUPERVISOR'));
-    `).catch(err => console.warn('evaluation_tasks role migration warning:', err.message));
-
-    // evaluation_criteria: scope codes by criteria_set so PRE_CRITERIA and
-    // POST_CRITERIA (src/constants.js) can both store code "1.1" etc. with
-    // their own (different) meaning, then mirror constants.js into the DB
-    // so server-side scoring (routes/evaluations.js) recognizes every code
-    // the frontend form actually submits.
-    await client.query(`
-      ALTER TABLE evaluation_criteria ADD COLUMN IF NOT EXISTS criteria_set VARCHAR(10) NOT NULL DEFAULT 'legacy';
-      ALTER TABLE evaluation_criteria DROP CONSTRAINT IF EXISTS evaluation_criteria_code_key;
-      ALTER TABLE evaluation_criteria DROP CONSTRAINT IF EXISTS evaluation_criteria_set_code_key;
-      ALTER TABLE evaluation_criteria ADD CONSTRAINT evaluation_criteria_set_code_key UNIQUE (criteria_set, code);
-    `).catch(err => console.warn('evaluation_criteria criteria_set migration warning:', err.message));
-
-    // ── Category code rename migration (v4) ──────────────────────
-    // Must run BEFORE seedCriteriaFromConstants so the seeder sees new codes
-    // and does DO NOTHING instead of inserting duplicate rows.
-    // Old codes: PRE-CAT1..N, POST-CAT1..N, M1-CAT1..M7-CAT1
-    // New codes: PRE-CORE1..N / PRE-ESG, POST-CORE1..N / POST-ESG, FUNC-M1..FUNC-M7
-    // Idempotent: WHERE clauses only match old-style codes, so re-running is safe.
-    // Step A: remove new-format rows ONLY IF old-format rows still coexist
-    // (handles the edge case where seeder ran before this migration block existed)
-    await client.query(`
-      -- PRE/POST: delete new-format category rows when old-format still present
-      DELETE FROM evaluation_categories
-       WHERE (code ~ '^PRE-CORE[0-9]+$' OR code = 'PRE-ESG')
-         AND EXISTS (SELECT 1 FROM evaluation_categories WHERE code ~ '^PRE-CAT[0-9]+$');
-      DELETE FROM evaluation_categories
-       WHERE (code ~ '^POST-CORE[0-9]+$' OR code = 'POST-ESG')
-         AND EXISTS (SELECT 1 FROM evaluation_categories WHERE code ~ '^POST-CAT[0-9]+$');
-
-      -- Function modules: remove new-format criteria + categories if old-format criteria exist
-      DELETE FROM score_level_descriptions
-       WHERE criterion_id IN (SELECT id FROM evaluation_criteria WHERE criteria_set ~ '^m[0-9]+$')
-         AND EXISTS (SELECT 1 FROM evaluation_criteria WHERE criteria_set ~ '^module_m[0-9]+');
-      DELETE FROM evaluation_criteria
-       WHERE criteria_set ~ '^m[0-9]+$'
-         AND EXISTS (SELECT 1 FROM evaluation_criteria WHERE criteria_set ~ '^module_m[0-9]+');
-      DELETE FROM evaluation_categories
-       WHERE code ~ '^FUNC-M[0-9]+$'
-         AND EXISTS (SELECT 1 FROM evaluation_categories WHERE code ~ '^[A-Z][0-9]+-CAT');
-    `).catch(err => console.warn('pre-migration cleanup warning:', err.message));
-
-    // Step B: rename old-format codes to new-format
-    await client.query(`
-      UPDATE evaluation_categories
-         SET code = regexp_replace(code, '^PRE-CAT([0-9]+)$', 'PRE-CORE\\1')
-       WHERE code ~ '^PRE-CAT[0-9]+$' AND name_th NOT ILIKE '%ESG%';
-    `).catch(err => console.warn('rename PRE-CORE warning:', err.message));
-    await client.query(`
-      UPDATE evaluation_categories SET code = 'PRE-ESG'
-       WHERE code ~ '^PRE-CAT[0-9]+$' AND name_th ILIKE '%ESG%';
-    `).catch(err => console.warn('rename PRE-ESG warning:', err.message));
-    await client.query(`
-      UPDATE evaluation_categories
-         SET code = regexp_replace(code, '^POST-CAT([0-9]+)$', 'POST-CORE\\1')
-       WHERE code ~ '^POST-CAT[0-9]+$' AND name_th NOT ILIKE '%ESG%';
-    `).catch(err => console.warn('rename POST-CORE warning:', err.message));
-    await client.query(`
-      UPDATE evaluation_categories SET code = 'POST-ESG'
-       WHERE code ~ '^POST-CAT[0-9]+$' AND name_th ILIKE '%ESG%';
-    `).catch(err => console.warn('rename POST-ESG warning:', err.message));
-    await client.query(`
-      UPDATE evaluation_categories
-         SET code = 'FUNC-' || regexp_replace(code, '^([A-Z][0-9]+)-CAT.*$', '\\1')
-       WHERE code ~ '^[A-Z][0-9]+-CAT';
-    `).catch(err => console.warn('rename FUNC-M warning:', err.message));
-    await client.query(`
-      UPDATE evaluation_criteria
-         SET criteria_set = regexp_replace(criteria_set, '^module_', '')
-       WHERE criteria_set ~ '^module_m[0-9]+';
-    `).catch(err => console.warn('rename criteria_set warning:', err.message));
-
-    // ── Drop unused tables + legacy seed data ────────────────────
-    await client.query(`
-      -- evaluation_category_weights: defined in schema but never queried by any route
-      DROP TABLE IF EXISTS evaluation_category_weights;
-
-      -- Legacy placeholder rows from seed.sql (criteria_set='legacy', codes CAT1/CAT2)
-      DELETE FROM score_level_descriptions
-       WHERE criterion_id IN (
-         SELECT id FROM evaluation_criteria WHERE criteria_set = 'legacy'
-       );
-      DELETE FROM evaluation_criteria WHERE criteria_set = 'legacy';
-      DELETE FROM evaluation_categories WHERE code IN ('CAT1', 'CAT2');
-    `).catch(err => console.warn('cleanup migration warning:', err.message));
-
-    // ── is_active soft-delete for categories (v5) ───────────────
-    await client.query(`
-      ALTER TABLE evaluation_categories ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
-      UPDATE evaluation_categories SET is_active = TRUE WHERE is_active IS NULL;
-    `).catch(err => console.warn('evaluation_categories is_active migration warning:', err.message));
-
-    // ── ESG sub-group weights (v6b) ──────────────────────────────
-    // group_weights stores per-sub-group % within the ESG section:
-    // { "1": 33.33, "2": 33.33, "3": 33.34 } — group number → % of section weight.
-    await client.query(`
-      ALTER TABLE evaluation_categories ADD COLUMN IF NOT EXISTS group_weights JSONB;
-    `).catch(err => console.warn('group_weights migration warning:', err.message));
-
-    // ── ESG item code rename (v5) ────────────────────────────────
-    // Old: 5.1.1 / F5.1.2 (section prefix + subsection + item)
-    // New: ESG1.1 / ESGF1.2 (subsection + item, no section prefix)
-    // Idempotent: ESG/ESGF codes don't match the old-format WHERE clauses.
-    await client.query(`
-      UPDATE evaluation_criteria
-         SET code = 'ESG' || regexp_replace(code, '^\\d+\\.(\\d+)\\.(\\d+)$', '\\1.\\2')
-       WHERE criteria_set IN ('pre_eval', 'post_eval')
-         AND code ~ '^\\d+\\.\\d+\\.\\d+$';
-
-      UPDATE evaluation_criteria
-         SET code = 'ESGF' || regexp_replace(code, '^F\\d+\\.(\\d+)\\.(\\d+)$', '\\1.\\2')
-       WHERE criteria_set IN ('pre_eval', 'post_eval')
-         AND code ~ '^F\\d+\\.\\d+\\.\\d+$';
-    `).catch(err => console.warn('ESG item code rename warning:', err.message));
-
-    // ── Fix CORE/ESG display_order collision (v6) ───────────────
-    // New CORE sections added before this fix got MAX(display_order)+1 across
-    // the whole PRE-% family, landing them after ESG.
-    // Step 1: pull those CORE sections up to ESG's current slot.
-    // Step 2: push ESG to MAX(CORE)+1 so it always trails the CORE group.
-    await client.query(`
-      UPDATE evaluation_categories c
-         SET display_order = esg.display_order
-        FROM evaluation_categories esg
-       WHERE esg.code = regexp_replace(c.code, '-CORE\\d+$', '-ESG')
-         AND c.code  ~ '^(PRE|POST)-CORE\\d+$'
-         AND c.display_order > esg.display_order;
-    `).catch(err => console.warn('CORE/ESG order fix step-1 warning:', err.message));
-
-    await client.query(`
-      UPDATE evaluation_categories esg
-         SET display_order = sub.max_core + 1
-        FROM (
-          SELECT regexp_replace(code, '-CORE\\d+$', '-ESG') AS esg_code,
-                 MAX(display_order) AS max_core
-            FROM evaluation_categories
-           WHERE code ~ '^(PRE|POST)-CORE\\d+$'
-           GROUP BY esg_code
-        ) sub
-       WHERE esg.code = sub.esg_code
-         AND esg.code IN ('PRE-ESG', 'POST-ESG');
-    `).catch(err => console.warn('CORE/ESG order fix step-2 warning:', err.message));
-
+    // ── DEAD-CODE REMOVAL NOTE (2026-07-08) ──────────────────────
+    // A long chain of one-time schema/data migrations used to run here on
+    // every startup: employees/evaluations/suppliers column adds, CHECK
+    // constraint rebuilds after 'BU'/'new_supplier' were retired, a session
+    // final_score backfill, CREATE TABLE IF NOT EXISTS for
+    // supplier_upload_batches/evaluation_tasks/email_logs/supervisor_reviews
+    // (+ their indexes and a later notified_at column add), a trigger-
+    // function redefinition (the 'returned' status fix), category code
+    // renames (PRE-CAT→PRE-CORE etc.), ESG item code renames (5.1.1→ESG1.1),
+    // and is_active/group_weights/level_values column adds. Removed after
+    // confirming directly against the live DB that every one of them was
+    // permanently satisfied (0 old-format rows anywhere, every column/
+    // table/constraint/trigger already present and matching). Their
+    // end-state is now schema.sql's job to document for any future fresh
+    // install — keep schema.sql in sync if the shape changes again.
     const { seedCriteriaFromConstants } = require('./utils/seedCriteriaFromConstants');
     await seedCriteriaFromConstants(client)
-      .then(() => console.log('✅ evaluation_criteria seeded from src/constants.js'))
+      .then(() => console.log('✅ evaluation_sub_criteria seeded from src/constants.js'))
       .catch(err => console.warn('criteria seed warning:', err.message));
 
     // Create default ADMIN account if none exists. The bootstrap password
@@ -486,10 +145,6 @@ pool.connect()
       );
       console.log(`✅ Admin account created  →  ID: ADMIN-001  |  Password: ${tempPassword}  (save this now — it is not recoverable, there is no self-service reset)`);
     }
-
-    await client.query(`
-      ALTER TABLE evaluation_criteria ADD COLUMN IF NOT EXISTS level_values JSONB;
-    `).catch(err => console.warn('level_values column migration warning:', err.message));
 
     client.release();
     console.log('✅ PostgreSQL connected');

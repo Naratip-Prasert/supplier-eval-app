@@ -148,7 +148,7 @@ router.patch('/:vendorCode', async (req, res) => {
 });
 
 // GET /api/suppliers/:vendorCode/permission?employeeId=EMP-001
-// Checks whether a BU employee has permission to evaluate this supplier (req 1).
+// Checks whether a USER employee has permission to evaluate this supplier (req 1).
 // GCP employees always have permission.
 router.get('/:vendorCode/permission', async (req, res) => {
   const { vendorCode } = req.params;
@@ -186,7 +186,7 @@ router.get('/:vendorCode/permission', async (req, res) => {
       return res.json({ hasPermission: true });
     }
 
-    // BU: check permissions table
+    // USER: check permissions table
     const permResult = await pool.query(
       `SELECT 1 FROM employee_supplier_permissions
         WHERE employee_id = $1 AND supplier_id = $2`,

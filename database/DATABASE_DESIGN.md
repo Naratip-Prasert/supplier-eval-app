@@ -1,4 +1,4 @@
-# Database Design — Supplier Performance Evaluation System (SPE)
+# Database Design — Supplier Performance Evaluation System (SPES)
 ## PostgreSQL / Supabase Schema v2.0
 
 ---
@@ -25,7 +25,7 @@ suppliers ──── employee_supplier_permissions    evaluation_sessions
                                                              │
                                                              │ (references)
                                                              ▼
-                                              evaluation_criteria ── evaluation_categories
+                                              evaluation_sub_criteria ── evaluation_main_criteria
                                               score_level_descriptions
 
 grade_thresholds (standalone lookup)
@@ -77,7 +77,7 @@ Employee master data — validates employee ID and auto-fills dept + job on the 
 | full_name     | VARCHAR(200)| NOT NULL                    |                              |
 | department_id | UUID        | FK → departments            | auto-fill on ID entry        |
 | job_title_id  | UUID        | FK → job_titles             | auto-fill on ID entry        |
-| role          | VARCHAR(10) | CHECK IN ('BU','GCP','ADMIN') | controls permissions       |
+| role          | VARCHAR(10) | CHECK IN ('USER','GCP','ADMIN') | controls permissions       |
 | is_active     | BOOLEAN     | DEFAULT TRUE                |                              |
 | created_at    | TIMESTAMPTZ | DEFAULT NOW()               |                              |
 | updated_at    | TIMESTAMPTZ | auto-updated by trigger     |                              |
@@ -87,7 +87,7 @@ Employee master data — validates employee ID and auto-fills dept + job on the 
 **Requirement mapping:**
 - Req 2: `employee_id` is looked up before evaluation can start
 - Req 11: querying by `employee_id` returns `department` + `job_title` to auto-fill form
-- Req 1: `role = 'BU'` users are restricted to suppliers in `employee_supplier_permissions`
+- Req 1: `role = 'USER'` users are restricted to suppliers in `employee_supplier_permissions`
 
 ---
 
@@ -109,7 +109,7 @@ Supplier master data — frontend validates vendor code and name against this ta
 ---
 
 ### 5. `employee_supplier_permissions`
-Controls which BU employees can evaluate which suppliers (Req 1). GCP users can evaluate all suppliers (seeded accordingly).
+Controls which USER employees can evaluate which suppliers (Req 1). GCP users can evaluate all suppliers (seeded accordingly).
 
 | Column      | Type        | Constraints                             | Notes                 |
 |-------------|-------------|-----------------------------------------|-----------------------|
@@ -123,7 +123,7 @@ Controls which BU employees can evaluate which suppliers (Req 1). GCP users can 
 
 ---
 
-### 6. `evaluation_categories`
+### 6. `evaluation_main_criteria`
 Top-level groupings (e.g., Quality, Delivery).
 
 | Column        | Type        | Constraints      | Notes                          |
@@ -138,13 +138,13 @@ Top-level groupings (e.g., Quality, Delivery).
 
 ---
 
-### 7. `evaluation_criteria`
+### 7. `evaluation_sub_criteria`
 Individual scoring items within a category (Req 9: weights configurable per eval).
 
 | Column         | Type        | Constraints                  | Notes                           |
 |----------------|-------------|------------------------------|---------------------------------|
 | id             | UUID        | PK                           |                                 |
-| category_id    | UUID        | FK → evaluation_categories   |                                 |
+| category_id    | UUID        | FK → evaluation_main_criteria   |                                 |
 | code           | VARCHAR(20) | UNIQUE, NOT NULL             | "1.1", "1.2", "2.1"            |
 | name_th        | VARCHAR(400)| NOT NULL                     |                                 |
 | name_en        | VARCHAR(400)|                              |                                 |
@@ -162,7 +162,7 @@ The text for each 1–5 score level per criterion (what each number means).
 | Column       | Type    | Constraints                  | Notes                     |
 |--------------|---------|------------------------------|---------------------------|
 | id           | UUID    | PK                           |                           |
-| criterion_id | UUID    | FK → evaluation_criteria     |                           |
+| criterion_id | UUID    | FK → evaluation_sub_criteria     |                           |
 | level        | INTEGER | CHECK BETWEEN 1 AND 5        |                           |
 | description  | TEXT    | NOT NULL                     | shown in evaluation form  |
 
@@ -171,7 +171,7 @@ The text for each 1–5 score level per criterion (what each number means).
 ---
 
 ### 9. `evaluation_sessions`
-One evaluation event for a supplier. Groups the BU and GCP evaluations together so their scores can be averaged (Req 3, 6, 7).
+One evaluation event for a supplier. Groups the USER and GCP evaluations together so their scores can be averaged (Req 3, 6, 7).
 
 | Column       | Type        | Constraints                              | Notes                                  |
 |--------------|-------------|------------------------------------------|----------------------------------------|
@@ -180,12 +180,12 @@ One evaluation event for a supplier. Groups the BU and GCP evaluations together 
 | eval_type    | VARCHAR(20) | CHECK IN ('new_supplier','re_evaluation')| Req 7: pre-eval type categorization    |
 | period       | VARCHAR(50) |                                          | "Monthly", "Quarterly", "Annual"       |
 | status       | VARCHAR(20) | DEFAULT 'pending'                        | pending → in_progress → completed      |
-| final_score  | DECIMAL(5,2)|                                          | avg of BU + GCP, set by trigger        |
+| final_score  | DECIMAL(5,2)|                                          | avg of USER + GCP, set by trigger        |
 | final_grade  | VARCHAR(5)  |                                          | 'A'/'B'/'C'/'D', set by trigger        |
 | initiated_by | UUID        | FK → employees                           | who started this session               |
 | created_at   | TIMESTAMPTZ | DEFAULT NOW()                            |                                        |
 | updated_at   | TIMESTAMPTZ | auto-updated by trigger                  |                                        |
-| completed_at | TIMESTAMPTZ |                                          | set when both BU+GCP submit            |
+| completed_at | TIMESTAMPTZ |                                          | set when both USER+GCP submit            |
 
 **Indexes:** `supplier_id`, `status`, `eval_type`, `created_at DESC`
 
@@ -197,14 +197,14 @@ pending ──(first eval saved)──► in_progress ──(both evals saved)�
 ---
 
 ### 10. `evaluations`
-Individual evaluation record by one person (BU or GCP). `status='draft'` means editable; `status='saved'` means locked after confirmation dialog (Req 4, 10).
+Individual evaluation record by one person (USER or GCP). `status='draft'` means editable; `status='saved'` means locked after confirmation dialog (Req 4, 10).
 
 | Column       | Type        | Constraints                     | Notes                                  |
 |--------------|-------------|---------------------------------|----------------------------------------|
 | id           | UUID        | PK                              |                                        |
 | session_id   | UUID        | FK → evaluation_sessions        |                                        |
 | employee_id  | UUID        | FK → employees, NOT NULL        |                                        |
-| role         | VARCHAR(10) | CHECK IN ('BU','GCP')           |                                        |
+| role         | VARCHAR(10) | CHECK IN ('USER','GCP')           |                                        |
 | product_type | VARCHAR(20) | CHECK IN ('goods','services','both') |                                   |
 | status       | VARCHAR(10) | DEFAULT 'draft'                 | 'draft' = editable, 'saved' = locked   |
 | total_score  | DECIMAL(5,2)|                                 | 0–100, computed from scores            |
@@ -213,7 +213,7 @@ Individual evaluation record by one person (BU or GCP). `status='draft'` means e
 | created_at   | TIMESTAMPTZ | DEFAULT NOW()                   |                                        |
 | updated_at   | TIMESTAMPTZ | auto-updated by trigger         |                                        |
 
-**Unique:** `(session_id, role)` — enforces exactly one BU + one GCP eval per session
+**Unique:** `(session_id, role)` — enforces exactly one USER + one GCP eval per session
 
 ---
 
@@ -224,7 +224,7 @@ Per-criterion score for each evaluation. `weight` can differ from `default_weigh
 |----------------|-------------|----------------------------------|-----------------------------------------|
 | id             | UUID        | PK                               |                                         |
 | evaluation_id  | UUID        | FK → evaluations, NOT NULL       |                                         |
-| criterion_id   | UUID        | FK → evaluation_criteria, NOT NULL |                                       |
+| criterion_id   | UUID        | FK → evaluation_sub_criteria, NOT NULL |                                       |
 | weight         | DECIMAL(5,2)| NOT NULL                         | agreed weight for this eval (req 9)     |
 | score          | INTEGER     | CHECK BETWEEN 1 AND 5, nullable  | NULL = not yet filled (req 5 alert)     |
 | note           | TEXT        |                                  | optional comment                        |
@@ -263,7 +263,7 @@ Automatically sets `updated_at = NOW()`.
 Fires AFTER UPDATE OF `status` ON `evaluations` WHEN `NEW.status = 'saved'`.
 
 Logic:
-1. Fetches saved BU score and saved GCP score for the session
+1. Fetches saved USER score and saved GCP score for the session
 2. If both exist → `final_score = (bu + gcp) / 2`, resolves grade from `grade_thresholds`, sets `status = 'completed'`
 3. If only one exists → sets session `status = 'in_progress'`
 
@@ -287,9 +287,9 @@ final_score (session) = (bu_total_score + gcp_total_score) / 2
 
 | # | Requirement                                           | Table(s)                                                    |
 |---|-------------------------------------------------------|-------------------------------------------------------------|
-| 1 | BU can only evaluate permitted suppliers              | `employee_supplier_permissions`                             |
+| 1 | USER can only evaluate permitted suppliers              | `employee_supplier_permissions`                             |
 | 2 | EmployeeID validation before evaluation               | `employees.employee_id` (UNIQUE + lookup)                   |
-| 3 | Final score = average of BU + GCP                     | `evaluation_sessions.final_score` + trigger                 |
+| 3 | Final score = average of USER + GCP                     | `evaluation_sessions.final_score` + trigger                 |
 | 4 | Edit form before save (draft mode)                    | `evaluations.status = 'draft'`                              |
 | 5 | Alert for missing scores                              | `evaluation_scores.score` nullable; frontend checks         |
 | 6 | Evaluation history in summary page                    | `evaluation_sessions` + `evaluations` + timestamps          |
@@ -315,7 +315,7 @@ SELECT e.employee_id, e.full_name, e.role,
  WHERE e.employee_id = $1 AND e.is_active = TRUE;
 ```
 
-### Check supplier permission for BU employee (Req 1)
+### Check supplier permission for USER employee (Req 1)
 ```sql
 SELECT 1
   FROM employee_supplier_permissions p
@@ -353,7 +353,7 @@ SELECT ev.role, ev.total_score, ev.grade, ev.status,
        evs.weight, evs.score, evs.note, evs.weighted_score
   FROM evaluations ev
   JOIN evaluation_scores evs ON evs.evaluation_id = ev.id
-  JOIN evaluation_criteria ec ON ec.id = evs.criterion_id
+  JOIN evaluation_sub_criteria ec ON ec.id = evs.criterion_id
  WHERE ev.session_id = $1
  ORDER BY ec.display_order;
 ```

@@ -381,6 +381,39 @@ function AddSectionRow({ onSave, onCancel, saving }) {
   );
 }
 
+// ── AddEsgGroupInline — inline form for adding a new ESG sub-group ───
+function AddEsgGroupInline({ onSave, onCancel, saving }) {
+  const [th, setTh] = useState('');
+  const [en, setEn] = useState('');
+  const inputStyle = {
+    fontFamily: FONT, fontSize: 12, border: '1.5px solid #a5d6a7',
+    borderRadius: 6, padding: '5px 8px', outline: 'none', boxSizing: 'border-box', width: 130,
+  };
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px',
+      background: '#f0fff4', borderRadius: 8, border: '1.5px dashed #a5d6a7', minWidth: 150,
+    }}>
+      <input value={th} onChange={e => setTh(e.target.value)} placeholder="ชื่อกลุ่ม (ไทย)" style={inputStyle} />
+      <input value={en} onChange={e => setEn(e.target.value)} placeholder="Group name (English)" style={inputStyle} />
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button onClick={() => { if (th.trim()) onSave(th.trim(), en.trim()); }}
+          disabled={saving || !th.trim()}
+          style={{
+            padding: '5px 12px', borderRadius: 6, border: 'none', flex: 1,
+            background: '#1b5e20', color: '#fff', fontFamily: FONT, fontSize: 12,
+            fontWeight: 700, cursor: saving || !th.trim() ? 'not-allowed' : 'pointer',
+          }}>
+          {saving ? <RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} /> : 'เพิ่ม'}
+        </button>
+        <button onClick={onCancel} style={{
+          padding: '5px 10px', borderRadius: 6, border: '1.5px solid #ddd',
+          background: '#fff', fontFamily: FONT, fontSize: 12, cursor: 'pointer',
+        }}>ยกเลิก</button>
+      </div>
+    </div>
+  );
+}
 
 // ── ItemRow ───────────────────────────────────────────────────
 function ItemRow({ item, onUpdate, onOpenLevels, saving, disabled, effectiveWeight, hideWeight, editableEffective, esgEditable }) {
@@ -481,11 +514,45 @@ const TH = {
   borderBottom: "1px solid #dce8dc",
 };
 
-const ESG_GROUPS = [
-  { key: "1", label: "สิ่งแวดล้อม", en: "Environment", color: "#2e7d32" },
-  { key: "2", label: "สังคม",       en: "Social",       color: "#1565c0" },
-  { key: "3", label: "ธรรมาภิบาล", en: "Governance",   color: "#6a1b9a" },
-];
+// Default labels/colors for the original 3 ESG sub-groups — used whenever
+// admin hasn't overridden a group's label (groupLabels[key] absent). Colors
+// beyond these 3 (for admin-added groups) come from GROUP_COLOR_PALETTE.
+const DEFAULT_ESG_GROUP_TEXT = {
+  "1": { label: "สิ่งแวดล้อม", en: "Environment" },
+  "2": { label: "สังคม",       en: "Social" },
+  "3": { label: "ธรรมาภิบาล", en: "Governance" },
+};
+const DEFAULT_ESG_COLORS = { "1": "#2e7d32", "2": "#1565c0", "3": "#6a1b9a" };
+const GROUP_COLOR_PALETTE = ["#2e7d32", "#1565c0", "#6a1b9a", "#e65100", "#00838f", "#ad1457"];
+
+// Derives the *live* group list for this ESG section from whatever's
+// actually there — section.items' code prefixes (ESG{n}./ESGF{n}.) union
+// groupWeights' key set (covers a just-added, still-empty group) — instead
+// of a fixed 3-entry array, so admin-added/removed groups show up correctly.
+function deriveEsgGroups(section, groupWeights, groupLabels) {
+  const keys = new Set();
+  (section.items ?? []).forEach(it => {
+    if (it.isActive === false) return;
+    const m = it.code?.match(/^ESGF?(\d+)\./i);
+    if (m) keys.add(m[1]);
+  });
+  Object.keys(groupWeights ?? {}).forEach(k => keys.add(k));
+  // Fallback to the original 3 only when nothing else is known yet (fresh
+  // section, groupWeights never saved) — matches today's behavior.
+  if (keys.size === 0) ["1", "2", "3"].forEach(k => keys.add(k));
+
+  return [...keys]
+    .sort((a, b) => Number(a) - Number(b))
+    .map((key, i) => {
+      const override = groupLabels?.[key];
+      return {
+        key,
+        label: override?.th ?? DEFAULT_ESG_GROUP_TEXT[key]?.label ?? `กลุ่มที่ ${key}`,
+        en:    override?.en ?? DEFAULT_ESG_GROUP_TEXT[key]?.en ?? "",
+        color: DEFAULT_ESG_COLORS[key] ?? GROUP_COLOR_PALETTE[i % GROUP_COLOR_PALETTE.length],
+      };
+    });
+}
 
 // ── SectionCard ───────────────────────────────────────────────
 function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, esgFilter, hideWeights, effectiveEditable, onDelete }) {
@@ -498,8 +565,12 @@ function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, e
   const [groupWeights, setGroupWeights] = useState(
     () => section.groupWeights ? { ...section.groupWeights } : { ...defaultGW }
   );
+  const [groupLabels, setGroupLabels] = useState(() => ({ ...(section.groupLabels ?? {}) }));
   const [savingGW, setSavingGW] = useState(false);
-  const gwTotal = ESG_GROUPS.reduce((s, g) => s + (parseFloat(groupWeights[g.key]) || 0), 0);
+  const [addingGroup, setAddingGroup] = useState(false);
+  const [removingGroupKey, setRemovingGroupKey] = useState(null);
+  const liveGroups = deriveEsgGroups(section, groupWeights, groupLabels);
+  const gwTotal = liveGroups.reduce((s, g) => s + (parseFloat(groupWeights[g.key]) || 0), 0);
   const gwOk    = Math.abs(gwTotal - 100) < 0.1;
 
   const saveGroupWeights = async () => {
@@ -516,10 +587,63 @@ function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, e
         ...computeEsgEffectiveWeights(section.items, section.totalWeight, groupWeights, 'ho'),
         ...computeEsgEffectiveWeights(section.items, section.totalWeight, groupWeights, 'factory'),
       };
-      await onUpdate("save-cat", section.id, { groupWeights, itemWeights });
+      await onUpdate("save-cat", section.id, { groupWeights, groupLabels, itemWeights });
     } finally {
       setSavingGW(false);
     }
+  };
+
+  // Add a brand-new ESG sub-group: next unused numeric key, weight rebalanced
+  // to an equal split across (current groups + 1). Items for it get added
+  // afterward through the normal "add item" flow using this key as the code
+  // prefix (e.g. ESG4.1) — applyOverrides() synthesizes the group's divider
+  // once it sees groupWeights carrying this key.
+  const handleAddGroup = async (th, en) => {
+    const existingKeys = liveGroups.map(g => Number(g.key));
+    const nextKey = String((existingKeys.length ? Math.max(...existingKeys) : 0) + 1);
+    const nextCount = liveGroups.length + 1;
+    const each = r2adm(100 / nextCount);
+    const newGW = {};
+    liveGroups.forEach((g, i) => { newGW[g.key] = i === liveGroups.length - 1 ? r2adm(100 - each * (nextCount - 1)) : each; });
+    newGW[nextKey] = each;
+    const newGL = { ...groupLabels, [nextKey]: { th, en } };
+    setGroupWeights(newGW);
+    setGroupLabels(newGL);
+    setAddingGroup(false);
+    setSavingGW(true);
+    try {
+      const itemWeights = {
+        ...computeEsgEffectiveWeights(section.items, section.totalWeight, newGW, 'ho'),
+        ...computeEsgEffectiveWeights(section.items, section.totalWeight, newGW, 'factory'),
+      };
+      await onUpdate("save-cat", section.id, { groupWeights: newGW, groupLabels: newGL, itemWeights });
+    } finally {
+      setSavingGW(false);
+    }
+  };
+
+  // Remove an ESG sub-group entirely (including the original 3) — soft-
+  // deletes every item under its code prefix and rebalances the remaining
+  // groups to an equal split. At least 1 group must remain.
+  const handleRemoveGroup = async (key) => {
+    if (liveGroups.length <= 1) return;
+    const remaining = liveGroups.filter(g => g.key !== key);
+    const each = r2adm(100 / remaining.length);
+    const newGW = {};
+    remaining.forEach((g, i) => { newGW[g.key] = i === remaining.length - 1 ? r2adm(100 - each * (remaining.length - 1)) : each; });
+    const newGL = { ...groupLabels };
+    delete newGL[key];
+    const itemIds = section.items
+      .filter(it => !it.divider && new RegExp(`^ESGF?${key}\\.`, 'i').test(it.code ?? ''))
+      .map(it => it.id);
+    const itemWeights = {
+      ...computeEsgEffectiveWeights(section.items, section.totalWeight, newGW, 'ho'),
+      ...computeEsgEffectiveWeights(section.items, section.totalWeight, newGW, 'factory'),
+    };
+    setGroupWeights(newGW);
+    setGroupLabels(newGL);
+    setRemovingGroupKey(null);
+    await onUpdate("remove-esg-group", section.id, { itemIds, groupWeights: newGW, groupLabels: newGL, itemWeights });
   };
   const isSavingSection = saving?.type === "category" && saving?.id === section.id;
   const isSavingNew     = saving?.type === "new-item";
@@ -613,19 +737,65 @@ function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, e
           background: "#f9fdf9",
         }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: "#333", marginBottom: 10 }}>
-            น้ำหนักหมวดย่อย ESG
+            น้ำหนักหมวดย่อย
             <span style={{ fontWeight: 400, color: "#999", marginLeft: 6, fontSize: 11 }}>รวมต้องได้ 100%</span>
           </div>
-          <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-            {ESG_GROUPS.map(g => (
-              <div key={g.key} style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 130 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
+            {liveGroups.map(g => (
+              <div key={g.key} style={{
+                display: "flex", flexDirection: "column", gap: 4, minWidth: 150,
+                padding: 8, borderRadius: 8, background: removingGroupKey === g.key ? "#fff5f5" : "transparent",
+              }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                   <div style={{
                     width: 10, height: 10, borderRadius: "50%", background: g.color, flexShrink: 0,
                   }} />
-                  <span style={{ fontSize: 11, fontWeight: 700, color: g.color }}>{g.label}</span>
-                  <span style={{ fontSize: 10, color: "#aaa" }}>{g.en}</span>
+                  <input
+                    value={g.label} disabled={disabled}
+                    onChange={e => setGroupLabels(prev => ({ ...prev, [g.key]: { ...prev[g.key], th: e.target.value, en: prev[g.key]?.en ?? g.en } }))}
+                    placeholder="ชื่อกลุ่ม (ไทย)"
+                    style={{
+                      flex: 1, minWidth: 0, fontFamily: FONT, fontSize: 11, fontWeight: 700, color: g.color,
+                      border: "1px solid transparent", borderRadius: 4, padding: "2px 4px", outline: "none", background: "transparent",
+                    }}
+                    onFocus={e => (e.target.style.borderColor = `${g.color}60`)}
+                    onBlur={e => (e.target.style.borderColor = "transparent")}
+                  />
+                  {!disabled && (
+                    removingGroupKey === g.key ? (
+                      <span style={{ display: "flex", gap: 3, flexShrink: 0 }}>
+                        <button onClick={() => handleRemoveGroup(g.key)} title="ยืนยันลบกลุ่ม"
+                          style={{ background: "#b71c1c", color: "#fff", border: "none", borderRadius: 4, fontSize: 10, padding: "2px 6px", cursor: "pointer", fontFamily: FONT, fontWeight: 700 }}>
+                          ลบ
+                        </button>
+                        <button onClick={() => setRemovingGroupKey(null)} title="ยกเลิก"
+                          style={{ background: "#fff", color: "#666", border: "1px solid #ddd", borderRadius: 4, fontSize: 10, padding: "2px 6px", cursor: "pointer", fontFamily: FONT }}>
+                          ยกเลิก
+                        </button>
+                      </span>
+                    ) : (
+                      <button onClick={() => setRemovingGroupKey(g.key)} title="ลบกลุ่มนี้ (รวมหัวข้อทั้งหมดในกลุ่ม)"
+                        disabled={liveGroups.length <= 1}
+                        style={{
+                          background: "none", border: "none", cursor: liveGroups.length <= 1 ? "not-allowed" : "pointer",
+                          color: liveGroups.length <= 1 ? "#ddd" : "#ccc", padding: 2, flexShrink: 0, lineHeight: 1,
+                        }}>
+                        <Trash2 size={12} />
+                      </button>
+                    )
+                  )}
                 </div>
+                <input
+                  value={g.en} disabled={disabled}
+                  onChange={e => setGroupLabels(prev => ({ ...prev, [g.key]: { ...prev[g.key], th: prev[g.key]?.th ?? g.label, en: e.target.value } }))}
+                  placeholder="Group name (English)"
+                  style={{
+                    fontFamily: FONT, fontSize: 10, color: "#aaa",
+                    border: "1px solid transparent", borderRadius: 4, padding: "1px 4px", outline: "none", background: "transparent",
+                  }}
+                  onFocus={e => (e.target.style.borderColor = "#ddd")}
+                  onBlur={e => (e.target.style.borderColor = "transparent")}
+                />
                 <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                   <input
                     type="number" min={0} max={100} step={0.01}
@@ -643,6 +813,23 @@ function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, e
                 </div>
               </div>
             ))}
+
+            {!disabled && (
+              addingGroup ? (
+                <AddEsgGroupInline onSave={handleAddGroup} onCancel={() => setAddingGroup(false)} saving={savingGW} />
+              ) : (
+                <button onClick={() => setAddingGroup(true)}
+                  style={{
+                    alignSelf: "center", display: "flex", alignItems: "center", gap: 5,
+                    padding: "7px 12px", borderRadius: 7, border: "1.5px dashed #a5d6a7",
+                    background: "#f0fff4", color: "#1b5e20", fontFamily: FONT, fontSize: 12, fontWeight: 700,
+                    cursor: "pointer", whiteSpace: "nowrap",
+                  }}>
+                  + เพิ่มกลุ่ม
+                </button>
+              )
+            )}
+
             <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
               <span style={{ fontSize: 11, color: gwOk ? "#2e7d32" : "#b71c1c", fontWeight: 700 }}>
                 รวม: {r2adm(gwTotal)}%{gwOk ? " ✓" : " ≠ 100%"}
@@ -1145,6 +1332,52 @@ export default function AdminCriteriaEditor() {
       return;
     }
 
+    // Remove an entire ESG sub-group (e.g. admin deletes "Governance"): soft-
+    // deletes every item under that group's code prefix, then persists the
+    // rebalanced groupWeights/groupLabels + recomputed item weights for the
+    // groups that remain — all in one action so it's one toast, one state
+    // update, instead of stacking one "ลบรายการสำเร็จ" toast per item.
+    if (action === "remove-esg-group") {
+      setSaving({ type: "category", id });
+      try {
+        await Promise.all(payload.itemIds.map(itemId =>
+          authFetch(`/api/criteria/items/${itemId}`, { method: 'DELETE' })
+        ));
+        await authFetch(`/api/criteria/categories/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ groupWeights: payload.groupWeights, groupLabels: payload.groupLabels }),
+        });
+        await Promise.all(Object.entries(payload.itemWeights ?? {}).map(([itemId, w]) => {
+          const it = coreEsgSections.find(s => s.id === id)?.items?.find(x => x.id === itemId);
+          if (!it) return Promise.resolve();
+          return authFetch(`/api/criteria/items/${itemId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ nameTh: it.nameTh, defaultWeight: w }),
+          });
+        }));
+        setSecs(prev => prev.map(s => {
+          if (s.id !== id) return s;
+          const removedIds = new Set(payload.itemIds);
+          return {
+            ...s,
+            groupWeights: payload.groupWeights,
+            groupLabels:  payload.groupLabels,
+            items: s.items
+              .filter(it => !removedIds.has(it.id))
+              .map(it => payload.itemWeights?.[it.id] !== undefined ? { ...it, defaultWeight: payload.itemWeights[it.id] } : it),
+          };
+        }));
+        esgNormalized.current = { ho: false, factory: false };
+        showToast('ลบกลุ่มสำเร็จ');
+        reloadContext();
+      } catch {
+        showToast('ลบกลุ่มไม่สำเร็จ', 'error');
+      } finally {
+        setSaving(null);
+      }
+      return;
+    }
+
     if (action === "save-cat") {
       setSaving({ type: "category", id });
       try {
@@ -1175,6 +1408,7 @@ export default function AdminCriteriaEditor() {
         const body = { ...current, ...payload };
         const patchBody = { nameTh: body.nameTh, totalWeight: body.totalWeight };
         if (payload.groupWeights !== undefined) patchBody.groupWeights = payload.groupWeights;
+        if (payload.groupLabels  !== undefined) patchBody.groupLabels  = payload.groupLabels;
         const r = await authFetch(`/api/criteria/categories/${id}`, {
           method: "PATCH",
           body: JSON.stringify(patchBody),
@@ -1237,6 +1471,7 @@ export default function AdminCriteriaEditor() {
           if (payload.nameTh       !== undefined) updated.nameTh       = payload.nameTh;
           if (payload.totalWeight  !== undefined) updated.totalWeight  = Number(payload.totalWeight);
           if (payload.groupWeights !== undefined) updated.groupWeights = payload.groupWeights;
+          if (payload.groupLabels  !== undefined) updated.groupLabels  = payload.groupLabels;
           if (payload.itemWeights) {
             updated.items = s.items.map(it =>
               payload.itemWeights[it.id] !== undefined ? { ...it, defaultWeight: payload.itemWeights[it.id] } : it

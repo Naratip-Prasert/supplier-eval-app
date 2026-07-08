@@ -22,7 +22,7 @@ router.use((req, res, next) => {
 
 // GET /api/sessions
 // Full evaluation history — each session row includes summary
-// for both BU and GCP evaluations (req 6).
+// for both USER and GCP evaluations (req 6).
 // Optional query params:
 //   ?vendorCode=SUP-001  — filter by supplier
 //   ?status=completed    — filter by status
@@ -182,8 +182,8 @@ router.get('/:id', async (req, res) => {
          evs.note,
          evs.weighted_score   AS "weightedScore"
        FROM evaluation_scores evs
-       JOIN evaluation_criteria   ec  ON ec.id  = evs.criterion_id
-       JOIN evaluation_categories cat ON cat.id = ec.category_id
+       JOIN evaluation_sub_criteria   ec  ON ec.id  = evs.criterion_id
+       JOIN evaluation_main_criteria cat ON cat.id = ec.category_id
        WHERE evs.evaluation_id = ANY($1)
        ORDER BY evs.evaluation_id, ec.display_order`,
       [evalIds]
