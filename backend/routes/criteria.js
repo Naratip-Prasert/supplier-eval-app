@@ -191,19 +191,31 @@ router.delete('/categories/:id', requireAdmin, async (req, res) => {
 router.patch('/categories/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
   const { nameTh, totalWeight, groupWeights, groupLabels } = req.body;
-  const updates = [];
-  const values  = [];
-  let   idx     = 1;
-  if (nameTh       !== undefined) { updates.push(`name_th = $${idx++}`);       values.push(nameTh); }
-  if (totalWeight  !== undefined) { updates.push(`total_weight = $${idx++}`);  values.push(Number(totalWeight)); }
-  if (groupWeights !== undefined) { updates.push(`group_weights = $${idx++}`); values.push(groupWeights === null ? null : JSON.stringify(groupWeights)); }
-  if (groupLabels  !== undefined) { updates.push(`group_labels = $${idx++}`);  values.push(groupLabels  === null ? null : JSON.stringify(groupLabels)); }
-  if (updates.length === 0) return res.status(400).json({ message: 'ไม่มีข้อมูลที่ต้องอัปเดต' });
-  values.push(id);
+  if (nameTh === undefined && totalWeight === undefined && groupWeights === undefined && groupLabels === undefined) {
+    return res.status(400).json({ message: 'ไม่มีข้อมูลที่ต้องอัปเดต' });
+  }
   try {
+    // group_weights/group_labels support an explicit `null` to CLEAR the
+    // column, distinct from "not sent" (keep as-is) — a plain COALESCE
+    // can't tell those apart, so each gets its own "did the caller send
+    // this field at all" flag param instead.
     const result = await pool.query(
-      `UPDATE evaluation_main_criteria SET ${updates.join(', ')} WHERE id = $${idx} RETURNING id`,
-      values
+      `UPDATE evaluation_main_criteria
+          SET name_th       = COALESCE($1, name_th),
+              total_weight  = COALESCE($2, total_weight),
+              group_weights = CASE WHEN $3 THEN $4::jsonb ELSE group_weights END,
+              group_labels  = CASE WHEN $5 THEN $6::jsonb ELSE group_labels END
+        WHERE id = $7
+        RETURNING id`,
+      [
+        nameTh      !== undefined ? nameTh : null,
+        totalWeight !== undefined ? Number(totalWeight) : null,
+        groupWeights !== undefined,
+        groupWeights !== undefined ? (groupWeights === null ? null : JSON.stringify(groupWeights)) : null,
+        groupLabels !== undefined,
+        groupLabels !== undefined ? (groupLabels === null ? null : JSON.stringify(groupLabels)) : null,
+        id,
+      ]
     );
     if (result.rowCount === 0) return res.status(404).json({ message: 'ไม่พบข้อมูล' });
     res.json({ message: 'อัปเดตหัวข้อสำเร็จ' });
@@ -444,20 +456,31 @@ router.delete('/items/:id', requireAdmin, async (req, res) => {
 router.patch('/items/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
   const { nameTh, detailTh, defaultWeight, code, levelValues } = req.body;
-  const updates = [];
-  const values  = [];
-  let   idx     = 1;
-  if (nameTh        !== undefined) { updates.push(`name_th = $${idx++}`);        values.push(nameTh); }
-  if (detailTh      !== undefined) { updates.push(`detail_th = $${idx++}`);      values.push(detailTh); }
-  if (defaultWeight !== undefined) { updates.push(`default_weight = $${idx++}`); values.push(Number(defaultWeight)); }
-  if (code          !== undefined) { updates.push(`code = $${idx++}`);           values.push(String(code).trim()); }
-  if (levelValues   !== undefined) { updates.push(`level_values = $${idx++}`);   values.push(levelValues === null ? null : JSON.stringify(levelValues)); }
-  if (updates.length === 0) return res.status(400).json({ message: 'ไม่มีข้อมูลที่ต้องอัปเดต' });
-  values.push(id);
+  if (nameTh === undefined && detailTh === undefined && defaultWeight === undefined && code === undefined && levelValues === undefined) {
+    return res.status(400).json({ message: 'ไม่มีข้อมูลที่ต้องอัปเดต' });
+  }
   try {
+    // level_values supports an explicit `null` to CLEAR the column (falls
+    // back to the default 1-5 scale), distinct from "not sent" — same
+    // flag-param reasoning as group_weights/group_labels above.
     const result = await pool.query(
-      `UPDATE evaluation_sub_criteria SET ${updates.join(', ')} WHERE id = $${idx} RETURNING id`,
-      values
+      `UPDATE evaluation_sub_criteria
+          SET name_th        = COALESCE($1, name_th),
+              detail_th      = COALESCE($2, detail_th),
+              default_weight = COALESCE($3, default_weight),
+              code           = COALESCE($4, code),
+              level_values   = CASE WHEN $5 THEN $6::jsonb ELSE level_values END
+        WHERE id = $7
+        RETURNING id`,
+      [
+        nameTh        !== undefined ? nameTh : null,
+        detailTh      !== undefined ? detailTh : null,
+        defaultWeight !== undefined ? Number(defaultWeight) : null,
+        code          !== undefined ? String(code).trim() : null,
+        levelValues !== undefined,
+        levelValues !== undefined ? (levelValues === null ? null : JSON.stringify(levelValues)) : null,
+        id,
+      ]
     );
     if (result.rowCount === 0) return res.status(404).json({ message: 'ไม่พบข้อมูล' });
     res.json({ message: 'อัปเดตรายการสำเร็จ' });

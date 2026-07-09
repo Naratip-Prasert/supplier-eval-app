@@ -149,17 +149,22 @@ router.patch('/:employeeId', async (req, res) => {
   if (role !== undefined && !validRoles.includes(role)) {
     return res.status(400).json({ message: 'role ไม่ถูกต้อง' });
   }
+  if (role === undefined && isActive === undefined) {
+    return res.status(400).json({ message: 'ไม่มีข้อมูลที่จะอัปเดต' });
+  }
   try {
-    const fields = [];
-    const params = [];
-    if (role !== undefined)     { params.push(role);     fields.push(`role = $${params.length}`); }
-    if (isActive !== undefined) { params.push(isActive); fields.push(`is_active = $${params.length}`); }
-    if (fields.length === 0) return res.status(400).json({ message: 'ไม่มีข้อมูลที่จะอัปเดต' });
-    params.push(req.params.employeeId);
     const result = await pool.query(
-      `UPDATE employees SET ${fields.join(', ')}, updated_at = NOW()
-       WHERE employee_id = $${params.length} RETURNING employee_id`,
-      params
+      `UPDATE employees
+          SET role       = COALESCE($1, role),
+              is_active  = COALESCE($2, is_active),
+              updated_at = NOW()
+        WHERE employee_id = $3
+        RETURNING employee_id`,
+      [
+        role     !== undefined ? role : null,
+        isActive !== undefined ? isActive : null,
+        req.params.employeeId,
+      ]
     );
     if (result.rows.length === 0) return res.status(404).json({ message: 'ไม่พบพนักงาน' });
     res.json({ message: 'อัปเดตสำเร็จ' });

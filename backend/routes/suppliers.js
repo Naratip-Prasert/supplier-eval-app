@@ -127,17 +127,23 @@ router.patch('/:vendorCode', async (req, res) => {
   if (productType !== undefined && !validTypes.includes(productType)) {
     return res.status(400).json({ message: 'productType ไม่ถูกต้อง' });
   }
-  const fields = [];
-  const params = [];
-  if (supplierName !== undefined) { params.push(supplierName.trim()); fields.push(`supplier_name = $${params.length}`); }
-  if (productType  !== undefined) { params.push(productType);          fields.push(`product_type = $${params.length}`); }
-  if (isActive     !== undefined) { params.push(isActive);             fields.push(`is_active = $${params.length}`); }
-  if (fields.length === 0) return res.status(400).json({ message: 'ไม่มีข้อมูลที่จะอัปเดต' });
-  params.push(req.params.vendorCode.trim());
+  if (supplierName === undefined && productType === undefined && isActive === undefined) {
+    return res.status(400).json({ message: 'ไม่มีข้อมูลที่จะอัปเดต' });
+  }
   try {
     const result = await pool.query(
-      `UPDATE suppliers SET ${fields.join(', ')} WHERE vendor_code = $${params.length} RETURNING vendor_code`,
-      params ///
+      `UPDATE suppliers
+          SET supplier_name = COALESCE($1, supplier_name),
+              product_type  = COALESCE($2, product_type),
+              is_active     = COALESCE($3, is_active)
+        WHERE vendor_code = $4
+        RETURNING vendor_code`,
+      [
+        supplierName !== undefined ? supplierName.trim() : null,
+        productType  !== undefined ? productType : null,
+        isActive     !== undefined ? isActive : null,
+        req.params.vendorCode.trim(),
+      ]
     );
     if (result.rows.length === 0) return res.status(404).json({ message: 'ไม่พบซัพพลายเออร์' });
     res.json({ message: 'อัปเดตสำเร็จ' });
