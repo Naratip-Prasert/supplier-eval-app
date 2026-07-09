@@ -137,7 +137,7 @@ router.patch('/:vendorCode', async (req, res) => {
   try {
     const result = await pool.query(
       `UPDATE suppliers SET ${fields.join(', ')} WHERE vendor_code = $${params.length} RETURNING vendor_code`,
-      params
+      params ///
     );
     if (result.rows.length === 0) return res.status(404).json({ message: 'ไม่พบซัพพลายเออร์' });
     res.json({ message: 'อัปเดตสำเร็จ' });
@@ -190,7 +190,7 @@ router.get('/:vendorCode/permission', async (req, res) => {
     const permResult = await pool.query(
       `SELECT 1 FROM employee_supplier_permissions
         WHERE employee_id = $1 AND supplier_id = $2`,
-      [employee.id, supplier.id]
+      [employee.id, supplier.id] ///
     );
 
     res.json({ hasPermission: permResult.rows.length > 0 });

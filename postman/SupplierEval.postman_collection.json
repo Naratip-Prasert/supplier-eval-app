@@ -1,0 +1,427 @@
+{
+  "info": {
+    "name": "Supplier Eval API",
+    "description": "Local dev collection for the Supplier Evaluation backend (Express + PostgreSQL). Auth is a cookie set by POST /api/auth/login — Postman's cookie jar carries it automatically on later requests as long as you keep hitting the same baseUrl. All non-GET requests need an X-Requested-With header (CSRF guard) — a collection-level pre-request script adds it automatically.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000" },
+    { "key": "identifier", "value": "ADMIN-001" },
+    { "key": "password", "value": "" },
+    { "key": "employeeId", "value": "ADMIN-001" },
+    { "key": "vendorCode", "value": "" },
+    { "key": "sessionId", "value": "" },
+    { "key": "taskId", "value": "" },
+    { "key": "categoryId", "value": "" },
+    { "key": "itemId", "value": "" },
+    { "key": "reviewId", "value": "" }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!['GET', 'HEAD', 'OPTIONS'].includes(pm.request.method)) {",
+          "  pm.request.headers.upsert({ key: 'X-Requested-With', value: 'XMLHttpRequest' });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identifier\": \"{{identifier}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] },
+            "description": "Sets the httpOnly auth cookie on success. Rate-limited to 10 attempts / 15 min per IP."
+          }
+        },
+        {
+          "name": "Me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/auth/me", "host": ["{{baseUrl}}"], "path": ["api", "auth", "me"] }
+          }
+        },
+        {
+          "name": "Verify Password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"employeeId\": \"{{employeeId}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/auth/verify-password", "host": ["{{baseUrl}}"], "path": ["api", "auth", "verify-password"] }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/auth/logout", "host": ["{{baseUrl}}"], "path": ["api", "auth", "logout"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Employees",
+      "item": [
+        {
+          "name": "List Employees",
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/employees", "host": ["{{baseUrl}}"], "path": ["api", "employees"] } }
+        },
+        {
+          "name": "My Profile",
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/employees/me", "host": ["{{baseUrl}}"], "path": ["api", "employees", "me"] } }
+        },
+        {
+          "name": "Update My Profile Picture",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"profilePicture\": \"\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/employees/me", "host": ["{{baseUrl}}"], "path": ["api", "employees", "me"] }
+          }
+        },
+        {
+          "name": "Get Employee By Id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/employees/{{employeeId}}", "host": ["{{baseUrl}}"], "path": ["api", "employees", "{{employeeId}}"] }
+          }
+        },
+        {
+          "name": "Update Employee Role/Active (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"role\": \"EVALUATOR\",\n  \"isActive\": true\n}" },
+            "url": { "raw": "{{baseUrl}}/api/employees/{{employeeId}}", "host": ["{{baseUrl}}"], "path": ["api", "employees", "{{employeeId}}"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Suppliers",
+      "item": [
+        {
+          "name": "List Suppliers",
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/suppliers", "host": ["{{baseUrl}}"], "path": ["api", "suppliers"] } }
+        },
+        {
+          "name": "Validate Supplier",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/suppliers/validate?vendorCode={{vendorCode}}&supplierName=",
+              "host": ["{{baseUrl}}"], "path": ["api", "suppliers", "validate"],
+              "query": [{ "key": "vendorCode", "value": "{{vendorCode}}" }, { "key": "supplierName", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Create Supplier",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"vendorCode\": \"{{vendorCode}}\",\n  \"supplierName\": \"Test Supplier\",\n  \"productType\": \"Raw Material\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/suppliers", "host": ["{{baseUrl}}"], "path": ["api", "suppliers"] }
+          }
+        },
+        {
+          "name": "Get Supplier By VendorCode",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/suppliers/{{vendorCode}}", "host": ["{{baseUrl}}"], "path": ["api", "suppliers", "{{vendorCode}}"] }
+          }
+        },
+        {
+          "name": "Update Supplier",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"supplierName\": \"\",\n  \"productType\": \"\",\n  \"isActive\": true\n}" },
+            "url": { "raw": "{{baseUrl}}/api/suppliers/{{vendorCode}}", "host": ["{{baseUrl}}"], "path": ["api", "suppliers", "{{vendorCode}}"] }
+          }
+        },
+        {
+          "name": "Check Supplier Permission",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/suppliers/{{vendorCode}}/permission?employeeId={{employeeId}}",
+              "host": ["{{baseUrl}}"], "path": ["api", "suppliers", "{{vendorCode}}", "permission"],
+              "query": [{ "key": "employeeId", "value": "{{employeeId}}" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Criteria",
+      "item": [
+        {
+          "name": "Get Criteria Tree",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/criteria?evalType=&track=pre",
+              "host": ["{{baseUrl}}"], "path": ["api", "criteria"],
+              "query": [{ "key": "evalType", "value": "" }, { "key": "track", "value": "pre" }]
+            }
+          }
+        },
+        {
+          "name": "Create Category (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"nameTh\": \"\",\n  \"totalWeight\": 10,\n  \"codePrefix\": \"\",\n  \"type\": \"\",\n  \"track\": \"pre\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/criteria/categories", "host": ["{{baseUrl}}"], "path": ["api", "criteria", "categories"] }
+          }
+        },
+        {
+          "name": "Update Category (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"nameTh\": \"\",\n  \"totalWeight\": 10,\n  \"groupWeights\": {},\n  \"groupLabels\": {}\n}" },
+            "url": { "raw": "{{baseUrl}}/api/criteria/categories/{{categoryId}}", "host": ["{{baseUrl}}"], "path": ["api", "criteria", "categories", "{{categoryId}}"] }
+          }
+        },
+        {
+          "name": "Delete Category (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/criteria/categories/{{categoryId}}", "host": ["{{baseUrl}}"], "path": ["api", "criteria", "categories", "{{categoryId}}"] }
+          }
+        },
+        {
+          "name": "Create Item (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"categoryId\": \"{{categoryId}}\",\n  \"code\": \"\",\n  \"nameTh\": \"\",\n  \"defaultWeight\": 5,\n  \"criteriaSet\": \"\",\n  \"levels\": []\n}" },
+            "url": { "raw": "{{baseUrl}}/api/criteria/items", "host": ["{{baseUrl}}"], "path": ["api", "criteria", "items"] }
+          }
+        },
+        {
+          "name": "Update Item (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"nameTh\": \"\",\n  \"detailTh\": \"\",\n  \"defaultWeight\": 5,\n  \"code\": \"\",\n  \"levelValues\": []\n}" },
+            "url": { "raw": "{{baseUrl}}/api/criteria/items/{{itemId}}", "host": ["{{baseUrl}}"], "path": ["api", "criteria", "items", "{{itemId}}"] }
+          }
+        },
+        {
+          "name": "Update Item Levels (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"levels\": [],\n  \"levelValues\": []\n}" },
+            "url": { "raw": "{{baseUrl}}/api/criteria/items/{{itemId}}/levels", "host": ["{{baseUrl}}"], "path": ["api", "criteria", "items", "{{itemId}}", "levels"] }
+          }
+        },
+        {
+          "name": "Delete Item (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/criteria/items/{{itemId}}", "host": ["{{baseUrl}}"], "path": ["api", "criteria", "items", "{{itemId}}"] }
+          }
+        },
+        {
+          "name": "Reorder (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"order\": []\n}" },
+            "url": { "raw": "{{baseUrl}}/api/criteria/reorder", "host": ["{{baseUrl}}"], "path": ["api", "criteria", "reorder"] }
+          }
+        },
+        {
+          "name": "Reseed From Constants (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"sections\": [],\n  \"reset\": false\n}" },
+            "url": { "raw": "{{baseUrl}}/api/criteria/seed", "host": ["{{baseUrl}}"], "path": ["api", "criteria", "seed"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Evaluations",
+      "item": [
+        {
+          "name": "Submit Evaluation",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"vendorCode\": \"{{vendorCode}}\",\n  \"evalType\": \"\",\n  \"period\": \"\",\n  \"productType\": \"\",\n  \"scores\": {},\n  \"sessionId\": null,\n  \"moduleCode\": null,\n  \"customModuleItems\": null\n}" },
+            "url": { "raw": "{{baseUrl}}/api/evaluations", "host": ["{{baseUrl}}"], "path": ["api", "evaluations"] }
+          }
+        },
+        { "name": "List Evaluations", "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/evaluations", "host": ["{{baseUrl}}"], "path": ["api", "evaluations"] } } },
+        { "name": "List All (Admin)", "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/evaluations/all", "host": ["{{baseUrl}}"], "path": ["api", "evaluations", "all"] } } },
+        { "name": "My Evaluations", "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/evaluations/my", "host": ["{{baseUrl}}"], "path": ["api", "evaluations", "my"] } } },
+        { "name": "My Tasks", "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/evaluations/my-tasks", "host": ["{{baseUrl}}"], "path": ["api", "evaluations", "my-tasks"] } } },
+        { "name": "My Timeline", "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/evaluations/my-timeline", "host": ["{{baseUrl}}"], "path": ["api", "evaluations", "my-timeline"] } } },
+        {
+          "name": "By Vendor",
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/evaluations/by-vendor/{{vendorCode}}", "host": ["{{baseUrl}}"], "path": ["api", "evaluations", "by-vendor", "{{vendorCode}}"] } }
+        },
+        {
+          "name": "Get Evaluation By Id",
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/evaluations/1", "host": ["{{baseUrl}}"], "path": ["api", "evaluations", "1"] } }
+        }
+      ]
+    },
+    {
+      "name": "Sessions",
+      "item": [
+        {
+          "name": "List Sessions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/sessions?vendorCode=&status=",
+              "host": ["{{baseUrl}}"], "path": ["api", "sessions"],
+              "query": [{ "key": "vendorCode", "value": "" }, { "key": "status", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Get Session By Id",
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/sessions/{{sessionId}}", "host": ["{{baseUrl}}"], "path": ["api", "sessions", "{{sessionId}}"] } }
+        }
+      ]
+    },
+    {
+      "name": "Supervisor",
+      "item": [
+        { "name": "Review Queue", "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/supervisor/queue", "host": ["{{baseUrl}}"], "path": ["api", "supervisor", "queue"] } } },
+        { "name": "Review History", "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/supervisor/history", "host": ["{{baseUrl}}"], "path": ["api", "supervisor", "history"] } } },
+        {
+          "name": "Approve Session",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"notes\": \"\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/supervisor/sessions/{{sessionId}}/approve", "host": ["{{baseUrl}}"], "path": ["api", "supervisor", "sessions", "{{sessionId}}", "approve"] }
+          }
+        },
+        {
+          "name": "Return Session",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"notes\": \"\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/supervisor/sessions/{{sessionId}}/return", "host": ["{{baseUrl}}"], "path": ["api", "supervisor", "sessions", "{{sessionId}}", "return"] }
+          }
+        },
+        {
+          "name": "Update Review Notes",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"notes\": \"\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/supervisor/reviews/{{reviewId}}/notes", "host": ["{{baseUrl}}"], "path": ["api", "supervisor", "reviews", "{{reviewId}}", "notes"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "Upload Pre/Post Excel",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": { "mode": "formdata", "formdata": [{ "key": "file", "type": "file", "src": [] }] },
+            "url": { "raw": "{{baseUrl}}/api/admin/upload/pre-post", "host": ["{{baseUrl}}"], "path": ["api", "admin", "upload", "pre-post"] },
+            "description": "Select an .xlsx file in the form-data 'file' field before sending."
+          }
+        },
+        {
+          "name": "Upload Periodic Excel",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": { "mode": "formdata", "formdata": [{ "key": "file", "type": "file", "src": [] }, { "key": "evalType", "value": "half_year", "type": "text" }] },
+            "url": { "raw": "{{baseUrl}}/api/admin/upload/periodic", "host": ["{{baseUrl}}"], "path": ["api", "admin", "upload", "periodic"] },
+            "description": "evalType is 'half_year' or 'yearly'. Select an .xlsx file in the form-data 'file' field before sending."
+          }
+        },
+        {
+          "name": "List Tasks",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/tasks?status=&role=&vendorCode=",
+              "host": ["{{baseUrl}}"], "path": ["api", "admin", "tasks"],
+              "query": [{ "key": "status", "value": "" }, { "key": "role", "value": "" }, { "key": "vendorCode", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Remind Task",
+          "request": { "method": "POST", "header": [], "url": { "raw": "{{baseUrl}}/api/admin/tasks/{{taskId}}/remind", "host": ["{{baseUrl}}"], "path": ["api", "admin", "tasks", "{{taskId}}", "remind"] } }
+        },
+        {
+          "name": "Update Task",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"assignedName\": \"\",\n  \"assignedEmail\": \"\",\n  \"dueDate\": \"\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/admin/tasks/{{taskId}}", "host": ["{{baseUrl}}"], "path": ["api", "admin", "tasks", "{{taskId}}"] }
+          }
+        },
+        {
+          "name": "Delete Session",
+          "request": { "method": "DELETE", "header": [], "url": { "raw": "{{baseUrl}}/api/admin/sessions/{{sessionId}}", "host": ["{{baseUrl}}"], "path": ["api", "admin", "sessions", "{{sessionId}}"] } }
+        },
+        {
+          "name": "Remind All",
+          "request": { "method": "POST", "header": [], "url": { "raw": "{{baseUrl}}/api/admin/tasks/remind-all", "host": ["{{baseUrl}}"], "path": ["api", "admin", "tasks", "remind-all"] } }
+        },
+        {
+          "name": "Bulk Delete Sessions",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"sessionIds\": []\n}" },
+            "url": { "raw": "{{baseUrl}}/api/admin/sessions/bulk-delete", "host": ["{{baseUrl}}"], "path": ["api", "admin", "sessions", "bulk-delete"] }
+          }
+        },
+        {
+          "name": "List Upload Batches",
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/admin/batches", "host": ["{{baseUrl}}"], "path": ["api", "admin", "batches"] } }
+        }
+      ]
+    }
+  ]
+}
