@@ -194,6 +194,25 @@ router.patch('/categories/:id', requireAdmin, async (req, res) => {
   if (nameTh === undefined && totalWeight === undefined && groupWeights === undefined && groupLabels === undefined) {
     return res.status(400).json({ message: 'ไม่มีข้อมูลที่ต้องอัปเดต' });
   }
+  if (nameTh !== undefined && !nameTh?.trim()) {
+    return res.status(400).json({ message: 'nameTh ต้องไม่เป็นค่าว่าง' });
+  }
+  // {} is truthy in JS — criteriaOverlay.js's `if (!groupWeights) return items`
+  // guard doesn't catch it, so an empty object silently drops every ESG
+  // group/item instead of falling back to "no override". Only null (no
+  // override) or a populated object are valid; {} is neither.
+  if (groupWeights !== undefined && groupWeights !== null &&
+      (typeof groupWeights !== 'object' || Array.isArray(groupWeights) || Object.keys(groupWeights).length === 0)) {
+    return res.status(400).json({ message: 'groupWeights ต้องเป็น null หรือ object ที่มีอย่างน้อย 1 กลุ่ม' });
+  }
+  // groupLabels:{} isn't dangerous the way groupWeights:{} is (reconcileEsgGroups
+  // only reads it via `?.[key]`, never gates on truthiness) — rejected anyway
+  // for consistency: same null-or-populated-object contract as groupWeights,
+  // so callers don't have to remember which of the two jsonb fields tolerates {}.
+  if (groupLabels !== undefined && groupLabels !== null &&
+      (typeof groupLabels !== 'object' || Array.isArray(groupLabels) || Object.keys(groupLabels).length === 0)) {
+    return res.status(400).json({ message: 'groupLabels ต้องเป็น null หรือ object ที่มีอย่างน้อย 1 กลุ่ม' });
+  }
   try {
     // group_weights/group_labels support an explicit `null` to CLEAR the
     // column, distinct from "not sent" (keep as-is) — a plain COALESCE
@@ -253,13 +272,14 @@ router.post('/categories', requireAdmin, async (req, res) => {
       );
       if (inactiveRes.rows.length > 0) {
         const row = inactiveRes.rows[0];
+        // Recycles the category row (code stays stable, no gaps) but does
+        // NOT auto-reactivate its old sub_criteria — those could be stale
+        // test junk from whatever this category was before, and reviving
+        // them silently would mismatch the "items: []" this endpoint always
+        // reports for a "new" category. Admin re-adds items explicitly.
         await client.query(
           `UPDATE evaluation_main_criteria SET is_active=TRUE, name_th=$1, total_weight=$2 WHERE id=$3`,
           [nameTh.trim(), Number(totalWeight) || 0, row.id]
-        );
-        await client.query(
-          `UPDATE evaluation_sub_criteria SET is_active=TRUE WHERE category_id=$1`,
-          [row.id]
         );
         await client.query('COMMIT');
         return res.json({ id: row.id, code: row.code, nameTh: nameTh.trim(), totalWeight: Number(totalWeight) || 0, displayOrder: row.displayOrder, items: [] });
@@ -285,13 +305,14 @@ router.post('/categories', requireAdmin, async (req, res) => {
       );
       if (inactiveRes.rows.length > 0) {
         const row = inactiveRes.rows[0];
+        // Recycles the category row (code stays stable, no gaps) but does
+        // NOT auto-reactivate its old sub_criteria — those could be stale
+        // test junk from whatever this category was before, and reviving
+        // them silently would mismatch the "items: []" this endpoint always
+        // reports for a "new" category. Admin re-adds items explicitly.
         await client.query(
           `UPDATE evaluation_main_criteria SET is_active=TRUE, name_th=$1, total_weight=$2 WHERE id=$3`,
           [nameTh.trim(), Number(totalWeight) || 0, row.id]
-        );
-        await client.query(
-          `UPDATE evaluation_sub_criteria SET is_active=TRUE WHERE category_id=$1`,
-          [row.id]
         );
         await client.query('COMMIT');
         return res.json({ id: row.id, code: row.code, nameTh: nameTh.trim(), totalWeight: Number(totalWeight) || 0, displayOrder: row.displayOrder, items: [] });
@@ -370,6 +391,46 @@ router.post('/items', requireAdmin, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const newCode = String(code).trim();
+
+    // categoryId isn't checked against evaluation_main_criteria.is_active by
+    // the FK constraint (it just requires the row to exist) — without this,
+    // an item created under an inactive category inserts fine (201) but is
+    // then invisible everywhere, since GET /api/criteria filters categories
+    // by is_active before ever looking at their items.
+    const categoryRes = await client.query(
+      `SELECT is_active FROM evaluation_main_criteria WHERE id = $1`,
+      [categoryId]
+    );
+    if (categoryRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'ไม่พบ categoryId นี้' });
+    }
+    if (categoryRes.rows[0].is_active === false) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ message: 'หัวข้อ (category) นี้ถูกปิดใช้งานอยู่ — เปิดใช้งานหัวข้อก่อนเพิ่มรายการ' });
+    }
+
+    // A code colliding with an existing row (even an inactive/soft-deleted
+    // one) used to silently overwrite it via ON CONFLICT DO UPDATE — same
+    // "recycle without telling anyone" problem as category creation. POST
+    // should only ever create genuinely new rows; reactivating an old item
+    // is a deliberate PATCH the admin does after seeing it exists.
+    const collisionRes = await client.query(
+      `SELECT id, is_active FROM evaluation_sub_criteria WHERE criteria_set = $1 AND code = $2`,
+      [criteriaSet, newCode]
+    );
+    if (collisionRes.rows.length > 0) {
+      await client.query('ROLLBACK');
+      const existing = collisionRes.rows[0];
+      return res.status(409).json({
+        message: existing.is_active
+          ? 'code นี้มีอยู่แล้วในระบบ'
+          : 'code นี้เคยมีอยู่แล้ว (ถูกปิดใช้งานไว้ เป็น false)',
+        existingId: existing.id,
+      });
+    }
+
     // New items land right after their numeric siblings (group = code with
     // the trailing ".N" stripped, e.g. "ESG1.11" groups with "ESG1.1"-
     // "ESG1.10"), not always at the very end of the category — the ESG
@@ -378,7 +439,6 @@ router.post('/items', requireAdmin, async (req, res) => {
     // landing a new HO-side item inside the Factory group instead of right
     // after its real siblings. Falls back to append-at-end when no sibling
     // shares the group (brand-new group/module — same as previous behavior).
-    const newCode  = String(code).trim();
     const groupKey = newCode.replace(/\.\d+$/, '');
     const siblingsRes = await client.query(
       `SELECT display_order AS "displayOrder" FROM evaluation_sub_criteria
@@ -405,19 +465,20 @@ router.post('/items', requireAdmin, async (req, res) => {
       `INSERT INTO evaluation_sub_criteria
          (category_id, code, name_th, default_weight, display_order, is_active, criteria_set)
        VALUES ($1, $2, $3, $4, $5, true, $6)
-       ON CONFLICT (criteria_set, code) DO UPDATE
-         SET is_active=true, name_th=EXCLUDED.name_th,
-             default_weight=EXCLUDED.default_weight,
-             category_id=EXCLUDED.category_id,
-             display_order=EXCLUDED.display_order
+       ON CONFLICT (criteria_set, code) DO NOTHING
        RETURNING id`,
       [categoryId, newCode, String(nameTh).trim(), Number(defaultWeight) || 0, nextOrder, criteriaSet]
     );
+    if (insertRes.rows.length === 0) {
+      // Pre-check above passed but another request inserted the same code
+      // in between (race) — surface it the same way instead of crashing.
+      await client.query('ROLLBACK');
+      return res.status(409).json({ message: 'code นี้ถูกสร้างไปแล้วโดย request อื่นในเวลาไล่เลี่ยกัน' });
+    }
     const newId = insertRes.rows[0].id;
     const defaultLevels = Array.isArray(levels) && levels.length > 0
       ? levels
       : ['', '', '', '', ''];
-    // Replace levels — row may have been restored from soft-delete with stale levels
     await client.query('DELETE FROM score_level_descriptions WHERE criterion_id = $1', [newId]);
     for (let i = 0; i < defaultLevels.length; i++) {
       await client.query(
@@ -458,6 +519,20 @@ router.patch('/items/:id', requireAdmin, async (req, res) => {
   const { nameTh, detailTh, defaultWeight, code, levelValues } = req.body;
   if (nameTh === undefined && detailTh === undefined && defaultWeight === undefined && code === undefined && levelValues === undefined) {
     return res.status(400).json({ message: 'ไม่มีข้อมูลที่ต้องอัปเดต' });
+  }
+  if (nameTh !== undefined && !nameTh?.trim()) {
+    return res.status(400).json({ message: 'nameTh ต้องไม่เป็นค่าว่าง' });
+  }
+  if (code !== undefined && !String(code).trim()) {
+    return res.status(400).json({ message: 'code ต้องไม่เป็นค่าว่าง' });
+  }
+  // [] is truthy in JS — App.jsx's `item.levelValues ? Math.max(...) : 5`
+  // guard doesn't catch it, so an empty array reaches Math.max(...[]) =
+  // -Infinity and breaks scoring for that item. Only null (default 1-5
+  // scale) or a populated array are valid; [] is neither.
+  if (levelValues !== undefined && levelValues !== null &&
+      (!Array.isArray(levelValues) || levelValues.length === 0)) {
+    return res.status(400).json({ message: 'levelValues ต้องเป็น null หรือ array ที่มีอย่างน้อย 1 ค่า' });
   }
   try {
     // level_values supports an explicit `null` to CLEAR the column (falls

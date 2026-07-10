@@ -451,14 +451,6 @@ router.post('/upload/periodic', upload.single('file'), async (req, res) => {
 // ── GET /api/admin/tasks ──────────────────────────────────────
 router.get('/tasks', async (req, res) => {
   const { status, role, vendorCode } = req.query;
-  const conditions = [];
-  const params = [];
-
-  if (status) { params.push(status); conditions.push(`et.status = $${params.length}`); }
-  if (role)   { params.push(role);   conditions.push(`et.role = $${params.length}`); }
-  if (vendorCode) { params.push(vendorCode); conditions.push(`s.vendor_code = $${params.length}`); }
-
-  const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
 
   try {
     const result = await pool.query(`
@@ -483,10 +475,12 @@ router.get('/tasks', async (req, res) => {
       FROM evaluation_tasks et
       JOIN suppliers s           ON s.id  = et.supplier_id
       JOIN evaluation_sessions es ON es.id = et.session_id
-      ${where}
+      WHERE ($1::text IS NULL OR et.status = $1)
+        AND ($2::text IS NULL OR et.role = $2)
+        AND ($3::text IS NULL OR s.vendor_code = $3)
       ORDER BY et.due_date ASC
       LIMIT 500
-    `, params);
+    `, [status || null, role || null, vendorCode || null]);
     res.json(result.rows);
   } catch (err) {
     console.error('GET /api/admin/tasks error:', err);
@@ -660,19 +654,13 @@ router.delete('/sessions/:sessionId', async (req, res) => {
 router.post('/tasks/remind-all', async (req, res) => {
   const { taskIds } = req.body || {};
   try {
-    const params = [];
-    let where = `et.status != 'completed' AND et.assigned_email IS NOT NULL`;
-    if (Array.isArray(taskIds) && taskIds.length > 0) {
-      params.push(taskIds);
-      where += ` AND et.id = ANY($${params.length}::uuid[])`;
-    }
-
     const taskResult = await pool.query(`
       SELECT et.*, s.supplier_name, s.vendor_code
         FROM evaluation_tasks et
         JOIN suppliers s ON s.id = et.supplier_id
-       WHERE ${where}
-    `, params);
+       WHERE et.status != 'completed' AND et.assigned_email IS NOT NULL
+         AND ($1::uuid[] IS NULL OR et.id = ANY($1::uuid[]))
+    `, [Array.isArray(taskIds) && taskIds.length > 0 ? taskIds : null]);
 
     const { sendReminderEmail } = require('../utils/emailService');
     let sent = 0, failed = 0;

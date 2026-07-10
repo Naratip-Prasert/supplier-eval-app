@@ -29,20 +29,6 @@ router.use((req, res, next) => {
 router.get('/', async (req, res) => {
   const { vendorCode, status } = req.query;
 
-  const conditions = [];
-  const params     = [];
-
-  if (vendorCode) {
-    params.push(vendorCode.trim());
-    conditions.push(`s.vendor_code = $${params.length}`);
-  }
-  if (status) {
-    params.push(status.trim());
-    conditions.push(`es.status = $${params.length}`);
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
   try {
     const sessionsResult = await pool.query(
       `SELECT
@@ -65,9 +51,10 @@ router.get('/', async (req, res) => {
        FROM evaluation_sessions es
        JOIN suppliers s ON s.id = es.supplier_id
        LEFT JOIN employees initiator ON initiator.id = es.initiated_by
-       ${where}
+       WHERE ($1::text IS NULL OR s.vendor_code = $1)
+         AND ($2::text IS NULL OR es.status = $2)
        ORDER BY es.created_at DESC`,
-      params
+      [vendorCode ? vendorCode.trim() : null, status ? status.trim() : null]
     );
 
     if (sessionsResult.rows.length === 0) {

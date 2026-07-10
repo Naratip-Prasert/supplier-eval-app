@@ -109,9 +109,10 @@
           "request": {
             "method": "PATCH",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"role\": \"EVALUATOR\",\n  \"isActive\": true\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"role\": \"USER\",\n  \"isActive\": true\n}" },
             "url": { "raw": "{{baseUrl}}/api/employees/{{employeeId}}", "host": ["{{baseUrl}}"], "path": ["api", "employees", "{{employeeId}}"] }
-          }
+          },
+          "description": "PARTIAL update — delete a field to leave it unchanged. role must be one of USER, GCP, ADMIN, SUPERVISOR (400 otherwise). Careful testing on your own logged-in account's employeeId — isActive:false locks that account out of future logins immediately."
         }
       ]
     },
@@ -156,9 +157,10 @@
           "request": {
             "method": "PATCH",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"supplierName\": \"\",\n  \"productType\": \"\",\n  \"isActive\": true\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"supplierName\": \"ชื่อซัพพลายเออร์ใหม่\",\n  \"productType\": \"goods\",\n  \"isActive\": true\n}" },
             "url": { "raw": "{{baseUrl}}/api/suppliers/{{vendorCode}}", "host": ["{{baseUrl}}"], "path": ["api", "suppliers", "{{vendorCode}}"] }
-          }
+          },
+          "description": "PARTIAL update — delete a field to leave it unchanged. supplierName must be non-empty if sent. productType must be 'goods', 'services', or 'both' (400 otherwise)."
         },
         {
           "name": "Check Supplier Permission",
@@ -178,14 +180,27 @@
       "name": "Criteria",
       "item": [
         {
-          "name": "Get Criteria Tree",
+          "name": "Get Criteria Tree (Pre)",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/criteria?evalType=&track=pre",
+              "raw": "{{baseUrl}}/api/criteria?evalType=pre_eval",
               "host": ["{{baseUrl}}"], "path": ["api", "criteria"],
-              "query": [{ "key": "evalType", "value": "" }, { "key": "track", "value": "pre" }]
+              "query": [{ "key": "evalType", "value": "pre_eval" }]
+            },
+            "description": "evalType decides pre vs post here (not track — track only matters for Function Module lookups, evalType=function or m1-m7)."
+          }
+        },
+        {
+          "name": "Get Criteria Tree (Post)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/criteria?evalType=post_eval",
+              "host": ["{{baseUrl}}"], "path": ["api", "criteria"],
+              "query": [{ "key": "evalType", "value": "post_eval" }]
             }
           }
         },
@@ -194,18 +209,20 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"nameTh\": \"\",\n  \"totalWeight\": 10,\n  \"codePrefix\": \"\",\n  \"type\": \"\",\n  \"track\": \"pre\"\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"nameTh\": \"ชื่อหัวข้อใหม่\",\n  \"totalWeight\": 10,\n  \"codePrefix\": \"PRE-CORE\"\n}" },
             "url": { "raw": "{{baseUrl}}/api/criteria/categories", "host": ["{{baseUrl}}"], "path": ["api", "criteria", "categories"] }
-          }
+          },
+          "description": "nameTh is required (400 if empty). codePrefix is required unless type is 'function', and must be exactly 'PRE-CORE' or 'POST-CORE' — that's what auto-generates the code (e.g. PRE-CORE6) and triggers the 'insert right before ESG' placement logic. type/track only matter for Function Module creation (type:'function', track:'pre'|'post') — omit both for a normal category."
         },
         {
           "name": "Update Category (Admin)",
           "request": {
             "method": "PATCH",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"nameTh\": \"\",\n  \"totalWeight\": 10,\n  \"groupWeights\": {},\n  \"groupLabels\": {}\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"nameTh\": \"ชื่อหัวข้อใหม่\",\n  \"totalWeight\": 10,\n  \"groupWeights\": null,\n  \"groupLabels\": null\n}" },
             "url": { "raw": "{{baseUrl}}/api/criteria/categories/{{categoryId}}", "host": ["{{baseUrl}}"], "path": ["api", "criteria", "categories", "{{categoryId}}"] }
-          }
+          },
+          "description": "PARTIAL update — only include the fields you actually want to change, delete the rest. nameTh must be non-empty if sent. groupWeights/groupLabels: use null to leave unchanged/clear, or a populated object like {\"1\":50,\"2\":50} — an empty {} is rejected with 400 (it used to silently wipe every ESG group)."
         },
         {
           "name": "Delete Category (Admin)",
@@ -220,18 +237,20 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"categoryId\": \"{{categoryId}}\",\n  \"code\": \"\",\n  \"nameTh\": \"\",\n  \"defaultWeight\": 5,\n  \"criteriaSet\": \"\",\n  \"levels\": []\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"categoryId\": \"{{categoryId}}\",\n  \"code\": \"1.1\",\n  \"nameTh\": \"ชื่อเกณฑ์ใหม่\",\n  \"defaultWeight\": 5,\n  \"criteriaSet\": \"pre_eval\",\n  \"levels\": []\n}" },
             "url": { "raw": "{{baseUrl}}/api/criteria/items", "host": ["{{baseUrl}}"], "path": ["api", "criteria", "items"] }
-          }
+          },
+          "description": "categoryId/code/nameTh/criteriaSet are required (400 if any missing/empty). categoryId must point to an ACTIVE category (400 if the category is soft-deleted, 404 if it doesn't exist at all). criteriaSet is 'pre_eval' or 'post_eval'. code is NOT auto-generated by the API — you must type the full code yourself (e.g. '1.4' under a category whose existing items go up to '1.3'); the Admin UI's auto-suggest is frontend-only (nextItemCode() in weightMath.js), the endpoint itself just uses whatever you send. A code colliding with an existing row (active OR inactive/soft-deleted) is rejected with 409, not silently overwritten. levels is optional 1-5 level description text, [] is fine here (unlike levelValues on items — different field)."
         },
         {
           "name": "Update Item (Admin)",
           "request": {
             "method": "PATCH",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"nameTh\": \"\",\n  \"detailTh\": \"\",\n  \"defaultWeight\": 5,\n  \"code\": \"\",\n  \"levelValues\": []\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"nameTh\": \"ชื่อเกณฑ์ใหม่\",\n  \"detailTh\": \"รายละเอียด\",\n  \"defaultWeight\": 5,\n  \"code\": \"1.1\",\n  \"levelValues\": null\n}" },
             "url": { "raw": "{{baseUrl}}/api/criteria/items/{{itemId}}", "host": ["{{baseUrl}}"], "path": ["api", "criteria", "items", "{{itemId}}"] }
-          }
+          },
+          "description": "PARTIAL update — only include the fields you actually want to change, delete the rest. nameTh/code must be non-empty if sent. levelValues: use null for the default 1-5 scale, or a populated array like [1,3,5] — an empty [] is rejected with 400 (it used to silently break score math via Math.max(...[]) = -Infinity)."
         },
         {
           "name": "Update Item Levels (Admin)",

@@ -1,0 +1,86 @@
+1.  Update Supplier
+1.1
+ไม่เปลี่ยน
+1.2
+{
+    "message": "อัปเดตสำเร็จ"
+}
+1.3 
+400 
+{
+    "message": "supplierName ต้องไม่เป็นค่าว่าง"
+}
+{
+    "message": "productType ไม่ถูกต้อง"
+}
+1.4 
+404
+{
+    "message": "ไม่พบซัพพลายเออร์"
+}
+
+2.  Update Employee Role/Active (Admin)
+2.1 ใช้ empid ADMIN-001
+{
+  "role": "EVALUATOR",
+  "isActive": false
+}
+{
+    "message": "role ไม่ถูกต้อง"
+}
+(ถูกไหม) EVALUATOR คืออะไรมันถูกไหม แต่เขียนrole:ADMIN แล้ว false ยังคงเป็นrole admin
+2.2
+ไม่เปลี่ยน คงเป็น false
+{
+    "message": "อัปเดตสำเร็จ"
+}
+2.3
+400
+{
+    "message": "role ไม่ถูกต้อง"
+}
+2.4
+400 ส่งคำว่า EVALUATOR
+{
+    "message": "role ไม่ถูกต้อง"
+}
+
+3.  Update Category (Admin)
+3.1 ส่งแค่ { "nameTh": "ชื่อใหม่" } → groupWeights/groupLabels หายหมดเลย *** แต่ยังมีในDB
+3.2
+ค่าเปลี่ยน 
+{
+    "message": "อัปเดตหัวข้อสำเร็จ"
+}
+3.3
+เป็น null แต่ถ้าเซตให้มี groupWeights itemข้างในจะกลายเป็นfalse และแก้กลับเป็น null itemก็ยังเป็น flaseอยู่นี้ถูกยัง มันจะไม่โชว์ แต่คงไม่เป็นไรมั้ง
+{
+    "message": "อัปเดตหัวข้อสำเร็จ"
+}
+3.4
+อันนี้ เป็น 200 ไม่มีค่าก็ยังส่งสำเร็จซึ่งไม่ควรทั้งหมดเลย ต้อง null ไม่ก็ มีformatนี้เท่านั้น{"1": 50, "2": 50} หรือคิดไง ***
+groupLabels คืออะไรอธิบายหน่อย ***
+{
+  "nameTh": "",
+  "totalWeight": 15,
+  "groupWeights": {},
+  "groupLabels": {}
+}งี้คืออัพเดทเลย
+
+4. Update Item (Admin)
+4.1
+{ "defaultWeight": 10 } → levelValues เดิมหาย ตอนแรกเป็น null มันก็เป็น[]
+4.2
+ค่าเปลี่ยนตามสั่ง
+4.3
+ค่าเป็นnull
+4.4
+อันนี้เป็น 200 ไม่ใส่ ชื่อหรืออะไรก็ 200 มันถูกยัง
+{
+  "nameTh": "",
+  "detailTh": "",
+  "defaultWeight": 10,
+  "code": "",
+  "levelValues": []
+}
+งี้คืออัพเดทเลย
