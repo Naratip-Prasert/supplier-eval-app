@@ -110,8 +110,15 @@ router.patch('/me', async (req, res) => {
   }
 });
 
-// ── GET /api/employees/:employeeId ────────────────────────────
+// ── GET /api/employees/:employeeId  (ADMIN only) ──────────────
+// Not called by any current frontend flow (only PATCH /:employeeId is,
+// for the admin role/status editor) — was previously reachable by any
+// authenticated role, letting one logged-in user enumerate every other
+// employee's name/role/department just by guessing employee_id values.
 router.get('/:employeeId', async (req, res) => {
+  if (req.user.role !== 'ADMIN') {
+    return res.status(403).json({ message: 'เฉพาะ Admin เท่านั้น' });
+  }
   try {
     const result = await pool.query(
       `SELECT

@@ -5,7 +5,7 @@ require('dotenv').config({ quiet: true }); // ดึงค่าจาก .env  
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_SSL === 'true'
-    ? { rejectUnauthorized: false }
+    ? { rejectUnauthorized: true }
     : false,
 });
 
