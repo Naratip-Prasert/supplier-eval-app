@@ -85,18 +85,18 @@ const loginLimiter = rateLimit({
 app.use('/api/auth/login', loginLimiter);
 app.use('/api/auth/verify-password', loginLimiter);
 
-app.use('/api/auth',        require('./routes/auth'));          // public
-app.use('/api/evaluations', requireAuth, require('./routes/evaluations'));
-app.use('/api/employees',   requireAuth, require('./routes/employees'));
-app.use('/api/suppliers',   requireAuth, require('./routes/suppliers'));
-app.use('/api/criteria',    requireAuth, require('./routes/criteria'));
-app.use('/api/sessions',    requireAuth, require('./routes/sessions'));
-app.use('/api/admin',       requireAuth, require('./routes/admin'));
-app.use('/api/supervisor',  requireAuth, require('./routes/supervisor'));
+app.use('/api/auth',        require('./routes/public/auth'));          // public
+app.use('/api/evaluations', requireAuth, require('./routes/shared/evaluations'));
+app.use('/api/employees',   requireAuth, require('./routes/shared/employees'));
+app.use('/api/suppliers',   requireAuth, require('./routes/shared/suppliers'));
+app.use('/api/criteria',    requireAuth, require('./routes/shared/criteria'));
+app.use('/api/sessions',    requireAuth, require('./routes/supervisor/sessions'));
+app.use('/api/admin',       requireAuth, require('./routes/admin/admin'));
+app.use('/api/supervisor',  requireAuth, require('./routes/supervisor/supervisor'));
 // Suppliers have no login in this system — reached only via a one-time
 // emailed token, see database/CROSS_EVALUATION_SPEC.md.
-app.use('/api/public/supplier-eval', require('./routes/publicSupplierEval'));
-app.use('/api/service-evaluations', requireAuth, require('./routes/serviceEvaluations'));
+app.use('/api/public/supplier-eval', require('./routes/public/publicSupplierEval'));
+app.use('/api/service-evaluations', requireAuth, require('./routes/shared/serviceEvaluations'));
 
 const { startCronJobs } = require('./utils/cronJobs');
 
