@@ -21,6 +21,19 @@
 const { PRE_CRITERIA, POST_CRITERIA, FUNCTION_MODULES } = require('../../shared/criteria-data.json');
 
 async function seedSet(client, sections, criteriaSet, codePrefix) {
+  // Skip the whole per-row loop below when this set is already fully seeded —
+  // otherwise every server restart re-runs a query per category/item/level
+  // (hundreds of round trips) just to no-op on ON CONFLICT DO NOTHING.
+  const expectedItemCount = sections.reduce(
+    (n, s) => n + s.items.filter(i => !i.divider).length,
+    0
+  );
+  const { rows: existing } = await client.query(
+    'SELECT COUNT(*)::int AS n FROM evaluation_sub_criteria WHERE criteria_set = $1',
+    [criteriaSet]
+  );
+  if (existing[0].n >= expectedItemCount) return;
+
   let coreIndex = 0;
   let sectionIndex = 0;
   for (const section of sections) {

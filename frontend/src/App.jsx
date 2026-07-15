@@ -12,15 +12,22 @@ import AdminPage          from "./pages/AdminPage";
 import UploadHistoryPage  from "./pages/UploadHistoryPage";
 import SupervisorPage     from "./pages/SupervisorPage";
 import LoginPage          from "./pages/LoginPage";
+import ServiceEvalPage    from "./pages/ServiceEvalPage";
 
 // ── Loader: fetch a saved evaluation and render ResultPage read-only ──
 function EvalHistoryLoader({ evalId, user, profilePic, onBack, onViewHistoryEval }) {
   const [loaded, setLoaded] = useState(null);
 
   useEffect(() => {
+    // Same EvalHistoryLoader instance is reused across evalId changes (no
+    // `key` prop — see onViewHistoryEval in App.jsx) — without this guard,
+    // navigating quickly between related evaluations could let an older,
+    // slower response overwrite the newer one's display with no error.
+    let cancelled = false;
     authFetch(`/api/evaluations/${evalId}`)
       .then(r => r.json())
       .then(d => {
+        if (cancelled) return;
         const CRITERIA = getCriteria(d.evalType);
 
         // Scores are stored as 0-5 normalized (rawLv/maxLv*5) at submit time.
@@ -88,7 +95,8 @@ function EvalHistoryLoader({ evalId, user, profilePic, onBack, onViewHistoryEval
           },
         });
       })
-      .catch(() => setLoaded("error"));
+      .catch(() => { if (!cancelled) setLoaded("error"); });
+    return () => { cancelled = true; };
   }, [evalId]);
 
   if (loaded === "error") return (
@@ -152,10 +160,15 @@ export default function App() {
 
   useEffect(() => {
     if (!user) { setProfilePic(null); return; }
+    // Guard against a fast logout-then-login-as-someone-else racing an
+    // older request — without this, the previous user's photo could
+    // briefly land after the new user's fetch resolves first.
+    let cancelled = false;
     authFetch("/api/employees/me")
       .then((r) => r.json())
-      .then((d) => setProfilePic(d.profilePicture || null))
+      .then((d) => { if (!cancelled) setProfilePic(d.profilePicture || null); })
       .catch(() => {});
+    return () => { cancelled = true; };
   }, [user?.empId]);
 
   // Criteria overrides need a live session — fetch once we actually know
@@ -202,6 +215,18 @@ export default function App() {
         onEvaluate={(tab) => { setLandingInitialTab(tab || "active"); setPage("landing"); }}
         onAdmin={() => { setAdminSessionId(null); setAdminInitialTab(null); setPage("admin"); }}
         onSupervisor={() => setPage("supervisor")}
+        onServiceEval={() => setPage("serviceEval")}
+      />
+    );
+  }
+
+  if (page === "serviceEval") {
+    return (
+      <ServiceEvalPage
+        authUser={user}
+        profilePic={profilePic}
+        onBack={() => setPage("portal")}
+        onLogout={handleLogout}
       />
     );
   }

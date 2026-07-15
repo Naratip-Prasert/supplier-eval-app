@@ -142,7 +142,7 @@ VALUES
     'ตรวจสอบความครบถ้วนของปริมาณสินค้าที่จัดส่งเทียบกับใบสั่งซื้อ',
     15, 2
   )
-ON CONFLICT (code) DO NOTHING;
+ON CONFLICT (criteria_set, code) DO NOTHING;
 
 -- ============================================================
 -- SCORE LEVEL DESCRIPTIONS (1-5 per criterion)
@@ -212,4 +212,87 @@ SELECT id, level, txt FROM evaluation_sub_criteria, (VALUES
   (5, 'ครบถ้วนทุกครั้ง')
 ) AS t(level, txt)
 WHERE evaluation_sub_criteria.code = '2.2'
+ON CONFLICT (criterion_id, level) DO NOTHING;
+
+-- ============================================================
+-- SERVICE EVALUATION CRITERIA (cross-evaluation #3/#4 — see
+-- database/CROSS_EVALUATION_SPEC.md section 3.4)
+-- 4 starter items, criteria_set = 'service' — meant to be edited/
+-- expanded later via the existing Criteria Editor, same as any
+-- other criteria_set.
+-- ============================================================
+INSERT INTO evaluation_main_criteria (code, name_th, name_en, total_weight, display_order) VALUES
+  ('SVC', 'การให้บริการ', 'Service', 100, 3)
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO evaluation_sub_criteria (category_id, code, name_th, name_en, detail_th, default_weight, display_order, criteria_set)
+VALUES
+  (
+    (SELECT id FROM evaluation_main_criteria WHERE code = 'SVC'),
+    'SVC1.1', 'ความรวดเร็วในการตอบสนอง', 'Responsiveness',
+    'ความรวดเร็วในการตอบกลับและดำเนินการเมื่อมีการติดต่อหรือร้องขอ',
+    25, 1, 'service'
+  ),
+  (
+    (SELECT id FROM evaluation_main_criteria WHERE code = 'SVC'),
+    'SVC1.2', 'การสื่อสารและความชัดเจน', 'Communication',
+    'ความชัดเจน ถูกต้อง และสม่ำเสมอในการสื่อสารระหว่างการทำงานร่วมกัน',
+    25, 2, 'service'
+  ),
+  (
+    (SELECT id FROM evaluation_main_criteria WHERE code = 'SVC'),
+    'SVC1.3', 'ความเป็นมืออาชีพ', 'Professionalism',
+    'มารยาท ความสุภาพ และความเป็นมืออาชีพในการทำงานร่วมกัน',
+    25, 3, 'service'
+  ),
+  (
+    (SELECT id FROM evaluation_main_criteria WHERE code = 'SVC'),
+    'SVC1.4', 'ความสามารถในการแก้ไขปัญหา', 'Problem-Solving',
+    'ความสามารถในการรับมือและแก้ไขปัญหาที่เกิดขึ้นระหว่างการทำงานร่วมกัน',
+    25, 4, 'service'
+  )
+ON CONFLICT (criteria_set, code) DO NOTHING;
+
+INSERT INTO score_level_descriptions (criterion_id, level, description)
+SELECT id, level, txt FROM evaluation_sub_criteria, (VALUES
+  (1, 'ไม่ตอบสนองหรือใช้เวลานานมาก'),
+  (2, 'ตอบสนองช้า'),
+  (3, 'ตอบสนองปานกลาง'),
+  (4, 'ตอบสนองเร็ว'),
+  (5, 'ตอบสนองทันที')
+) AS t(level, txt)
+WHERE evaluation_sub_criteria.criteria_set = 'service' AND evaluation_sub_criteria.code = 'SVC1.1'
+ON CONFLICT (criterion_id, level) DO NOTHING;
+
+INSERT INTO score_level_descriptions (criterion_id, level, description)
+SELECT id, level, txt FROM evaluation_sub_criteria, (VALUES
+  (1, 'สื่อสารไม่ชัดเจน เข้าใจผิดบ่อยครั้ง'),
+  (2, 'สื่อสารพอเข้าใจได้ แต่ไม่สม่ำเสมอ'),
+  (3, 'สื่อสารชัดเจนในระดับปานกลาง'),
+  (4, 'สื่อสารชัดเจน ครบถ้วนเกือบทุกครั้ง'),
+  (5, 'สื่อสารชัดเจน ถูกต้อง และสม่ำเสมอทุกครั้ง')
+) AS t(level, txt)
+WHERE evaluation_sub_criteria.criteria_set = 'service' AND evaluation_sub_criteria.code = 'SVC1.2'
+ON CONFLICT (criterion_id, level) DO NOTHING;
+
+INSERT INTO score_level_descriptions (criterion_id, level, description)
+SELECT id, level, txt FROM evaluation_sub_criteria, (VALUES
+  (1, 'ขาดความเป็นมืออาชีพอย่างชัดเจน'),
+  (2, 'มีข้อบกพร่องด้านมารยาท/ความสุภาพบ่อยครั้ง'),
+  (3, 'เป็นมืออาชีพในระดับปานกลาง'),
+  (4, 'เป็นมืออาชีพเกือบทุกครั้ง'),
+  (5, 'เป็นมืออาชีพอย่างสม่ำเสมอทุกครั้ง')
+) AS t(level, txt)
+WHERE evaluation_sub_criteria.criteria_set = 'service' AND evaluation_sub_criteria.code = 'SVC1.3'
+ON CONFLICT (criterion_id, level) DO NOTHING;
+
+INSERT INTO score_level_descriptions (criterion_id, level, description)
+SELECT id, level, txt FROM evaluation_sub_criteria, (VALUES
+  (1, 'ไม่สามารถแก้ไขปัญหาได้ หรือเพิกเฉย'),
+  (2, 'แก้ไขปัญหาได้ช้า ต้องติดตามหลายครั้ง'),
+  (3, 'แก้ไขปัญหาได้ในระดับปานกลาง'),
+  (4, 'แก้ไขปัญหาได้ดี ใช้เวลาพอสมควร'),
+  (5, 'แก้ไขปัญหาได้รวดเร็วและมีประสิทธิภาพ')
+) AS t(level, txt)
+WHERE evaluation_sub_criteria.criteria_set = 'service' AND evaluation_sub_criteria.code = 'SVC1.4'
 ON CONFLICT (criterion_id, level) DO NOTHING;

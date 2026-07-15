@@ -42,8 +42,7 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
   const [sendingAll,      setSendingAll]      = useState(false);
   const [sendingSelected, setSendingSelected] = useState(false);
   const [remindMsg,       setRemindMsg]       = useState(null);
-  const [mainTab,         setMainTab]         = useState("active"); // 'active' | 'completed'
-  const [statusFilter,    setStatusFilter]    = useState(new Set()); // sub-filter within "active": pending/overdue — empty = all
+  const [statusFilter,    setStatusFilter]    = useState(new Set()); // pending/overdue/completed — empty = all
   const [typeFilter,      setTypeFilter]      = useState(new Set());
   const [dateFilter,      setDateFilter]      = useState(DEFAULT_DATE_FILTER);
   const [search,          setSearch]          = useState("");
@@ -93,8 +92,8 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  // Filters/tab changes invalidate the current page + selection
-  useEffect(() => { setPage(1); setSelected(new Set()); }, [mainTab, statusFilter, typeFilter, search, dateFrom, dateTo, dateFilter, sortDir]);
+  // Filters changes invalidate the current page + selection
+  useEffect(() => { setPage(1); setSelected(new Set()); }, [statusFilter, typeFilter, search, dateFrom, dateTo, dateFilter, sortDir]);
 
   // Close the filter popover when clicking outside of it
   useClickOutside(filterPanelRef, filterOpen, () => setFilterOpen(false));
@@ -268,47 +267,55 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
 
   // Session ที่ Approved แล้ว (สถานะรวม = completed) ให้ไปอยู่แค่หน้า
   // "ผลและประวัติการประเมิน" เท่านั้น — ไม่โชว์ซ้ำที่นี่ หน้านี้เก็บไว้เฉพาะ
-  // งานที่ยังไม่จบรอบ (รอประเมิน/รออนุมัติ/ถูกตีกลับ/เกินกำหนด ฯลฯ)
-  const notYetApproved = useMemo(() => tasks.filter(t => t.sessionStatus !== "completed"), [tasks]);
-  const activeTasks    = useMemo(() => notYetApproved.filter(t => t.status !== "completed"), [notYetApproved]);
-  const completedTasks = useMemo(() => notYetApproved.filter(t => t.status === "completed"), [notYetApproved]);
-  const baseList = mainTab === "completed" ? completedTasks : activeTasks;
+  // งานที่ยังไม่จบรอบ (รอประเมิน/รออนุมัติ/ถูกตีกลับ/เกินกำหนด ฯลฯ) — สถานะ
+  // งาน (รอประเมิน/เกินกำหนด/เสร็จสิ้น) กรองผ่าน statusFilter ในแผงตัวกรอง
+  // เดียวกัน แทนที่จะแยกเป็นแท็บ/สรุปตัวเลขซ้ำซ้อนกันหลายจุด
+  // No manual useMemo here — this project's React Compiler auto-memoizes
+  // component bodies, and a Set-typed dependency (statusFilter/typeFilter)
+  // is one it can't always statically prove stable for a hand-rolled
+  // useMemo, so it was skipping optimization on this block entirely.
+  // Letting the compiler handle it directly resolves that instead of
+  // fighting it with a manual memo it doesn't trust.
+  const notYetApproved = tasks.filter(t => t.sessionStatus !== "completed");
 
-  const filtered = useMemo(() => {
-    const from = dateFrom ? new Date(dateFrom) : null;
-    const to   = dateTo ? new Date(dateTo + "T23:59:59") : null;
-    const list = baseList.filter(t => {
-      const matchStatus = mainTab === "completed" || statusFilter.size === 0 || statusFilter.has(t.status);
-      const matchType   = typeFilter.size === 0 || typeFilter.has(t.evalType);
-      const due = new Date(t.dueDate);
-      const matchDate = (!from || due >= from) && (!to || due <= to);
-      const matchUploadDate = matchesDateFilter(t.createdAt, dateFilter);
-      const q = search.trim().toLowerCase();
-      const matchSearch = !q
-        || t.supplierName?.toLowerCase().includes(q)
-        || t.taxId?.toLowerCase().includes(q)
-        || t.vendorCode?.toLowerCase().includes(q)
-        || t.assignedEmail?.toLowerCase().includes(q)
-        || t.assignedName?.toLowerCase().includes(q);
-      return matchStatus && matchType && matchDate && matchUploadDate && matchSearch;
-    });
-    return [...list].sort((a, b) => {
-      const da = new Date(a.dueDate).getTime();
-      const db = new Date(b.dueDate).getTime();
-      if (da !== db) return sortDir === "asc" ? da - db : db - da;
-      return (a.supplierName || "").localeCompare(b.supplierName || "", "th");
-    });
-  }, [baseList, mainTab, statusFilter, typeFilter, search, dateFrom, dateTo, dateFilter, sortDir]);
+  const from = dateFrom ? new Date(dateFrom) : null;
+  const to   = dateTo ? new Date(dateTo + "T23:59:59") : null;
+  const filteredUnsorted = notYetApproved.filter(t => {
+    const matchStatus = statusFilter.size === 0 || statusFilter.has(t.status);
+    const matchType   = typeFilter.size === 0 || typeFilter.has(t.evalType);
+    const due = new Date(t.dueDate);
+    const matchDate = (!from || due >= from) && (!to || due <= to);
+    const matchUploadDate = matchesDateFilter(t.createdAt, dateFilter);
+    const q = search.trim().toLowerCase();
+    const matchSearch = !q
+      || t.supplierName?.toLowerCase().includes(q)
+      || t.taxId?.toLowerCase().includes(q)
+      || t.vendorCode?.toLowerCase().includes(q)
+      || t.assignedEmail?.toLowerCase().includes(q)
+      || t.assignedName?.toLowerCase().includes(q);
+    return matchStatus && matchType && matchDate && matchUploadDate && matchSearch;
+  });
+  const filtered = [...filteredUnsorted].sort((a, b) => {
+    const da = new Date(a.dueDate).getTime();
+    const db = new Date(b.dueDate).getTime();
+    if (da !== db) return sortDir === "asc" ? da - db : db - da;
+    return (a.supplierName || "").localeCompare(b.supplierName || "", "th");
+  });
 
-  const filteredTaskIds = useMemo(() => filtered.map(t => t.id), [filtered]);
-  const filteredSessionIds = useMemo(() => Array.from(new Set(filtered.map(t => t.sessionId))), [filtered]);
+  // Bulk remind/delete only ever make sense for not-yet-done tasks — the
+  // backend already silently skips completed ones for both, but excluding
+  // them here too keeps the button's own count ("ส่ง Email ทั้งหมด (N)")
+  // honest instead of counting rows that won't actually be acted on. Plain
+  // derivations off the already-memoized `filtered`, not memoized again
+  // themselves — cheap enough, and avoids the compiler being unable to
+  // prove a useMemo-of-a-useMemo chain here is safe to preserve.
+  const actionableFiltered = filtered.filter(t => t.status !== "completed");
+  const filteredTaskIds = actionableFiltered.map(t => t.id);
+  const filteredSessionIds = Array.from(new Set(actionableFiltered.map(t => t.sessionId)));
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageItems  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const pageSessionIds = useMemo(() => Array.from(new Set(pageItems.map(t => t.sessionId))), [pageItems]);
-
-  const pendingCount = activeTasks.filter(t => t.status === "pending").length;
-  const overdueCount = activeTasks.filter(t => t.status === "overdue").length;
+  const pageSessionIds = useMemo(() => Array.from(new Set(pageItems.filter(t => t.status !== "completed").map(t => t.sessionId))), [pageItems]);
 
   function toggleSelect(sessionId) {
     setSelected(prev => {
@@ -419,20 +426,8 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
           </div>
         )}
 
-        {/* Stats + Upload button */}
-        <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
-          <div style={{ display: "flex", gap: 10 }}>
-            {[
-              { label: "รอประเมิน",   value: pendingCount,        color: "#f57f17", bg: "#fff8e1" },
-              { label: "เกินกำหนด",   value: overdueCount,        color: "#c62828", bg: "#ffebee" },
-              { label: "เสร็จสิ้น",   value: completedTasks.length, color: "#2e7d32", bg: "#e8f5e9" },
-            ].map(s => (
-              <div key={s.label} style={{ background: s.bg, border: `1px solid ${s.color}22`, borderRadius: 8, padding: "8px 16px", textAlign: "center", minWidth: 80 }}>
-                <div style={{ fontWeight: 800, fontSize: 20, color: s.color }}>{s.value}</div>
-                <div style={{ fontSize: 11, color: s.color }}>{s.label}</div>
-              </div>
-            ))}
-          </div>
+        {/* Upload button */}
+        <div style={{ display: "flex", marginBottom: 20 }}>
           <button
             onClick={() => setShowUploadModal(true)}
             style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, background: "#1b5e20", color: "#fff", border: "none", borderRadius: 8, padding: "10px 20px", cursor: "pointer", fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 14 }}
@@ -446,27 +441,6 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
             {remindMsg.msg}
           </div>
         )}
-
-        {/* ── Main tabs: active vs. completed ── */}
-        <div style={{ display: "flex", gap: 4, background: "#fff", borderRadius: 12, padding: 4, marginBottom: 16, boxShadow: "0 2px 8px rgba(0,0,0,0.06)", width: "fit-content" }}>
-          {[
-            { key: "active",    label: `งานที่รอดำเนินการ (${activeTasks.length})` },
-            { key: "completed", label: `เสร็จสิ้น (${completedTasks.length})` },
-          ].map(t => (
-            <button
-              key={t.key}
-              onClick={() => setMainTab(t.key)}
-              style={{
-                padding: "8px 16px", borderRadius: 9, border: "none", cursor: "pointer",
-                fontSize: 13, fontWeight: mainTab === t.key ? 700 : 500, fontFamily: "Sarabun, sans-serif",
-                background: mainTab === t.key ? "#1b5e20" : "transparent",
-                color: mainTab === t.key ? "#fff" : "#666", transition: "all .15s",
-              }}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
 
         {/* Search + filter trigger */}
         <div style={{ display: "flex", gap: 10, marginBottom: 14, position: "relative" }}>
@@ -512,17 +486,15 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
                 width: 380, maxWidth: "92vw", display: "flex", flexDirection: "column", gap: 16,
               }}
             >
-              {mainTab === "active" && (
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>สถานะงาน</div>
-                  <FilterChips
-                    options={[{ v: "pending", l: "รอประเมิน" }, { v: "overdue", l: "เกินกำหนด" }]}
-                    selected={statusFilter}
-                    onToggle={v => setStatusFilter(s => toggleInSet(s, v))}
-                    onClear={() => setStatusFilter(new Set())}
-                  />
-                </div>
-              )}
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>สถานะงาน</div>
+                <FilterChips
+                  options={[{ v: "pending", l: "รอประเมิน" }, { v: "overdue", l: "เกินกำหนด" }, { v: "completed", l: "เสร็จสิ้น" }]}
+                  selected={statusFilter}
+                  onToggle={v => setStatusFilter(s => toggleInSet(s, v))}
+                  onClear={() => setStatusFilter(new Set())}
+                />
+              </div>
 
               <div>
                 <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>ประเภทการประเมิน</div>
@@ -591,9 +563,10 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
           )}
         </div>
 
-        {/* Bulk action bar — only meaningful for not-yet-completed tasks */}
-        {mainTab === "active" && (
-          <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+        {/* Bulk action bar — counts/targets exclude completed tasks (see
+            filteredTaskIds/filteredSessionIds above), so it's safe to show
+            regardless of what's in the unified list below */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
             <button
               disabled={sendingAll || filteredTaskIds.length === 0}
               onClick={handleRemindAll}
@@ -659,7 +632,6 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
               </>
             )}
           </div>
-        )}
 
         <datalist id="emp-email-list">
           {employees.filter(e => e.email).map(e => <option key={e.employeeId} value={e.email} label={`${e.fullName} (${e.role})`} />)}
@@ -673,15 +645,13 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
             <table className="admin-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr>
-                  {mainTab === "active" && (
-                    <th style={{ width: 30 }}>
-                      <button onClick={toggleSelectAllOnPage} style={{ background: "none", border: "none", cursor: "pointer", display: "flex" }} title="เลือกทั้งหมดในหน้านี้">
-                        {pageSessionIds.length > 0 && pageSessionIds.every(id => selected.has(id))
-                          ? <CheckSquare size={15} color="#1b5e20" />
-                          : <Square size={15} color="#aaa" />}
-                      </button>
-                    </th>
-                  )}
+                  <th style={{ width: 30 }}>
+                    <button onClick={toggleSelectAllOnPage} style={{ background: "none", border: "none", cursor: "pointer", display: "flex" }} title="เลือกทั้งหมดในหน้านี้ (ยกเว้นรายการที่เสร็จสิ้นแล้ว)">
+                      {pageSessionIds.length > 0 && pageSessionIds.every(id => selected.has(id))
+                        ? <CheckSquare size={15} color="#1b5e20" />
+                        : <Square size={15} color="#aaa" />}
+                    </button>
+                  </th>
                   {["Supplier","ประเภท","อัพโหลดเมื่อ","Role","ผู้รับผิดชอบ","ครบกำหนด","สถานะ","สถานะรวม","Email ล่าสุด","จัดการ"].map(h => (
                     <th key={h} style={{ whiteSpace: "nowrap" }}>{h}</th>
                   ))}
@@ -696,13 +666,13 @@ export default function TasksPage({ onBack, onUploadHistory, embedded = false })
                   const isCompleted = t.status === "completed";
                   return (
                     <tr key={t.id} style={isEditing ? { background: "#f8fdf8" } : undefined}>
-                      {mainTab === "active" && (
-                        <td style={{ padding: "10px 12px" }}>
+                      <td style={{ padding: "10px 12px" }}>
+                        {!isCompleted && (
                           <button onClick={() => toggleSelect(t.sessionId)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex" }}>
                             {selected.has(t.sessionId) ? <CheckSquare size={15} color="#1b5e20" /> : <Square size={15} color="#aaa" />}
                           </button>
-                        </td>
-                      )}
+                        )}
+                      </td>
                       <td style={{ padding: "10px 12px", fontWeight: 600 }}>{t.supplierName}</td>
                       <td style={{ padding: "10px 12px", fontSize: 11 }}>{EVAL_TYPE_LABEL[t.evalType] || t.evalType}</td>
                       <td style={{ padding: "10px 12px", fontSize: 11, color: "#888", whiteSpace: "nowrap" }}>

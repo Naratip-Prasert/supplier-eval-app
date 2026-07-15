@@ -46,8 +46,17 @@ export default function AdminUploadModal({ onClose }) {
   const fileRef = useRef();
 
   // กัน setState หลัง component unmount (เช่นปิด modal ระหว่าง upload ยังไม่เสร็จ)
+  // Reset to true on mount (not just declare it via useRef's initial value)
+  // — React 18 StrictMode double-invokes effects in dev (mount → cleanup →
+  // mount again), so the cleanup below fires once "for free" right after
+  // the first mount. Without this line, mountedRef.current is permanently
+  // false from that point on even though the component is genuinely
+  // mounted, silently skipping every setResult/setLoading call forever.
   const mountedRef = useRef(true);
-  useEffect(() => () => { mountedRef.current = false; }, []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   function handleFileSelect(f) {
     if (!f) return;

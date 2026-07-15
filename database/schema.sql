@@ -82,7 +82,13 @@ CREATE TABLE suppliers (
   buyer_name        VARCHAR(200),
   buyer_email       VARCHAR(200),
   evaluator_name    VARCHAR(200),
-  evaluator_email   VARCHAR(200)
+  evaluator_email   VARCHAR(200),
+  -- The supplier's OWN contact email (distinct from buyer_email/evaluator_
+  -- email above, which are internal staff) — destination for the
+  -- supplier_eval_tokens magic-link flow below. Sourced from the Excel
+  -- bulk-upload template; nullable, so a supplier missing this simply
+  -- never gets a link rather than failing anything.
+  contact_email     VARCHAR(200)
 );
 
 CREATE INDEX idx_suppliers_vendor_code    ON suppliers(vendor_code);
@@ -342,6 +348,15 @@ CREATE TABLE supervisor_reviews (
 
 CREATE INDEX idx_supervisor_reviews_session ON supervisor_reviews(session_id);
 CREATE INDEX idx_supervisor_reviews_status  ON supervisor_reviews(status);
+-- Partial (not full-table) unique index: a session can accumulate multiple
+-- historical rows over its lifetime (returned → resubmitted → reviewed
+-- again), but only one 'pending' review at a time — this is what backs
+-- routes/evaluations.js's `ON CONFLICT (session_id) WHERE status = 'pending'`
+-- so two near-simultaneous USER+GCP submission commits can't both create a
+-- duplicate pending review (and a duplicate supervisor notification) for
+-- the same session.
+CREATE UNIQUE INDEX idx_supervisor_reviews_one_pending_per_session
+  ON supervisor_reviews(session_id) WHERE status = 'pending';
 
 -- ============================================================
 -- 16. EMAIL_LOGS — record of every email sent by the app
@@ -356,6 +371,50 @@ CREATE TABLE email_logs (
   status      VARCHAR(10) DEFAULT 'sent',
   error_msg   TEXT,
   sent_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- 17. SUPPLIER_EVAL_TOKENS — one-time magic-link tokens for the
+--     external "Supplier rates User/Buyer" flow (no login for
+--     suppliers — see database/CROSS_EVALUATION_SPEC.md). Same
+--     shape as a typical password-reset-token table: single-use
+--     (used_at), time-boxed (expires_at).
+-- ============================================================
+CREATE TABLE supplier_eval_tokens (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  token       VARCHAR(64) UNIQUE NOT NULL,
+  session_id  UUID        NOT NULL REFERENCES evaluation_sessions(id) ON DELETE CASCADE,
+  supplier_id UUID        NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  used_at     TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_supplier_eval_tokens_token ON supplier_eval_tokens(token);
+
+-- ============================================================
+-- 18. SERVICE_EVALUATIONS — "เชิงบริการ" cross-evaluations between
+--     people (Supplier→User, Supplier→Buyer, User→Buyer). Kept
+--     separate from EVALUATIONS (#13) rather than reusing it,
+--     since that table's employee_id evaluator column is NOT NULL
+--     and can't represent a Supplier as evaluator without loosening
+--     constraints that #1/#2's scoring trigger depends on. One
+--     shared criteria_set ('service' in
+--     evaluation_sub_criteria) covers all three directions for now
+--     — see CROSS_EVALUATION_SPEC.md if that needs to split later.
+-- ============================================================
+CREATE TABLE service_evaluations (
+  id                     UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id             UUID        NOT NULL REFERENCES evaluation_sessions(id) ON DELETE CASCADE,
+  direction              VARCHAR(20) NOT NULL
+                            CHECK (direction IN ('supplier_to_user', 'supplier_to_gcp', 'user_to_gcp')),
+  evaluator_supplier_id  UUID        REFERENCES suppliers(id),   -- set for direction LIKE 'supplier_%'
+  evaluator_employee_id  UUID        REFERENCES employees(id),   -- set for direction = 'user_to_gcp'
+  target_employee_id     UUID        NOT NULL REFERENCES employees(id),
+  total_score            DECIMAL(5,2),
+  grade                  VARCHAR(5),
+  raw_scores             JSONB,
+  submitted_at           TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (session_id, direction, target_employee_id)
 );
 
 -- ============================================================
@@ -451,4 +510,5 @@ $$ LANGUAGE plpgsql;
 -- one trigger that actually matters; keep it AFTER INSERT OR UPDATE.
 CREATE TRIGGER trg_recalculate_score
   AFTER INSERT OR UPDATE ON evaluations
+  FOR EACH ROW
   EXECUTE FUNCTION recalculate_session_final_score();

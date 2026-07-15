@@ -91,6 +91,10 @@ app.use('/api/criteria',    requireAuth, require('./routes/criteria'));
 app.use('/api/sessions',    requireAuth, require('./routes/sessions'));
 app.use('/api/admin',       requireAuth, require('./routes/admin'));
 app.use('/api/supervisor',  requireAuth, require('./routes/supervisor'));
+// Suppliers have no login in this system — reached only via a one-time
+// emailed token, see database/CROSS_EVALUATION_SPEC.md.
+app.use('/api/public/supplier-eval', require('./routes/publicSupplierEval'));
+app.use('/api/service-evaluations', requireAuth, require('./routes/serviceEvaluations'));
 
 const { startCronJobs } = require('./utils/cronJobs');
 

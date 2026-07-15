@@ -168,7 +168,7 @@ router.get('/:vendorCode/permission', async (req, res) => {
     // Fetch employee and supplier in parallel
     const [empResult, supResult] = await Promise.all([
       pool.query(
-        `SELECT id, role FROM employees WHERE employee_id = $1 AND is_active = TRUE`,
+        `SELECT id, role FROM employees WHERE UPPER(employee_id) = UPPER($1) AND is_active = TRUE`,
         [employeeId.trim()]
       ),
       pool.query(

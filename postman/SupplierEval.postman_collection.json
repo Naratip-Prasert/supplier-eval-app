@@ -14,7 +14,9 @@
     { "key": "taskId", "value": "" },
     { "key": "categoryId", "value": "" },
     { "key": "itemId", "value": "" },
-    { "key": "reviewId", "value": "" }
+    { "key": "reviewId", "value": "" },
+    { "key": "supplierEvalToken", "value": "" },
+    { "key": "targetEmployeeId", "value": "" }
   ],
   "event": [
     {
@@ -439,6 +441,65 @@
         {
           "name": "List Upload Batches",
           "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/admin/batches", "host": ["{{baseUrl}}"], "path": ["api", "admin", "batches"] } }
+        }
+      ]
+    },
+    {
+      "name": "Public Supplier Eval",
+      "description": "Cross-evaluation #3 (database/CROSS_EVALUATION_SPEC.md) — supplier rates the User/Buyer who evaluated them, via a one-time emailed magic-link. NOT behind requireAuth (no login cookie needed) — the token itself is the credential. Rate-limited to 20/15min/IP, same as /login. supplierEvalToken comes from the supplier_eval_tokens row created when a supervisor approves a session (only fires if that supplier has contact_email set — not currently populated by any upload flow, so you'll likely need to grab a token directly from the DB to test this manually).",
+      "item": [
+        {
+          "name": "Get Who/What To Rate",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/public/supplier-eval/{{supplierEvalToken}}", "host": ["{{baseUrl}}"], "path": ["api", "public", "supplier-eval", "{{supplierEvalToken}}"] },
+            "description": "404 if token doesn't exist, 410 if already used or expired. Returns { supplierName, targets: [{role, employeeId, fullName}], criteria: [...] } — targets is whichever of USER/GCP have a 'saved' evaluation on that session."
+          }
+        },
+        {
+          "name": "Submit Ratings",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ratings\": [\n    {\n      \"targetEmployeeId\": \"{{targetEmployeeId}}\",\n      \"role\": \"USER\",\n      \"scores\": {\n        \"SVC1.1\": { \"score\": 5 },\n        \"SVC1.2\": { \"score\": 5 },\n        \"SVC1.3\": { \"score\": 5 },\n        \"SVC1.4\": { \"score\": 5 }\n      }\n    }\n  ]\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/public/supplier-eval/{{supplierEvalToken}}", "host": ["{{baseUrl}}"], "path": ["api", "public", "supplier-eval", "{{supplierEvalToken}}"] },
+            "description": "ratings is an array — one entry per target (USER and/or GCP) returned by the GET above, so both can be rated in one call. role must be 'USER' or 'GCP'. Marks the token used — a second call returns 410. Duplicate target within an already-used-up token returns 409 (checked via ON CONFLICT + rowcount, not silently dropped)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Service Evaluations",
+      "description": "Cross-evaluation #4 (database/CROSS_EVALUATION_SPEC.md) — the USER who evaluated a supplier also rates the Buyer (GCP) they worked with on that same session, once it's completed. Behind requireAuth, reuses the normal USER login (login as a USER-role employee first, e.g. EMP-005 / User@1234).",
+      "item": [
+        {
+          "name": "Pending (Sessions I Can Rate My Buyer For)",
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/service-evaluations/pending", "host": ["{{baseUrl}}"], "path": ["api", "service-evaluations", "pending"] } }
+        },
+        {
+          "name": "My Feedback (Ratings I've Received)",
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/service-evaluations/my-feedback", "host": ["{{baseUrl}}"], "path": ["api", "service-evaluations", "my-feedback"] } }
+        },
+        {
+          "name": "Get Criteria",
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/service-evaluations/criteria", "host": ["{{baseUrl}}"], "path": ["api", "service-evaluations", "criteria"] } }
+        },
+        {
+          "name": "Submit Rating",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sessionId\": \"{{sessionId}}\",\n  \"targetEmployeeId\": \"{{targetEmployeeId}}\",\n  \"scores\": {\n    \"SVC1.1\": { \"score\": 5 },\n    \"SVC1.2\": { \"score\": 5 },\n    \"SVC1.3\": { \"score\": 5 },\n    \"SVC1.4\": { \"score\": 5 }\n  }\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/service-evaluations", "host": ["{{baseUrl}}"], "path": ["api", "service-evaluations"] },
+            "description": "Server re-derives from the DB that the logged-in user really was this session's USER evaluator and targetEmployeeId really was its GCP evaluator — 400 if not. Duplicate submission returns 409 (checked via ON CONFLICT + rowcount)."
+          }
         }
       ]
     }

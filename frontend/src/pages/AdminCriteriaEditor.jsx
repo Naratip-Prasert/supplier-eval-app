@@ -1577,7 +1577,9 @@ export default function AdminCriteriaEditor() {
       let item = null;
       let itemSec = null;
       allSecs.forEach(s => s.items?.forEach(it => { if (it.id === id) { item = it; itemSec = s; } }));
-      if (!item) return;
+      // Every SectionCard renders disabled={!!saving} — bailing out here
+      // without clearing it would lock the whole editor until reload.
+      if (!item) { setSaving(null); return; }
       const isEsgItem = !inFunc && itemSec && isEsgSec(itemSec) && payload.defaultWeight != null;
       const esgPool = isEsgItem
         ? itemSec.items.filter(it => {

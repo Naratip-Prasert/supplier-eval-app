@@ -7,7 +7,11 @@
 // ============================================================
 const router = require('express').Router();
 const pool   = require('../db');
-const { sendSupervisorResultEmail } = require('../utils/emailService');
+const crypto = require('crypto');
+const { sendSupervisorResultEmail, sendSupplierEvalInviteEmail } = require('../utils/emailService');
+
+const FE_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+const SUPPLIER_EVAL_TOKEN_TTL_DAYS = 14;
 
 // Current assignees for a session — read from evaluation_tasks (the live
 // source of truth, kept up to date by admin edits) rather than
@@ -144,7 +148,7 @@ router.post('/sessions/:id/approve', async (req, res) => {
     // Fetch session + supplier
     const sessionResult = await client.query(`
       SELECT es.id, es.eval_type, es.final_score, es.final_grade,
-             s.id AS "supplierId", s.supplier_name, s.vendor_code
+             s.id AS "supplierId", s.supplier_name, s.vendor_code, s.contact_email
         FROM evaluation_sessions es
         JOIN suppliers s ON s.id = es.supplier_id
        WHERE es.id = $1 AND es.status = 'pending_review'
@@ -204,6 +208,25 @@ router.post('/sessions/:id/approve', async (req, res) => {
         .catch(e => console.warn('[supervisor] email error:', e.message));
     }
 
+    // Cross-evaluation #3 (see database/CROSS_EVALUATION_SPEC.md): once a
+    // session is truly completed, invite the supplier to rate the staff
+    // who evaluated them, via a one-time magic-link — no supplier login
+    // exists, so a token is the only way in. Silently skipped if the
+    // supplier has no contact_email on file (nothing to send to).
+    if (session.contact_email) {
+      (async () => {
+        const token = crypto.randomBytes(32).toString('hex');
+        const expiresAt = new Date(Date.now() + SUPPLIER_EVAL_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
+        await pool.query(
+          `INSERT INTO supplier_eval_tokens (token, session_id, supplier_id, expires_at)
+             VALUES ($1, $2, $3, $4)`,
+          [token, sessionId, session.supplierId, expiresAt]
+        );
+        const evalUrl = `${FE_URL}/supplier-feedback/${token}`;
+        await sendSupplierEvalInviteEmail(session.contact_email, session.supplier_name, evalUrl);
+      })().catch(e => console.warn('[supervisor] supplier eval invite error:', e.message));
+    }
+
     console.log(`[supervisor] อนุมัติ session ${sessionId} โดย ${req.user.empId}`);
     res.json({ message: 'อนุมัติสำเร็จ', sessionId });
   } catch (err) {
@@ -256,9 +279,14 @@ router.post('/sessions/:id/return', async (req, res) => {
     }
     const supervisorId = supervisorResult.rows[0].id;
 
-    // Reset session → returned
+    // Reset session → returned. Clears final_score/final_grade too — the
+    // recalculate trigger's "not both submitted yet" branch only resets
+    // status, so without this the stale score/grade from the rejected
+    // round would keep showing on session lists until both sides resubmit.
     await client.query(`
-      UPDATE evaluation_sessions SET status = 'returned' WHERE id = $1
+      UPDATE evaluation_sessions
+         SET status = 'returned', final_score = NULL, final_grade = NULL
+       WHERE id = $1
     `, [sessionId]);
 
     // Delete (not soft-mark) the rejected evaluations — the submit

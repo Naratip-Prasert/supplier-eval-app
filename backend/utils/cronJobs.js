@@ -137,6 +137,12 @@ async function notifySupervisors() {
     `);
 
     for (const review of result.rows) {
+      // Only mark notified once at least one supervisor actually got the
+      // email — same reasoning as sendPreEvalInvitations below: marking it
+      // sent when every send failed (e.g. Resend outage) would leave the
+      // review permanently un-notified with nothing left to retry it,
+      // since the query above is gated on notified_at IS NULL.
+      let anySent = false;
       for (const sup of supervisors.rows) {
         try {
           await sendSupervisorNotifyEmail(
@@ -144,11 +150,14 @@ async function notifySupervisors() {
             { supplier_name: review.supplier_name, eval_type: review.evalType, final_score: review.finalScore },
             review.reviewDue
           );
+          anySent = true;
         } catch (e) {
           console.warn(`[cron] supervisor notify failed for ${sup.email}:`, e.message);
         }
       }
-      await pool.query(`UPDATE supervisor_reviews SET notified_at = NOW() WHERE id = $1`, [review.reviewId]);
+      if (anySent) {
+        await pool.query(`UPDATE supervisor_reviews SET notified_at = NOW() WHERE id = $1`, [review.reviewId]);
+      }
     }
   } catch (e) {
     console.error('[cron] notifySupervisors error:', e.message);

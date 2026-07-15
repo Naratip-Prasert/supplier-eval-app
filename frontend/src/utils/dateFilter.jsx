@@ -24,6 +24,17 @@ export function todayRangeFilter() {
   return { preset: "custom", from: t, to: t };
 }
 
+// `new Date("YYYY-MM-DD")` parses as UTC midnight, not local midnight — for
+// Bangkok (UTC+7) that's 07:00 local, so a "from: <today>" filter silently
+// excluded anything created between local midnight and 7am on that date.
+// Building the Date from separate y/m/d numbers instead makes the
+// constructor treat it as local time, matching what the <input type="date">
+// picker's value visually means to whoever picked it.
+function parseLocalDate(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
 export function matchesDateFilter(dateStr, filter) {
   const hasRange = !!(filter.from || filter.to);
   if (!hasRange && (!filter.preset || filter.preset === "all")) return true;
@@ -32,9 +43,9 @@ export function matchesDateFilter(dateStr, filter) {
   const d = new Date(dateStr);
 
   if (hasRange) {
-    if (filter.from && d < new Date(filter.from)) return false;
+    if (filter.from && d < parseLocalDate(filter.from)) return false;
     if (filter.to) {
-      const to = new Date(filter.to);
+      const to = parseLocalDate(filter.to);
       to.setHours(23, 59, 59, 999);
       if (d > to) return false;
     }

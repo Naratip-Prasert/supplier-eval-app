@@ -4,11 +4,19 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Header } from "../components";
-import { ShieldCheck, Camera, Loader2 } from "lucide-react";
+import { ShieldCheck, Camera, Loader2, Star } from "lucide-react";
 import { authFetch } from "../utils/api";
 import { roleThemeColor } from "../styles/theme";
 
 const ROLE_LABEL = { gcp: "GCP", user: "USER", admin: "ADMIN", supervisor: "SUPERVISOR" };
+
+// direction → short Thai label for the "ความคิดเห็นที่ได้รับ" (feedback
+// received) list — see database/CROSS_EVALUATION_SPEC.md cross-eval #3/#4.
+const DIRECTION_LABEL = {
+  supplier_to_user: "จาก Supplier",
+  supplier_to_gcp:  "จาก Supplier",
+  user_to_gcp:      "จากเพื่อนร่วมงาน",
+};
 
 export default function ProfilePage({ authUser, onBack, onProfileUpdate }) {
   const themeColor = roleThemeColor(authUser.role);
@@ -18,6 +26,7 @@ export default function ProfilePage({ authUser, onBack, onProfileUpdate }) {
   const [email,      setEmail]      = useState(authUser.email    || "");
   const [saving,     setSaving]     = useState(false);
   const [error,      setError]      = useState("");
+  const [feedback,   setFeedback]   = useState([]);
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -32,6 +41,10 @@ export default function ProfilePage({ authUser, onBack, onProfileUpdate }) {
         if (d.fullName) setFullName(d.fullName);
         if (d.email)    setEmail(d.email);
       })
+      .catch(() => {});
+    authFetch("/api/service-evaluations/my-feedback")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => { if (!cancelled) setFeedback(Array.isArray(d) ? d : []); })
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
@@ -195,6 +208,32 @@ export default function ProfilePage({ authUser, onBack, onProfileUpdate }) {
               </div>
             ))}
           </div>
+
+          {/* ── Cross-eval #3/#4 feedback received (database/CROSS_EVALUATION_SPEC.md) ── */}
+          {feedback.length > 0 && (
+            <div style={{ margin: "0 20px 22px" }}>
+              <div style={{ fontSize: 11.5, color: "#a8a8a8", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4, display: "flex", alignItems: "center", gap: 5 }}>
+                <Star size={12} /> ความคิดเห็นที่ได้รับ
+              </div>
+              {feedback.map((f) => (
+                <div key={f.id} style={{
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "10px 14px", background: "#fafafa", borderRadius: 10, marginBottom: 6,
+                }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#2a2a2a" }}>{f.supplierName}</div>
+                    <div style={{ fontSize: 11, color: "#999" }}>{DIRECTION_LABEL[f.direction] ?? f.direction}</div>
+                  </div>
+                  <div style={{
+                    fontSize: 13, fontWeight: 700, color: themeColor,
+                    background: `${themeColor}17`, borderRadius: 20, padding: "3px 12px", flexShrink: 0,
+                  }}>
+                    {f.totalScore} · {f.grade}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

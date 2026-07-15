@@ -13,7 +13,7 @@ import { FilterChips, toggleInSet } from "../components/FilterChips";
 import {
   Users, ClipboardList, Upload,
   ArrowLeft, Search, RefreshCw, X,
-  AlertCircle, SlidersHorizontal,
+  AlertCircle, SlidersHorizontal, Star,
 } from "lucide-react";
 import AdminCriteriaEditor from "./AdminCriteriaEditor";
 import { ROLE_THEME, GRADE_COLOR } from "../styles/theme";
@@ -35,6 +35,10 @@ const TABS = [
   {
     key: "sessions", label: "ผลและประวัติการประเมิน", labelEn: "Results & History", icon: ClipboardList,
     color: "#6a1b9a", circleBg: "radial-gradient(circle at 38% 35%, #f3e8fd, #b39ddb 130%)",
+  },
+  {
+    key: "serviceEval", label: "ผลประเมินเชิงบริการ", labelEn: "Service Feedback", icon: Star,
+    color: "#e65100", circleBg: "radial-gradient(circle at 38% 35%, #fff3e0, #ffcc80 130%)",
   },
   {
     key: "criteria", label: "เปลี่ยนเกณฑ์และ Parameter", labelEn: "Criteria Editor", icon: SlidersHorizontal,
@@ -163,6 +167,7 @@ export default function AdminPage({ authUser, onBack, onViewEvaluation, onViewUp
           />
         )}
         {tab === "criteria"  && <AdminCriteriaEditor authUser={authUser} />}
+        {tab === "serviceEval" && <ServiceEvalTab />}
       </div>
 
       <style>{`
@@ -178,6 +183,102 @@ export default function AdminPage({ authUser, onBack, onViewEvaluation, onViewUp
         .admin-table tbody tr:nth-child(even) { background: #fafbfa; }
         .admin-table tbody tr:hover { background: #f1f7f1; }
       `}</style>
+    </div>
+  );
+}
+
+// พ.ศ. dd/mm/yyyy — matches the date format used elsewhere in the Admin
+// upload/task tables, so this new tab doesn't introduce a different style.
+function formatThaiDate(iso) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  const buddhistYear = d.getFullYear() + 543;
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${buddhistYear}`;
+}
+
+// ── Service Feedback Tab ─────────────────────────────────────
+// Cross-eval #3/#4 detail (database/CROSS_EVALUATION_SPEC.md) — one row
+// per service_evaluations record: who was rated, by whom (Supplier or
+// User), which round, when, and the score — not aggregated, so an admin
+// can trace any score back to its exact evaluation.
+function ServiceEvalTab() {
+  const [rows,    setRows]    = useState(null); // null = loading
+  const [search,  setSearch]  = useState("");
+
+  useEffect(() => {
+    authFetch("/api/admin/service-evaluations")
+      .then(r => r.json())
+      .then(d => setRows(Array.isArray(d) ? d : []))
+      .catch(() => setRows([]));
+  }, []);
+
+  const filtered = (rows ?? []).filter(r => {
+    const q = search.toLowerCase();
+    return !q ||
+      r.supplierName?.toLowerCase().includes(q) ||
+      r.targetFullName?.toLowerCase().includes(q) || r.targetEmpCode?.toLowerCase().includes(q) ||
+      r.evaluatorName?.toLowerCase().includes(q)   || r.evaluatorCode?.toLowerCase().includes(q);
+  });
+
+  return (
+    <div>
+      <div style={{ position: "relative", maxWidth: 320, marginBottom: 16 }}>
+        <Search size={15} style={{ position: "absolute", left: 12, top: 11, color: "#aaa" }} />
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="ค้นหาชื่องานประเมิน/ชื่อพนักงาน/ผู้ประเมิน"
+          style={{
+            width: "100%", padding: "9px 12px 9px 34px", borderRadius: 10,
+            border: "1.5px solid #e0e0e0", fontSize: 13, fontFamily: "Sarabun, sans-serif",
+          }}
+        />
+      </div>
+
+      {rows === null && <div style={{ textAlign: "center", padding: 40, color: "#888" }}>กำลังโหลด...</div>}
+
+      {rows?.length === 0 && (
+        <div style={{ textAlign: "center", padding: 40, color: "#bbb" }}>ยังไม่มีผลประเมินเชิงบริการเข้ามา</div>
+      )}
+
+      {filtered.length > 0 && (
+        <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden", boxShadow: "0 2px 10px rgba(0,0,0,0.06)" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: "#fafafa", textAlign: "left" }}>
+                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5 }}>Supplier</th>
+                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5 }}>พนักงาน</th>
+                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5 }}>Role</th>
+                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5 }}>Evaluator</th>
+                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5 }}>Role-Evaluator</th>
+                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5 }}>รอบประเมิน</th>
+                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5 }}>วันที่ประเมิน</th>
+                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5, textAlign: "right" }}>คะแนน</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(r => (
+                <tr key={r.id} style={{ borderTop: "1px solid #f0f0f0" }}>
+                  <td style={{ padding: "10px 16px", fontWeight: 600, color: "#2a2a2a" }}>{r.supplierName}</td>
+                  <td style={{ padding: "10px 16px" }}>
+                    <div style={{ fontWeight: 600, color: "#2a2a2a" }}>{r.targetFullName}</div>
+                    <div style={{ fontSize: 11, color: "#aaa", fontFamily: "monospace" }}>{r.targetEmpCode}</div>
+                  </td>
+                  <td style={{ padding: "10px 16px", color: "#666" }}>{r.targetRole}</td>
+                  <td style={{ padding: "10px 16px" }}>
+                    <div style={{ fontWeight: 600, color: "#2a2a2a" }}>{r.evaluatorName}</div>
+                    <div style={{ fontSize: 11, color: "#aaa", fontFamily: "monospace" }}>{r.evaluatorCode}</div>
+                  </td>
+                  <td style={{ padding: "10px 16px", color: "#666" }}>{r.evaluatorRoleLabel}</td>
+                  <td style={{ padding: "10px 16px", color: "#666" }}>{r.period}</td>
+                  <td style={{ padding: "10px 16px", color: "#666" }}>{formatThaiDate(r.submittedAt)}</td>
+                  <td style={{ padding: "10px 16px", textAlign: "right", fontWeight: 700, color: "#e65100" }}>{r.totalScore}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -629,7 +730,7 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }) {
         <table className="admin-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
             <tr>
-              {["ซัพพลายเออร์", "ประเภทการประเมิน", "Period", "สถานะ", "เสร็จสิ้นเมื่อ", "คะแนนรวม", "เกรด", "ผู้ประเมิน", "ครั้งที่ประเมิน"].map(h => (
+              {["Supplier", "ประเภทการประเมิน", "Period", "สถานะ", "เสร็จสิ้นเมื่อ", "คะแนนรวม", "เกรด", "ผู้ประเมิน", "ครั้งที่ประเมิน"].map(h => (
                 <th key={h}>{h}</th>
               ))}
             </tr>

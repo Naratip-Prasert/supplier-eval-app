@@ -143,6 +143,17 @@ async function sendSupervisorResultEmail(toEmail, toName, supplier, status, note
   return send(toEmail, subject, html, { emailType: 'supervisor_result' });
 }
 
+// ── 7. Supplier eval invite (magic-link, no login) ─────────────
+async function sendSupplierEvalInviteEmail(toEmail, supplierName, evalUrl) {
+  const html = wrap('ขอความคิดเห็นเกี่ยวกับการให้บริการ', `
+    <p>เรียน <strong>${esc(supplierName)}</strong></p>
+    <p>การประเมินรอบล่าสุดของท่านเสร็จสมบูรณ์แล้ว ทางเราขอความคิดเห็นของท่านเกี่ยวกับการให้บริการของทีมงานที่ดูแลท่าน เพื่อนำไปพัฒนาการทำงานร่วมกันต่อไป</p>
+    <a href="${evalUrl}" style="display:inline-block;background:#1a6b1a;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">ให้ความคิดเห็น</a>
+    <p style="margin-top:16px;color:#888;font-size:12px">ลิงก์นี้ใช้ได้ครั้งเดียวและมีอายุจำกัด</p>
+  `);
+  return send(toEmail, `[SPE] ขอความคิดเห็นเกี่ยวกับการให้บริการ`, html, { emailType: 'supplier_eval_invite' });
+}
+
 module.exports = {
   sendInvitationEmail,
   sendReminderEmail,
@@ -150,4 +161,5 @@ module.exports = {
   sendThankyouEmail,
   sendSupervisorNotifyEmail,
   sendSupervisorResultEmail,
+  sendSupplierEvalInviteEmail,
 };

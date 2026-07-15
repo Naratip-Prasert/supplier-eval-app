@@ -748,4 +748,37 @@ router.get('/batches', async (req, res) => {
   }
 });
 
+// ── GET /api/admin/service-evaluations ─────────────────────────
+// Per-evaluation detail for cross-eval #3/#4 (database/CROSS_EVALUATION_SPEC.md)
+// — one row per service_evaluations record, not aggregated, so an admin can
+// see exactly which round/date/evaluator each score came from.
+router.get('/service-evaluations', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        se.id,
+        sessionSup.supplier_name AS "supplierName",
+        target.employee_id AS "targetEmpCode", target.full_name AS "targetFullName", target.role AS "targetRole",
+        CASE WHEN se.direction LIKE 'supplier_%' THEN sup.supplier_name ELSE evalEmp.full_name END AS "evaluatorName",
+        CASE WHEN se.direction LIKE 'supplier_%' THEN sup.vendor_code ELSE evalEmp.employee_id END AS "evaluatorCode",
+        CASE WHEN se.direction LIKE 'supplier_%' THEN 'Supplier' ELSE 'User' END AS "evaluatorRoleLabel",
+        es.period,
+        se.submitted_at AS "submittedAt",
+        se.total_score AS "totalScore",
+        se.grade
+      FROM service_evaluations se
+      JOIN employees target ON target.id = se.target_employee_id
+      JOIN evaluation_sessions es ON es.id = se.session_id
+      JOIN suppliers sessionSup ON sessionSup.id = es.supplier_id
+      LEFT JOIN suppliers sup ON sup.id = se.evaluator_supplier_id
+      LEFT JOIN employees evalEmp ON evalEmp.id = se.evaluator_employee_id
+      ORDER BY se.submitted_at DESC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('GET /api/admin/service-evaluations error:', err);
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+  }
+});
+
 module.exports = router;

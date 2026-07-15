@@ -7,7 +7,7 @@ import { Header, useModal } from "../components";
 import { authFetch } from "../utils/api";
 import {
   ClipboardList, Clock, BarChart2, Shield, CheckSquare,
-  User, LogOut, ArrowRight, AlertTriangle,
+  User, LogOut, ArrowRight, AlertTriangle, Star,
 } from "lucide-react";
 
 // ── Module definitions ────────────────────────────────────────
@@ -39,6 +39,20 @@ const MODULES = [
     roles: ["USER", "GCP"],
     available: true,
     buttonLabel: "ดูประวัติ",
+  },
+  {
+    key: "serviceEval",
+    icon: Star,
+    title: "ประเมิน Buyer",
+    titleEn: "Rate Your Buyer",
+    desc: "หลังงานประเมินซัพพลายเออร์ของคุณได้รับการอนุมัติแล้ว ให้คะแนนการทำงานร่วมกับ Buyer ที่ดูแลรอบนั้น",
+    color: "#e65100",
+    bg: "linear-gradient(135deg, #fff3e0 0%, #fff8e1 100%)",
+    border: "#ffcc80",
+    accent: "#ef6c00",
+    roles: ["USER"],
+    available: true,
+    buttonLabel: "ให้คะแนน",
   },
   {
     key: "dashboard",
@@ -145,7 +159,7 @@ const ROLE_HERO = {
 // ── PortalPage ────────────────────────────────────────────────
 export default function PortalPage({
   authUser, profilePic,
-  onLogout, onProfile, onHistory, onEvaluate, onAdmin, onSupervisor,
+  onLogout, onProfile, onHistory, onEvaluate, onAdmin, onSupervisor, onServiceEval,
 }) {
   const role    = authUser?.role ?? "USER";
   const badge   = ROLE_BADGE[role] ?? ROLE_BADGE.USER;
@@ -168,6 +182,17 @@ export default function PortalPage({
       .catch(() => {});
   }, [role]);
 
+  // Cross-eval #4 (database/CROSS_EVALUATION_SPEC.md) — how many completed
+  // sessions this USER hasn't yet rated their Buyer for.
+  const [pendingServiceEval, setPendingServiceEval] = useState([]);
+  useEffect(() => {
+    if (role !== "USER") return;
+    authFetch("/api/service-evaluations/pending")
+      .then(r => r.ok ? r.json() : [])
+      .then(data => setPendingServiceEval(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, [role]);
+
   const modules = MODULES
     .filter((m) => m.roles.includes(role))
     .sort((a, b) => {
@@ -180,10 +205,11 @@ export default function PortalPage({
 
   const handleModule = (mod) => {
     if (!mod.available) return;
-    if (mod.key === "evaluate")   onEvaluate?.("active");
-    if (mod.key === "history")    onHistory?.();
-    if (mod.key === "admin")      onAdmin?.();
-    if (mod.key === "supervisor") onSupervisor?.();
+    if (mod.key === "evaluate")    onEvaluate?.("active");
+    if (mod.key === "history")     onHistory?.();
+    if (mod.key === "admin")       onAdmin?.();
+    if (mod.key === "supervisor")  onSupervisor?.();
+    if (mod.key === "serviceEval") onServiceEval?.();
   };
 
   const initials = (authUser?.fullName || "?")
@@ -372,7 +398,10 @@ export default function PortalPage({
                 mod={mod}
                 Icon={Icon}
                 onClick={() => handleModule(mod)}
-                badgeCount={mod.key === "evaluate" ? returnedTasks.length : 0}
+                badgeCount={
+                  mod.key === "evaluate" ? returnedTasks.length :
+                  mod.key === "serviceEval" ? pendingServiceEval.length : 0
+                }
               />
             );
           })}
@@ -392,7 +421,8 @@ export default function PortalPage({
 
 // ── Circle bg per module ─────────────────────────────────────
 const CIRCLE_BG = {
-  evaluate:   "radial-gradient(circle at 38% 35%, #f1f8e9, #a5d6a7 130%)",
+  evaluate:    "radial-gradient(circle at 38% 35%, #f1f8e9, #a5d6a7 130%)",
+  serviceEval: "radial-gradient(circle at 38% 35%, #fff3e0, #ffcc80 130%)",
   history:    "radial-gradient(circle at 38% 35%, #e8f4fd, #90caf9 130%)",
   dashboard:  "radial-gradient(circle at 38% 35%, #f8f0ff, #ce93d8 130%)",
   admin:      "radial-gradient(circle at 38% 35%, #fff3e0, #ffab91 130%)",

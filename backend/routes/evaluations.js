@@ -334,10 +334,15 @@ router.post('/', async (req, res) => {
 
       // Both submitted — create supervisor review record
       const reviewDue = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      // Two near-simultaneous USER+GCP submission commits can both read
+      // count=2 and reach here — ON CONFLICT (backed by a partial unique
+      // index on session_id WHERE status='pending', schema.sql) keeps only
+      // one pending review per session instead of a duplicate + duplicate
+      // supervisor notification.
       await pool.query(`
         INSERT INTO supervisor_reviews (session_id, review_due)
         VALUES ($1, $2)
-        ON CONFLICT DO NOTHING
+        ON CONFLICT (session_id) WHERE status = 'pending' DO NOTHING
       `, [sessionId, reviewDue]);
 
       // Fetch session + supplier for email
@@ -386,7 +391,13 @@ router.post('/', async (req, res) => {
 
 // ── GET /api/evaluations ──────────────────────────────────────
 // Returns all sessions with summary (replaces old flat list)
+// Same data exposure as /api/sessions (every supplier's score/grade) —
+// gated the same way (ADMIN/SUPERVISOR only), not just relying on the
+// frontend never calling this with a lesser role logged in.
 router.get('/', async (req, res) => {
+  if (!['ADMIN', 'SUPERVISOR'].includes(req.user?.role)) {
+    return res.status(403).json({ message: 'สิทธิ์ไม่เพียงพอ (ต้องการ ADMIN หรือ SUPERVISOR)' });
+  }
   try {
     const result = await pool.query(
       `SELECT
@@ -666,3 +677,6 @@ router.get('/:id', async (req, res) => {
 });
 
 module.exports = router;
+// Shared with routes/serviceEvaluations.js and routes/publicSupplierEval.js —
+// same weighted-score + grade-threshold formula, one place to change it.
+module.exports.computeScoreAndGrade = computeScoreAndGrade;
