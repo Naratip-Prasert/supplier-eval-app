@@ -7,18 +7,19 @@
 //  PATCH /api/criteria/items/:id/levels    — update levels (ADMIN)
 //  PUT   /api/criteria/reorder             — reorder sections (ADMIN)
 // ============================================================
+import type { Request, Response, NextFunction } from 'express';
 const router = require('express').Router();
 const pool   = require('../db');
 
-function requireAdmin(req, res, next) {
+function requireAdmin(req: Request, res: Response, next: NextFunction) {
   if (req.user?.role !== 'ADMIN') return res.status(403).json({ message: 'สิทธิ์ไม่เพียงพอ (ต้องการ ADMIN)' });
   next();
 }
 
 // ── GET /api/criteria ─────────────────────────────────────────
-router.get('/', async (req, res) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
-    const et = req.query.evalType ?? '';
+    const et = (req.query.evalType as string) ?? '';
     const isFunctionLoad = et === 'function' || /^m\d+$/i.test(et);
     // Function modules are configured separately per Pre/Post track (each
     // track needs its own weight so Core+Func+ESG can independently total
@@ -117,14 +118,14 @@ router.get('/', async (req, res) => {
       ]);
     }
 
-    const levelsByCriterion = {};
-    levelsResult.rows.forEach(row => {
+    const levelsByCriterion: Record<string, any[]> = {};
+    levelsResult.rows.forEach((row: any) => {
       if (!levelsByCriterion[row.criterionId]) levelsByCriterion[row.criterionId] = [];
       levelsByCriterion[row.criterionId].push(row.description);
     });
 
-    const criteriaByCategory = {};
-    criteriaResult.rows.forEach(c => {
+    const criteriaByCategory: Record<string, any[]> = {};
+    criteriaResult.rows.forEach((c: any) => {
       if (!criteriaByCategory[c.categoryId]) criteriaByCategory[c.categoryId] = [];
       criteriaByCategory[c.categoryId].push({
         id:            c.id,
@@ -140,7 +141,7 @@ router.get('/', async (req, res) => {
       });
     });
 
-    const response = categoriesResult.rows.map(cat => ({
+    const response = categoriesResult.rows.map((cat: any) => ({
       id:           cat.id,
       code:         cat.code,
       nameTh:       cat.nameTh,
@@ -153,7 +154,7 @@ router.get('/', async (req, res) => {
     }));
 
     res.json(response);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/criteria error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
@@ -162,7 +163,7 @@ router.get('/', async (req, res) => {
 // ── DELETE /api/criteria/categories/:id ──────────────────────
 // Soft-delete: SET is_active=FALSE (preserves history / score references).
 // Items inside are also soft-deleted via is_active=FALSE.
-router.delete('/categories/:id', requireAdmin, async (req, res) => {
+router.delete('/categories/:id', requireAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   const client = await pool.connect();
   try {
@@ -178,7 +179,7 @@ router.delete('/categories/:id', requireAdmin, async (req, res) => {
     if (result.rowCount === 0) { await client.query('ROLLBACK'); return res.status(404).json({ message: 'ไม่พบข้อมูล' }); }
     await client.query('COMMIT');
     res.json({ message: 'ลบหัวข้อสำเร็จ' });
-  } catch (err) {
+  } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('DELETE /api/criteria/categories/:id error:', err);
     res.status(500).json({ message: 'ลบหัวข้อไม่สำเร็จ', error: err.message });
@@ -188,7 +189,7 @@ router.delete('/categories/:id', requireAdmin, async (req, res) => {
 });
 
 // ── PATCH /api/criteria/categories/:id ───────────────────────
-router.patch('/categories/:id', requireAdmin, async (req, res) => {
+router.patch('/categories/:id', requireAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   const { nameTh, totalWeight, groupWeights, groupLabels } = req.body;
   if (nameTh === undefined && totalWeight === undefined && groupWeights === undefined && groupLabels === undefined) {
@@ -238,14 +239,14 @@ router.patch('/categories/:id', requireAdmin, async (req, res) => {
     );
     if (result.rowCount === 0) return res.status(404).json({ message: 'ไม่พบข้อมูล' });
     res.json({ message: 'อัปเดตหัวข้อสำเร็จ' });
-  } catch (err) {
+  } catch (err: any) {
     console.error('PATCH /api/criteria/categories/:id error:', err);
     res.status(500).json({ message: 'อัปเดตไม่สำเร็จ', error: err.message });
   }
 });
 
 // ── POST /api/criteria/categories — เพิ่ม section ใหม่ ──────────
-router.post('/categories', requireAdmin, async (req, res) => {
+router.post('/categories', requireAdmin, async (req: Request, res: Response) => {
   const { nameTh, totalWeight, codePrefix, type, track } = req.body;
   if (!nameTh?.trim())
     return res.status(400).json({ message: 'กรุณาระบุ nameTh' });
@@ -289,7 +290,7 @@ router.post('/categories', requireAdmin, async (req, res) => {
         `SELECT code FROM evaluation_main_criteria WHERE code LIKE $1 ORDER BY code`,
         [`${funcPrefix}%`]
       );
-      const nums = rows.map(r => { const m = r.code.match(new RegExp(`^${funcPrefix}(\\d+)$`, 'i')); return m ? parseInt(m[1], 10) : 0; }).filter(Boolean);
+      const nums = rows.map((r: any) => { const m = r.code.match(new RegExp(`^${funcPrefix}(\\d+)$`, 'i')); return m ? parseInt(m[1], 10) : 0; }).filter(Boolean);
       const nextNum = nums.length > 0 ? Math.max(...nums) + 1 : 1;
       code = `${funcPrefix}${nextNum}`;
     } else {
@@ -373,7 +374,7 @@ router.post('/categories', requireAdmin, async (req, res) => {
     );
     await client.query('COMMIT');
     res.json({ ...result.rows[0], items: [] });
-  } catch (err) {
+  } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('POST /api/criteria/categories error:', err);
     res.status(500).json({ message: 'เพิ่มหัวข้อไม่สำเร็จ', error: err.message });
@@ -383,7 +384,7 @@ router.post('/categories', requireAdmin, async (req, res) => {
 });
 
 // ── POST /api/criteria/items — เพิ่ม item ใหม่ ───────────────
-router.post('/items', requireAdmin, async (req, res) => {
+router.post('/items', requireAdmin, async (req: Request, res: Response) => {
   const { categoryId, code, nameTh, defaultWeight, criteriaSet, levels } = req.body;
   if (!categoryId || !code || !nameTh || !criteriaSet)
     return res.status(400).json({ message: 'กรุณาระบุ categoryId, code, nameTh, criteriaSet' });
@@ -488,7 +489,7 @@ router.post('/items', requireAdmin, async (req, res) => {
     }
     await client.query('COMMIT');
     res.status(201).json({ id: newId, message: 'เพิ่มรายการสำเร็จ' });
-  } catch (err) {
+  } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('POST /api/criteria/items error:', err);
     res.status(500).json({ message: 'เพิ่มรายการไม่สำเร็จ', error: err.message });
@@ -498,7 +499,7 @@ router.post('/items', requireAdmin, async (req, res) => {
 });
 
 // ── DELETE /api/criteria/items/:id — soft delete ─────────────
-router.delete('/items/:id', requireAdmin, async (req, res) => {
+router.delete('/items/:id', requireAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const result = await pool.query(
@@ -507,14 +508,14 @@ router.delete('/items/:id', requireAdmin, async (req, res) => {
     );
     if (result.rowCount === 0) return res.status(404).json({ message: 'ไม่พบข้อมูล' });
     res.json({ message: 'ลบรายการสำเร็จ' });
-  } catch (err) {
+  } catch (err: any) {
     console.error('DELETE /api/criteria/items/:id error:', err);
     res.status(500).json({ message: 'ลบไม่สำเร็จ', error: err.message });
   }
 });
 
 // ── PATCH /api/criteria/items/:id ────────────────────────────
-router.patch('/items/:id', requireAdmin, async (req, res) => {
+router.patch('/items/:id', requireAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   const { nameTh, detailTh, defaultWeight, code, levelValues } = req.body;
   if (nameTh === undefined && detailTh === undefined && defaultWeight === undefined && code === undefined && levelValues === undefined) {
@@ -559,14 +560,14 @@ router.patch('/items/:id', requireAdmin, async (req, res) => {
     );
     if (result.rowCount === 0) return res.status(404).json({ message: 'ไม่พบข้อมูล' });
     res.json({ message: 'อัปเดตรายการสำเร็จ' });
-  } catch (err) {
+  } catch (err: any) {
     console.error('PATCH /api/criteria/items/:id error:', err);
     res.status(500).json({ message: 'อัปเดตไม่สำเร็จ', error: err.message });
   }
 });
 
 // ── PATCH /api/criteria/items/:id/levels ─────────────────────
-router.patch('/items/:id/levels', requireAdmin, async (req, res) => {
+router.patch('/items/:id/levels', requireAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   const { levels, levelValues } = req.body;
   if (!Array.isArray(levels) || levels.length === 0)
@@ -590,7 +591,7 @@ router.patch('/items/:id/levels', requireAdmin, async (req, res) => {
     }
     await client.query('COMMIT');
     res.json({ message: 'อัปเดตระดับคะแนนสำเร็จ' });
-  } catch (err) {
+  } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('PATCH /api/criteria/items/:id/levels error:', err);
     res.status(500).json({ message: 'อัปเดตไม่สำเร็จ', error: err.message });
@@ -601,7 +602,7 @@ router.patch('/items/:id/levels', requireAdmin, async (req, res) => {
 
 // ── PUT /api/criteria/reorder ─────────────────────────────────
 // Body: { order: [{ id, displayOrder }] }
-router.put('/reorder', requireAdmin, async (req, res) => {
+router.put('/reorder', requireAdmin, async (req: Request, res: Response) => {
   const { order } = req.body;
   if (!Array.isArray(order) || order.length === 0)
     return res.status(400).json({ message: 'order ต้องเป็น array' });
@@ -617,7 +618,7 @@ router.put('/reorder', requireAdmin, async (req, res) => {
     }
     await client.query('COMMIT');
     res.json({ message: 'เรียงลำดับสำเร็จ' });
-  } catch (err) {
+  } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('PUT /api/criteria/reorder error:', err);
     res.status(500).json({ message: 'เรียงลำดับไม่สำเร็จ', error: err.message });
@@ -630,7 +631,7 @@ router.put('/reorder', requireAdmin, async (req, res) => {
 // Body: { sections: [{ code, nameTh, totalWeight, criteriaSet, displayOrder, items: [...] }] }
 // Inserts only rows that don't exist yet (DO NOTHING) — never overwrites
 // admin customisations. Pass { reset: true } to force DO UPDATE instead.
-router.post('/seed', requireAdmin, async (req, res) => {
+router.post('/seed', requireAdmin, async (req: Request, res: Response) => {
   const { sections, reset = false } = req.body;
   if (!Array.isArray(sections) || sections.length === 0)
     return res.status(400).json({ message: 'sections ต้องเป็น array' });
@@ -640,10 +641,10 @@ router.post('/seed', requireAdmin, async (req, res) => {
     client = await pool.connect();
     await client.query('BEGIN');
 
-    const newCritIds = []; // only newly-inserted criteria (for level seed)
-    const lvCritIds  = [];
-    const lvLevels   = [];
-    const lvDescs    = [];
+    const newCritIds: string[] = []; // only newly-inserted criteria (for level seed)
+    const lvCritIds: string[]  = [];
+    const lvLevels: number[]   = [];
+    const lvDescs: string[]    = [];
 
     for (const section of sections) {
       // Category: upsert only if reset=true, otherwise insert-if-missing
@@ -708,7 +709,7 @@ router.post('/seed', requireAdmin, async (req, res) => {
           newCritIds.push(critId);
         }
 
-        (item.levels ?? []).forEach((desc, li) => {
+        (item.levels ?? []).forEach((desc: any, li: number) => {
           lvCritIds.push(critId);
           lvLevels.push(li + 1);
           lvDescs.push(desc);
@@ -734,7 +735,7 @@ router.post('/seed', requireAdmin, async (req, res) => {
     await client.query('COMMIT');
     const verb = reset ? 'รีเซ็ต' : 'เพิ่ม';
     res.json({ message: `${verb}ข้อมูลสำเร็จ (${sections.length} หัวข้อ, ${newCritIds.length} รายการใหม่)` });
-  } catch (err) {
+  } catch (err: any) {
     if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('POST /api/criteria/seed error:', err);
     res.status(500).json({ message: 'นำเข้าข้อมูลไม่สำเร็จ', error: err.message });

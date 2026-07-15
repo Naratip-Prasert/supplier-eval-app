@@ -7,6 +7,8 @@
 //  POST /api/admin/tasks/:id/remind  — manual remind
 //  GET  /api/admin/batches           — upload history
 // ============================================================
+import type { Request, Response, NextFunction } from 'express';
+type RequestWithFile = Request & { file?: { buffer: Buffer; originalname: string } };
 const router = require('express').Router();
 const pool   = require('../db');
 const multer = require('multer');
@@ -14,7 +16,7 @@ const XLSX   = require('xlsx');
 const { sendInvitationEmail } = require('../utils/emailService');
 
 // ADMIN only middleware
-router.use((req, res, next) => {
+router.use((req: Request, res: Response, next: NextFunction) => {
   if (req.user?.role !== 'ADMIN') {
     return res.status(403).json({ message: 'สิทธิ์ไม่เพียงพอ (ต้องการ ADMIN)' });
   }
@@ -25,21 +27,21 @@ router.use((req, res, next) => {
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
+  fileFilter: (req: Request, file: any, cb: (error: Error | null, acceptFile: boolean) => void) => {
     const ok = /\.(xlsx|xls|csv)$/i.test(file.originalname);
     cb(ok ? null : new Error('รองรับเฉพาะไฟล์ .xlsx, .xls, .csv'), ok);
   },
 });
 
 // ── Parse uploaded file → array of row objects ────────────────
-function parseFile(buffer, originalname) {
+function parseFile(buffer: Buffer, originalname: string): any[] {
   const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
   const ws = wb.Sheets[wb.SheetNames[0]];
   return XLSX.utils.sheet_to_json(ws, { defval: null });
 }
 
 // ── Normalize column names (case-insensitive, trim spaces) ────
-function norm(row, key) {
+function norm(row: Record<string, any>, key: string): any {
   const found = Object.keys(row).find(k => k.trim().toLowerCase() === key.toLowerCase());
   return found ? row[found] : null;
 }
@@ -50,7 +52,7 @@ function norm(row, key) {
 // order instead, which silently misreads e.g. "01/09/2025" as
 // January 9th instead of September 1st (no error, just wrong date),
 // throwing off every downstream due-date calculation.
-function toDate(val) {
+function toDate(val: any): Date | null {
   if (!val) return null;
   if (val instanceof Date) return val;
   if (typeof val === 'number') {
@@ -78,20 +80,20 @@ function toDate(val) {
 }
 
 // ── Add days to a date ────────────────────────────────────────
-function addDays(date, n) {
+function addDays(date: Date | string | number, n: number): Date {
   const d = new Date(date);
   d.setDate(d.getDate() + n);
   return d;
 }
 
 // ── POST /api/admin/upload/pre-post ──────────────────────────
-router.post('/upload/pre-post', upload.single('file'), async (req, res) => {
+router.post('/upload/pre-post', upload.single('file'), async (req: RequestWithFile, res: Response) => {
   if (!req.file) return res.status(400).json({ message: 'กรุณาแนบไฟล์' });
 
   let rows;
   try {
     rows = parseFile(req.file.buffer, req.file.originalname);
-  } catch (e) {
+  } catch (e: any) {
     return res.status(400).json({ message: 'ไม่สามารถอ่านไฟล์ได้', error: e.message });
   }
 
@@ -107,7 +109,7 @@ router.post('/upload/pre-post', upload.single('file'), async (req, res) => {
 
     // Get uploader employee id
     const uploaderResult = await client.query(
-      `SELECT id FROM employees WHERE employee_id = $1`, [req.user.empId]
+      `SELECT id FROM employees WHERE employee_id = $1`, [req.user!.empId]
     );
     const uploaderId = uploaderResult.rows[0]?.id || null;
 
@@ -118,8 +120,9 @@ router.post('/upload/pre-post', upload.single('file'), async (req, res) => {
     `, [uploaderId, req.file.originalname, rows.length]);
     batchId = batchResult.rows[0].id;
 
-    const summary = { processed: 0, skipped: 0, pre_eval: 0, post_eval: 0, warnings: [] };
-    const invitationTasks = []; // collect for email after commit
+    const summary: { processed: number; skipped: number; pre_eval: number; post_eval: number; warnings: string[] } =
+      { processed: 0, skipped: 0, pre_eval: 0, post_eval: 0, warnings: [] };
+    const invitationTasks: any[] = []; // collect for email after commit
 
     for (const row of rows) {
       const taxId        = String(norm(row, 'TAX_ID') || '').trim();
@@ -170,7 +173,7 @@ router.post('/upload/pre-post', upload.single('file'), async (req, res) => {
       if (evalType === 'pre_eval') {
         dueDate = addDays(new Date(), 30);
       } else {
-        dueDate = addDays(ptaDate, 90);
+        dueDate = addDays(ptaDate!, 90);
       }
 
       const period = evalType === 'pre_eval' ? 'New Supplier / ผู้ขายรายใหม่' : 'Post 90 Days';
@@ -261,12 +264,12 @@ router.post('/upload/pre-post', upload.single('file'), async (req, res) => {
     for (const task of invitationTasks) {
       sendInvitationEmail(task, task.supplier)
         .then(() => pool.query(`UPDATE evaluation_tasks SET invitation_sent_at = NOW() WHERE id = $1`, [task.id]))
-        .catch(e => console.warn('[admin upload] invitation email error:', e.message));
+        .catch((e: any) => console.warn('[admin upload] invitation email error:', e.message));
     }
 
     console.log(`[admin] upload pre-post: ${summary.processed} processed, ${summary.skipped} skipped`);
     res.status(201).json({ message: 'อัพโหลดสำเร็จ', batchId, ...summary });
-  } catch (err) {
+  } catch (err: any) {
     await client.query('ROLLBACK');
     if (typeof batchId !== 'undefined') {
       await pool.query(`UPDATE supplier_upload_batches SET status='error', error_msg=$1 WHERE id=$2`,
@@ -280,7 +283,7 @@ router.post('/upload/pre-post', upload.single('file'), async (req, res) => {
 });
 
 // ── POST /api/admin/upload/periodic ──────────────────────────
-router.post('/upload/periodic', upload.single('file'), async (req, res) => {
+router.post('/upload/periodic', upload.single('file'), async (req: RequestWithFile, res: Response) => {
   if (!req.file) return res.status(400).json({ message: 'กรุณาแนบไฟล์' });
   const { evalType } = req.body; // 'half_year' | 'yearly'
   if (!['half_year', 'yearly'].includes(evalType)) {
@@ -290,7 +293,7 @@ router.post('/upload/periodic', upload.single('file'), async (req, res) => {
   let rows;
   try {
     rows = parseFile(req.file.buffer, req.file.originalname);
-  } catch (e) {
+  } catch (e: any) {
     return res.status(400).json({ message: 'ไม่สามารถอ่านไฟล์ได้', error: e.message });
   }
 
@@ -305,7 +308,7 @@ router.post('/upload/periodic', upload.single('file'), async (req, res) => {
     await client.query('BEGIN');
 
     const uploaderResult = await client.query(
-      `SELECT id FROM employees WHERE employee_id = $1`, [req.user.empId]
+      `SELECT id FROM employees WHERE employee_id = $1`, [req.user!.empId]
     );
     const uploaderId = uploaderResult.rows[0]?.id || null;
 
@@ -324,8 +327,9 @@ router.post('/upload/periodic', upload.single('file'), async (req, res) => {
     // resolved as if they were "the same" evaluation period.
     const cycleYear = new Date().getFullYear();
     const period  = evalType === 'half_year' ? `Half-Year ${cycleYear}` : `Yearly ${cycleYear}`;
-    const summary = { processed: 0, skipped: 0, warnings: [] };
-    const invitationTasks = [];
+    const summary: { processed: number; skipped: number; warnings: string[] } =
+      { processed: 0, skipped: 0, warnings: [] };
+    const invitationTasks: any[] = [];
 
     for (const row of rows) {
       const taxId        = String(norm(row, 'TAX_ID') || '').trim();
@@ -430,12 +434,12 @@ router.post('/upload/periodic', upload.single('file'), async (req, res) => {
     for (const task of invitationTasks) {
       sendInvitationEmail(task, task.supplier)
         .then(() => pool.query(`UPDATE evaluation_tasks SET invitation_sent_at = NOW() WHERE id = $1`, [task.id]))
-        .catch(e => console.warn('[admin upload periodic] invitation email error:', e.message));
+        .catch((e: any) => console.warn('[admin upload periodic] invitation email error:', e.message));
     }
 
     console.log(`[admin] upload periodic (${evalType}): ${summary.processed} processed`);
     res.status(201).json({ message: 'อัพโหลดสำเร็จ', batchId, ...summary });
-  } catch (err) {
+  } catch (err: any) {
     await client.query('ROLLBACK');
     if (typeof batchId !== 'undefined') {
       await pool.query(`UPDATE supplier_upload_batches SET status='error', error_msg=$1 WHERE id=$2`,
@@ -449,7 +453,7 @@ router.post('/upload/periodic', upload.single('file'), async (req, res) => {
 });
 
 // ── GET /api/admin/tasks ──────────────────────────────────────
-router.get('/tasks', async (req, res) => {
+router.get('/tasks', async (req: Request, res: Response) => {
   const { status, role, vendorCode } = req.query;
 
   try {
@@ -482,14 +486,14 @@ router.get('/tasks', async (req, res) => {
       LIMIT 500
     `, [status || null, role || null, vendorCode || null]);
     res.json(result.rows);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/admin/tasks error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
 });
 
 // ── POST /api/admin/tasks/:id/remind ─────────────────────────
-router.post('/tasks/:id/remind', async (req, res) => {
+router.post('/tasks/:id/remind', async (req: Request, res: Response) => {
   try {
     const taskResult = await pool.query(`
       SELECT et.*, s.supplier_name, s.vendor_code
@@ -511,7 +515,7 @@ router.post('/tasks/:id/remind', async (req, res) => {
     await pool.query(`UPDATE evaluation_tasks SET reminder_sent_at = NOW() WHERE id = $1`, [req.params.id]);
 
     res.json({ message: 'ส่ง reminder สำเร็จ', email: task.assigned_email });
-  } catch (err) {
+  } catch (err: any) {
     console.error('POST /api/admin/tasks/:id/remind error:', err);
     res.status(500).json({ message: 'ส่ง reminder ไม่สำเร็จ', error: err.message });
   }
@@ -526,7 +530,7 @@ router.post('/tasks/:id/remind', async (req, res) => {
 // doesn't match anyone in the system (ad-hoc external recipient).
 // Re-arms reminder/overdue emails when due_date changes, and
 // re-arms the full invite cycle when the assignee changes.
-router.patch('/tasks/:id', async (req, res) => {
+router.patch('/tasks/:id', async (req: Request, res: Response) => {
   const { assignedName, assignedEmail, dueDate } = req.body;
 
   try {
@@ -598,9 +602,9 @@ router.patch('/tasks/:id', async (req, res) => {
       req.params.id,
     ]);
 
-    console.log(`[admin] แก้ไข task ${req.params.id} โดย ${req.user.empId}`);
+    console.log(`[admin] แก้ไข task ${req.params.id} โดย ${req.user!.empId}`);
     res.json({ message: 'แก้ไขสำเร็จ', id: result.rows[0].id });
-  } catch (err) {
+  } catch (err: any) {
     console.error('PATCH /api/admin/tasks/:id error:', err);
     res.status(500).json({ message: 'แก้ไขไม่สำเร็จ', error: err.message });
   }
@@ -611,7 +615,7 @@ router.patch('/tasks/:id', async (req, res) => {
 // session). Blocked once it's gone to supervisor review or beyond,
 // so finished work can't be casually wiped — use this only to undo
 // a bad upload before anyone has acted on it.
-router.delete('/sessions/:sessionId', async (req, res) => {
+router.delete('/sessions/:sessionId', async (req: Request, res: Response) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -636,9 +640,9 @@ router.delete('/sessions/:sessionId', async (req, res) => {
     await client.query(`DELETE FROM evaluation_sessions WHERE id = $1`, [req.params.sessionId]);
 
     await client.query('COMMIT');
-    console.log(`[admin] ลบรายการประเมิน session ${req.params.sessionId} โดย ${req.user.empId}`);
+    console.log(`[admin] ลบรายการประเมิน session ${req.params.sessionId} โดย ${req.user!.empId}`);
     res.json({ message: 'ลบรายการสำเร็จ' });
-  } catch (err) {
+  } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('DELETE /api/admin/sessions/:sessionId error:', err);
     res.status(500).json({ message: 'ลบไม่สำเร็จ', error: err.message });
@@ -651,7 +655,7 @@ router.delete('/sessions/:sessionId', async (req, res) => {
 // Bulk-send reminder emails. With no body, targets every active
 // (non-completed) task with an assigned email. Pass `taskIds` to
 // scope it to a specific filtered/visible set instead.
-router.post('/tasks/remind-all', async (req, res) => {
+router.post('/tasks/remind-all', async (req: Request, res: Response) => {
   const { taskIds } = req.body || {};
   try {
     const taskResult = await pool.query(`
@@ -669,15 +673,15 @@ router.post('/tasks/remind-all', async (req, res) => {
         await sendReminderEmail(task, { supplier_name: task.supplier_name, vendor_code: task.vendor_code });
         await pool.query(`UPDATE evaluation_tasks SET reminder_sent_at = NOW() WHERE id = $1`, [task.id]);
         sent++;
-      } catch (e) {
+      } catch (e: any) {
         failed++;
         console.warn('[admin remind-all] failed for task', task.id, e.message);
       }
     }
 
-    console.log(`[admin] remind-all: ${sent} ส่งสำเร็จ, ${failed} ล้มเหลว โดย ${req.user.empId}`);
+    console.log(`[admin] remind-all: ${sent} ส่งสำเร็จ, ${failed} ล้มเหลว โดย ${req.user!.empId}`);
     res.json({ message: 'ส่ง reminder ทั้งหมดสำเร็จ', sent, failed, total: taskResult.rows.length });
-  } catch (err) {
+  } catch (err: any) {
     console.error('POST /api/admin/tasks/remind-all error:', err);
     res.status(500).json({ message: 'ส่ง reminder ทั้งหมดไม่สำเร็จ', error: err.message });
   }
@@ -688,7 +692,7 @@ router.post('/tasks/remind-all', async (req, res) => {
 // once. Sessions already past pending/in_progress (i.e. completed
 // or in review) are skipped rather than erroring the whole batch,
 // so a mixed selection still deletes what it safely can.
-router.post('/sessions/bulk-delete', async (req, res) => {
+router.post('/sessions/bulk-delete', async (req: Request, res: Response) => {
   const { sessionIds } = req.body || {};
   if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
     return res.status(400).json({ message: 'กรุณาระบุ sessionIds' });
@@ -714,7 +718,7 @@ router.post('/sessions/bulk-delete', async (req, res) => {
       await client.query(`DELETE FROM evaluation_sessions WHERE id = $1`, [sessionId]);
       await client.query('COMMIT');
       deleted.push(sessionId);
-    } catch (err) {
+    } catch (err: any) {
       await client.query('ROLLBACK');
       console.error('bulk-delete session error:', sessionId, err.message);
       skipped.push(sessionId);
@@ -723,12 +727,12 @@ router.post('/sessions/bulk-delete', async (req, res) => {
     }
   }
 
-  console.log(`[admin] bulk delete: ${deleted.length} ลบ, ${skipped.length} ข้าม โดย ${req.user.empId}`);
+  console.log(`[admin] bulk delete: ${deleted.length} ลบ, ${skipped.length} ข้าม โดย ${req.user!.empId}`);
   res.json({ message: 'ดำเนินการลบหลายรายการสำเร็จ', deleted, skipped });
 });
 
 // ── GET /api/admin/batches ────────────────────────────────────
-router.get('/batches', async (req, res) => {
+router.get('/batches', async (req: Request, res: Response) => {
   try {
     const result = await pool.query(`
       SELECT
@@ -742,7 +746,7 @@ router.get('/batches', async (req, res) => {
       LIMIT 100
     `);
     res.json(result.rows);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/admin/batches error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
@@ -752,7 +756,7 @@ router.get('/batches', async (req, res) => {
 // Per-evaluation detail for cross-eval #3/#4 (database/CROSS_EVALUATION_SPEC.md)
 // — one row per service_evaluations record, not aggregated, so an admin can
 // see exactly which round/date/evaluator each score came from.
-router.get('/service-evaluations', async (req, res) => {
+router.get('/service-evaluations', async (req: Request, res: Response) => {
   try {
     const result = await pool.query(`
       SELECT
@@ -775,7 +779,7 @@ router.get('/service-evaluations', async (req, res) => {
       ORDER BY se.submitted_at DESC
     `);
     res.json(result.rows);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/admin/service-evaluations error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }

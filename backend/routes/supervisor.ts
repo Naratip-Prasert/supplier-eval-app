@@ -5,6 +5,8 @@
 //  POST /api/supervisor/sessions/:id/approve
 //  POST /api/supervisor/sessions/:id/return
 // ============================================================
+import type { Request, Response, NextFunction } from 'express';
+import type { PoolClient } from 'pg';
 const router = require('express').Router();
 const pool   = require('../db');
 const crypto = require('crypto');
@@ -16,7 +18,7 @@ const SUPPLIER_EVAL_TOKEN_TTL_DAYS = 14;
 // Current assignees for a session — read from evaluation_tasks (the live
 // source of truth, kept up to date by admin edits) rather than
 // suppliers.buyer_email/evaluator_email (a stale snapshot from upload time).
-async function getCurrentAssignees(client, sessionId) {
+async function getCurrentAssignees(client: PoolClient, sessionId: string) {
   const result = await client.query(
     `SELECT role, assigned_email AS email, assigned_name AS name
        FROM evaluation_tasks WHERE session_id = $1`,
@@ -26,15 +28,15 @@ async function getCurrentAssignees(client, sessionId) {
 }
 
 // middleware: SUPERVISOR or ADMIN only
-router.use((req, res, next) => {
-  if (!['SUPERVISOR', 'ADMIN'].includes(req.user?.role)) {
+router.use((req: Request, res: Response, next: NextFunction) => {
+  if (!['SUPERVISOR', 'ADMIN'].includes(req.user?.role ?? '')) {
     return res.status(403).json({ message: 'สิทธิ์ไม่เพียงพอ (ต้องการ SUPERVISOR หรือ ADMIN)' });
   }
   next();
 });
 
 // ── GET /api/supervisor/queue ─────────────────────────────────
-router.get('/queue', async (req, res) => {
+router.get('/queue', async (req: Request, res: Response) => {
   try {
     const sessionsResult = await pool.query(`
       SELECT
@@ -62,7 +64,7 @@ router.get('/queue', async (req, res) => {
 
     if (sessionsResult.rows.length === 0) return res.json([]);
 
-    const sessionIds = sessionsResult.rows.map(r => r.sessionId);
+    const sessionIds = sessionsResult.rows.map((r: any) => r.sessionId);
 
     const evalsResult = await pool.query(`
       SELECT
@@ -83,26 +85,26 @@ router.get('/queue', async (req, res) => {
       ORDER BY ev.role
     `, [sessionIds]);
 
-    const evalsBySession = {};
-    evalsResult.rows.forEach(ev => {
+    const evalsBySession: Record<string, any[]> = {};
+    evalsResult.rows.forEach((ev: any) => {
       if (!evalsBySession[ev.sessionId]) evalsBySession[ev.sessionId] = [];
       evalsBySession[ev.sessionId].push(ev);
     });
 
-    const response = sessionsResult.rows.map(s => ({
+    const response = sessionsResult.rows.map((s: any) => ({
       ...s,
       evaluations: evalsBySession[s.sessionId] ?? [],
     }));
 
     res.json(response);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/supervisor/queue error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
 });
 
 // ── GET /api/supervisor/history ───────────────────────────────
-router.get('/history', async (req, res) => {
+router.get('/history', async (req: Request, res: Response) => {
   try {
     const result = await pool.query(`
       SELECT
@@ -130,16 +132,16 @@ router.get('/history', async (req, res) => {
       LIMIT 100
     `);
     res.json(result.rows);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/supervisor/history error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
 });
 
 // ── POST /api/supervisor/sessions/:id/approve ─────────────────
-router.post('/sessions/:id/approve', async (req, res) => {
+router.post('/sessions/:id/approve', async (req: Request, res: Response) => {
   const { notes } = req.body;
-  const sessionId  = req.params.id;
+  const sessionId  = req.params.id as string;
 
   const client = await pool.connect();
   try {
@@ -167,11 +169,11 @@ router.post('/sessions/:id/approve', async (req, res) => {
     // audit trail of who approved this session.
     const supervisorResult = await client.query(
       `SELECT id FROM employees WHERE UPPER(employee_id) = UPPER($1) LIMIT 1`,
-      [req.user.empId]
+      [req.user!.empId]
     );
     if (supervisorResult.rows.length === 0) {
       await client.query('ROLLBACK');
-      console.error(`[supervisor] empId จาก JWT ไม่พบใน employees: ${req.user.empId}`);
+      console.error(`[supervisor] empId จาก JWT ไม่พบใน employees: ${req.user!.empId}`);
       return res.status(401).json({ message: 'ไม่พบบัญชีผู้ใช้ของคุณในระบบ กรุณาเข้าสู่ระบบใหม่' });
     }
     const supervisorId = supervisorResult.rows[0].id;
@@ -205,7 +207,7 @@ router.post('/sessions/:id/approve', async (req, res) => {
     for (const a of assignees) {
       if (!a.email) continue;
       sendSupervisorResultEmail(a.email, a.name, supplier, 'approved', notes)
-        .catch(e => console.warn('[supervisor] email error:', e.message));
+        .catch((e: any) => console.warn('[supervisor] email error:', e.message));
     }
 
     // Cross-evaluation #3 (see database/CROSS_EVALUATION_SPEC.md): once a
@@ -224,12 +226,12 @@ router.post('/sessions/:id/approve', async (req, res) => {
         );
         const evalUrl = `${FE_URL}/supplier-feedback/${token}`;
         await sendSupplierEvalInviteEmail(session.contact_email, session.supplier_name, evalUrl);
-      })().catch(e => console.warn('[supervisor] supplier eval invite error:', e.message));
+      })().catch((e: any) => console.warn('[supervisor] supplier eval invite error:', e.message));
     }
 
-    console.log(`[supervisor] อนุมัติ session ${sessionId} โดย ${req.user.empId}`);
+    console.log(`[supervisor] อนุมัติ session ${sessionId} โดย ${req.user!.empId}`);
     res.json({ message: 'อนุมัติสำเร็จ', sessionId });
-  } catch (err) {
+  } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('POST /api/supervisor/approve error:', err);
     res.status(500).json({ message: 'เกิดข้อผิดพลาด', error: err.message });
@@ -239,9 +241,9 @@ router.post('/sessions/:id/approve', async (req, res) => {
 });
 
 // ── POST /api/supervisor/sessions/:id/return ──────────────────
-router.post('/sessions/:id/return', async (req, res) => {
+router.post('/sessions/:id/return', async (req: Request, res: Response) => {
   const { notes } = req.body;
-  const sessionId  = req.params.id;
+  const sessionId  = req.params.id as string;
 
   if (!notes?.trim()) {
     return res.status(400).json({ message: 'กรุณาระบุหมายเหตุสำหรับการส่งคืน' });
@@ -270,11 +272,11 @@ router.post('/sessions/:id/return', async (req, res) => {
     // the approve handler for why.
     const supervisorResult = await client.query(
       `SELECT id FROM employees WHERE UPPER(employee_id) = UPPER($1) LIMIT 1`,
-      [req.user.empId]
+      [req.user!.empId]
     );
     if (supervisorResult.rows.length === 0) {
       await client.query('ROLLBACK');
-      console.error(`[supervisor] empId จาก JWT ไม่พบใน employees: ${req.user.empId}`);
+      console.error(`[supervisor] empId จาก JWT ไม่พบใน employees: ${req.user!.empId}`);
       return res.status(401).json({ message: 'ไม่พบบัญชีผู้ใช้ของคุณในระบบ กรุณาเข้าสู่ระบบใหม่' });
     }
     const supervisorId = supervisorResult.rows[0].id;
@@ -318,12 +320,12 @@ router.post('/sessions/:id/return', async (req, res) => {
     for (const a of assignees) {
       if (!a.email) continue;
       sendSupervisorResultEmail(a.email, a.name, supplier, 'returned', notes)
-        .catch(e => console.warn('[supervisor] email error:', e.message));
+        .catch((e: any) => console.warn('[supervisor] email error:', e.message));
     }
 
-    console.log(`[supervisor] ส่งคืน session ${sessionId} โดย ${req.user.empId}`);
+    console.log(`[supervisor] ส่งคืน session ${sessionId} โดย ${req.user!.empId}`);
     res.json({ message: 'ส่งคืนสำเร็จ', sessionId });
-  } catch (err) {
+  } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('POST /api/supervisor/return error:', err);
     res.status(500).json({ message: 'เกิดข้อผิดพลาด', error: err.message });
@@ -339,7 +341,7 @@ router.post('/sessions/:id/return', async (req, res) => {
 // rows over multiple return/resubmit cycles, and editing by session id
 // would resolve to an arbitrary (often wrong/stale) row among them.
 // Only the supervisor who wrote it (or ADMIN) may edit.
-router.patch('/reviews/:id/notes', async (req, res) => {
+router.patch('/reviews/:id/notes', async (req: Request, res: Response) => {
   const { notes } = req.body;
   const reviewId   = req.params.id;
 
@@ -360,13 +362,13 @@ router.patch('/reviews/:id/notes', async (req, res) => {
     }
     const review = reviewResult.rows[0];
 
-    if (req.user.role !== 'ADMIN' && review.supervisorEmpId?.toUpperCase() !== req.user.empId?.toUpperCase()) {
+    if (req.user!.role !== 'ADMIN' && review.supervisorEmpId?.toUpperCase() !== req.user!.empId?.toUpperCase()) {
       return res.status(403).json({ message: 'แก้ไขได้เฉพาะหมายเหตุของตัวเองเท่านั้น' });
     }
 
     await pool.query(`UPDATE supervisor_reviews SET notes = $1 WHERE id = $2`, [notes.trim(), review.id]);
     res.json({ message: 'บันทึกหมายเหตุสำเร็จ' });
-  } catch (err) {
+  } catch (err: any) {
     console.error('PATCH /api/supervisor/reviews/:id/notes error:', err);
     res.status(500).json({ message: 'เกิดข้อผิดพลาด', error: err.message });
   }

@@ -42,11 +42,11 @@ async function sendReminderEmails() {
         await sendReminderEmail(task, { supplier_name: task.supplier_name, vendor_code: task.vendor_code });
         await pool.query(`UPDATE evaluation_tasks SET reminder_sent_at = NOW() WHERE id = $1`, [task.id]);
         console.log(`[cron] reminder sent → ${task.assigned_email} for ${task.supplier_name}`);
-      } catch (e) {
+      } catch (e: any) {
         console.warn(`[cron] reminder failed for task ${task.id}:`, e.message);
       }
     }
-  } catch (e) {
+  } catch (e: any) {
     console.error('[cron] sendReminderEmails error:', e.message);
   }
 }
@@ -72,11 +72,11 @@ async function sendOverdueEmails() {
           UPDATE evaluation_tasks SET overdue_sent_at = NOW(), status = 'overdue' WHERE id = $1
         `, [task.id]);
         console.log(`[cron] overdue sent → ${task.assigned_email} for ${task.supplier_name}`);
-      } catch (e) {
+      } catch (e: any) {
         console.warn(`[cron] overdue failed for task ${task.id}:`, e.message);
       }
     }
-  } catch (e) {
+  } catch (e: any) {
     console.error('[cron] sendOverdueEmails error:', e.message);
   }
 }
@@ -99,11 +99,11 @@ async function sendThankyouEmails() {
         await sendThankyouEmail(task, { supplier_name: task.supplier_name, vendor_code: task.vendor_code });
         await pool.query(`UPDATE evaluation_tasks SET thankyou_sent_at = NOW() WHERE id = $1`, [task.id]);
         console.log(`[cron] thankyou sent → ${task.assigned_email} for ${task.supplier_name}`);
-      } catch (e) {
+      } catch (e: any) {
         console.warn(`[cron] thankyou failed for task ${task.id}:`, e.message);
       }
     }
-  } catch (e) {
+  } catch (e: any) {
     console.error('[cron] sendThankyouEmails error:', e.message);
   }
 }
@@ -151,7 +151,7 @@ async function notifySupervisors() {
             review.reviewDue
           );
           anySent = true;
-        } catch (e) {
+        } catch (e: any) {
           console.warn(`[cron] supervisor notify failed for ${sup.email}:`, e.message);
         }
       }
@@ -159,7 +159,7 @@ async function notifySupervisors() {
         await pool.query(`UPDATE supervisor_reviews SET notified_at = NOW() WHERE id = $1`, [review.reviewId]);
       }
     }
-  } catch (e) {
+  } catch (e: any) {
     console.error('[cron] notifySupervisors error:', e.message);
   }
 }
@@ -192,11 +192,11 @@ async function sendPostEvalInvitations() {
         );
         await pool.query(`UPDATE evaluation_tasks SET invitation_sent_at = NOW() WHERE id = $1`, [task.id]);
         console.log(`[cron] post_eval invitation sent → ${task.assigned_email}`);
-      } catch (e) {
+      } catch (e: any) {
         console.warn(`[cron] post_eval invitation failed for task ${task.id}:`, e.message);
       }
     }
-  } catch (e) {
+  } catch (e: any) {
     console.error('[cron] sendPostEvalInvitations error:', e.message);
   }
 }
@@ -231,11 +231,11 @@ async function sendPreEvalInvitations() {
         );
         await pool.query(`UPDATE evaluation_tasks SET invitation_sent_at = NOW() WHERE id = $1`, [task.id]);
         console.log(`[cron] pre_eval invitation (retry) sent → ${task.assigned_email}`);
-      } catch (e) {
+      } catch (e: any) {
         console.warn(`[cron] pre_eval invitation retry failed for task ${task.id}:`, e.message);
       }
     }
-  } catch (e) {
+  } catch (e: any) {
     console.error('[cron] sendPreEvalInvitations error:', e.message);
   }
 }

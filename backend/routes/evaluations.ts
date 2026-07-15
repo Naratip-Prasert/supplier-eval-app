@@ -5,17 +5,23 @@
 //  GET  /api/evaluations  — list all (legacy history endpoint)
 //  GET  /api/evaluations/:id — single evaluation detail
 // ============================================================
+import type { Request, Response } from 'express';
+import type { PoolClient } from 'pg';
 const router = require('express').Router();
 const pool   = require('../db');
 const { sendSupervisorNotifyEmail, sendThankyouEmail } = require('../utils/emailService');
 
 // ── helpers ──────────────────────────────────────────────────
 
-function missingFields(body, fields) {
+function missingFields(body: Record<string, any>, fields: string[]): string[] {
   return fields.filter(f => body[f] === undefined || body[f] === null || body[f] === '');
 }
 
-async function computeScoreAndGrade(client, scoresInput, criteriaMap) {
+async function computeScoreAndGrade(
+  client: PoolClient,
+  scoresInput: Record<string, { score?: number | string; weight?: number | string; note?: string }>,
+  criteriaMap: Record<string, { id: string; code: string; default_weight: number }>
+) {
   let totalRawScore      = 0;
   let totalPossibleWeight = 0;
 
@@ -23,10 +29,10 @@ async function computeScoreAndGrade(client, scoresInput, criteriaMap) {
   // is correct even for criteria codes not yet in the DB.
   for (const code of Object.keys(scoresInput)) {
     const entry  = scoresInput[code];
-    const weight = parseFloat(entry.weight ?? criteriaMap[code]?.default_weight ?? 1);
+    const weight = parseFloat(String(entry.weight ?? criteriaMap[code]?.default_weight ?? 1));
     totalPossibleWeight += weight;
     if (entry.score != null) {
-      totalRawScore += (parseFloat(entry.score) / 5) * weight;
+      totalRawScore += (parseFloat(String(entry.score)) / 5) * weight;
     }
   }
 
@@ -58,14 +64,14 @@ async function computeScoreAndGrade(client, scoresInput, criteriaMap) {
 //     ...
 //   }
 // }
-router.post('/', async (req, res) => {
+router.post('/', async (req: Request, res: Response) => {
   const { vendorCode, evalType, period, productType, scores, sessionId: taskSessionId, moduleCode, customModuleItems } = req.body;
 
   // The acting employee is resolved from the verified JWT (req.user.empId),
   // never from the request body — req.body used to carry an `employeeId`
   // field the client could set to ANY employee code, letting one logged-in
   // user submit (and complete/lock) another employee's evaluation task.
-  const employeeId = req.user.empId;
+  const employeeId = req.user!.empId;
 
   const missing = missingFields(req.body, ['vendorCode', 'evalType', 'period', 'productType', 'scores']);
   if (missing.length > 0) {
@@ -238,8 +244,8 @@ router.post('/', async (req, res) => {
         WHERE code = ANY($1) AND is_active = TRUE AND criteria_set = ANY($2)`,
       [codes, criteriaSets]
     );
-    const criteriaMap = {};
-    criteriaResult.rows.forEach(c => { criteriaMap[c.code] = c; });
+    const criteriaMap: Record<string, { id: string; code: string; default_weight: number }> = {};
+    criteriaResult.rows.forEach((c: any) => { criteriaMap[c.code] = c; });
 
     // Log unknown codes but do not reject (criteria table may be incomplete).
     // CUSTOM.* codes are expected to never resolve — they're deliberately
@@ -263,7 +269,7 @@ router.post('/', async (req, res) => {
     // evaluator (title + level text), persisted via custom_module_items
     // instead of a shared catalog. Their codes (CUSTOM.n) must still count
     // toward total_score even though criteriaMap can't resolve them.
-    const matchedScores = {};
+    const matchedScores: Record<string, { score?: number | string; weight?: number | string; note?: string }> = {};
     for (const code of codes) {
       if (criteriaMap[code] || code.startsWith('CUSTOM.')) matchedScores[code] = scores[code];
     }
@@ -317,11 +323,11 @@ router.post('/', async (req, res) => {
         `SELECT supplier_name, vendor_code FROM suppliers s
            JOIN evaluation_sessions es ON es.supplier_id = s.id WHERE es.id = $1`,
         [sessionId]
-      ).then(async supRes => {
+      ).then(async (supRes: any) => {
         if (supRes.rows.length === 0) return;
         await sendThankyouEmail(task, supRes.rows[0]);
         await pool.query(`UPDATE evaluation_tasks SET thankyou_sent_at = NOW() WHERE id = $1`, [task.id]);
-      }).catch(e => console.warn('[evaluations] thankyou email error:', e.message));
+      }).catch((e: any) => console.warn('[evaluations] thankyou email error:', e.message));
     }
 
     // After commit: check if both USER+GCP have submitted for this session
@@ -329,7 +335,7 @@ router.post('/', async (req, res) => {
     pool.query(
       `SELECT COUNT(*) AS cnt FROM evaluations WHERE session_id = $1 AND status = 'saved'`,
       [sessionId]
-    ).then(async r => {
+    ).then(async (r: any) => {
       if (parseInt(r.rows[0].cnt, 10) < 2) return;
 
       // Both submitted — create supervisor review record
@@ -363,15 +369,15 @@ router.post('/', async (req, res) => {
       `);
       for (const sup of supervisors.rows) {
         sendSupervisorNotifyEmail(sup.email, sup.full_name, sess, reviewDue)
-          .catch(e => console.warn('[evaluations] supervisor notify error:', e.message));
+          .catch((e: any) => console.warn('[evaluations] supervisor notify error:', e.message));
       }
-    }).catch(e => console.warn('[evaluations] post-commit supervisor check error:', e.message));
+    }).catch((e: any) => console.warn('[evaluations] post-commit supervisor check error:', e.message));
 
     res.status(201).json({
       message: 'บันทึกสำเร็จ',
       data: { evaluationId, sessionId, totalScore, grade },
     });
-  } catch (err) {
+  } catch (err: any) {
     await client.query('ROLLBACK');
     // 23505 = unique_violation. The SELECT-then-INSERT dup-checks above can
     // lose a race under concurrent submissions (e.g. double-click, two
@@ -394,8 +400,8 @@ router.post('/', async (req, res) => {
 // Same data exposure as /api/sessions (every supplier's score/grade) —
 // gated the same way (ADMIN/SUPERVISOR only), not just relying on the
 // frontend never calling this with a lesser role logged in.
-router.get('/', async (req, res) => {
-  if (!['ADMIN', 'SUPERVISOR'].includes(req.user?.role)) {
+router.get('/', async (req: Request, res: Response) => {
+  if (!['ADMIN', 'SUPERVISOR'].includes(req.user?.role ?? '')) {
     return res.status(403).json({ message: 'สิทธิ์ไม่เพียงพอ (ต้องการ ADMIN หรือ SUPERVISOR)' });
   }
   try {
@@ -416,7 +422,7 @@ router.get('/', async (req, res) => {
        ORDER BY es.created_at DESC`
     );
     res.json(result.rows);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/evaluations error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
@@ -424,8 +430,8 @@ router.get('/', async (req, res) => {
 
 // ── GET /api/evaluations/all  (ADMIN only) ───────────────────
 // Returns every evaluation in the system with evaluator info
-router.get('/all', async (req, res) => {
-  if (req.user.role !== 'ADMIN') {
+router.get('/all', async (req: Request, res: Response) => {
+  if (req.user!.role !== 'ADMIN') {
     return res.status(403).json({ message: 'เฉพาะ Admin เท่านั้น' });
   }
   try {
@@ -455,7 +461,7 @@ router.get('/all', async (req, res) => {
        LIMIT 500`
     );
     res.json(result.rows);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/evaluations/all error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
@@ -463,7 +469,7 @@ router.get('/all', async (req, res) => {
 
 // ── GET /api/evaluations/my ───────────────────────────────────
 // Returns all evaluations submitted by the current user
-router.get('/my', async (req, res) => {
+router.get('/my', async (req: Request, res: Response) => {
   try {
     const result = await pool.query(
       `SELECT
@@ -486,10 +492,10 @@ router.get('/my', async (req, res) => {
        WHERE emp.employee_id = $1
        ORDER BY ev.submitted_at DESC
        LIMIT 100`,
-      [req.user.empId]
+      [req.user!.empId]
     );
     res.json(result.rows);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/evaluations/my error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
@@ -499,8 +505,8 @@ router.get('/my', async (req, res) => {
 // Returns pending/overdue evaluation tasks assigned to the current user
 // (by email), so GCP/USER can see which suppliers they must evaluate
 // instead of typing a vendor code blind.
-router.get('/my-tasks', async (req, res) => {
-  if (!req.user.email) return res.json([]);
+router.get('/my-tasks', async (req: Request, res: Response) => {
+  if (!req.user!.email) return res.json([]);
   try {
     const result = await pool.query(`
       SELECT
@@ -525,9 +531,9 @@ router.get('/my-tasks', async (req, res) => {
         AND et.status != 'completed'
         AND es.status IN ('pending', 'in_progress', 'returned')
       ORDER BY et.due_date ASC
-    `, [req.user.email]);
+    `, [req.user!.email]);
     res.json(result.rows);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/evaluations/my-tasks error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
@@ -539,8 +545,8 @@ router.get('/my-tasks', async (req, res) => {
 // assigned to the current user so the frontend can render a stage
 // tracker (Not Started → In Process → Submitted → Approved/Returned)
 // that keeps following the session after their own part is done.
-router.get('/my-timeline', async (req, res) => {
-  if (!req.user.email) return res.json([]);
+router.get('/my-timeline', async (req: Request, res: Response) => {
+  if (!req.user!.email) return res.json([]);
   try {
     const result = await pool.query(`
       SELECT
@@ -568,9 +574,9 @@ router.get('/my-timeline', async (req, res) => {
       WHERE et.assigned_email = $1
       ORDER BY es.created_at DESC
       LIMIT 50
-    `, [req.user.email]);
+    `, [req.user!.email]);
     res.json(result.rows);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/evaluations/my-timeline error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
@@ -579,7 +585,7 @@ router.get('/my-timeline', async (req, res) => {
 // ── GET /api/evaluations/by-vendor/:vendorCode ────────────────
 // Returns past saved evaluations for one supplier (all eval types/periods),
 // newest first — feeds the "Evaluation History" widget on the Result page.
-router.get('/by-vendor/:vendorCode', async (req, res) => {
+router.get('/by-vendor/:vendorCode', async (req: Request, res: Response) => {
   try {
     const result = await pool.query(
       `SELECT
@@ -601,7 +607,7 @@ router.get('/by-vendor/:vendorCode', async (req, res) => {
       [req.params.vendorCode]
     );
     res.json(result.rows);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/evaluations/by-vendor error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
@@ -609,7 +615,7 @@ router.get('/by-vendor/:vendorCode', async (req, res) => {
 
 // ── GET /api/evaluations/:id ─────────────────────────────────
 // Returns a single evaluation with all its scores
-router.get('/:id', async (req, res) => {
+router.get('/:id', async (req: Request, res: Response) => {
   try {
     const evalResult = await pool.query(
       `SELECT
@@ -670,7 +676,7 @@ router.get('/:id', async (req, res) => {
     );
 
     res.json({ ...evaluation, scores: scoresResult.rows });
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/evaluations/:id error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }

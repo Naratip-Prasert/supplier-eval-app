@@ -1,6 +1,6 @@
 'use strict';
 // ============================================================
-//  utils/seedCriteriaFromConstants.js
+//  utils/seedCriteriaFromConstants.ts
 //  Mirrors shared/criteria-data.json (PRE_CRITERIA / POST_CRITERIA /
 //  FUNCTION_MODULES — also consumed directly by frontend/src/constants.js)
 //  into evaluation_main_criteria / evaluation_sub_criteria /
@@ -18,9 +18,54 @@
 //      separately per track since each track's Core+ESG total differs, so
 //      each needs its own Function weight to independently reach 100%.
 // ============================================================
-const { PRE_CRITERIA, POST_CRITERIA, FUNCTION_MODULES } = require('../../shared/criteria-data.json');
+import type { PoolClient } from 'pg';
+import * as fs from 'fs';
+import * as path from 'path';
 
-async function seedSet(client, sections, criteriaSet, codePrefix) {
+interface CriteriaItem {
+  no: string;
+  weight: number;
+  title: string;
+  levels?: string[];
+  levelValues?: number[];
+  divider?: boolean;
+}
+
+interface CriteriaSection {
+  section: string;
+  weight: number;
+  items: CriteriaItem[];
+}
+
+interface FunctionModule {
+  label: string;
+  items: CriteriaItem[];
+}
+
+// Read via fs + a cwd-relative path (not a relative `require()`) because the
+// compiled dist/ output sits one directory deeper than the .ts source —
+// a `require('../../shared/...')` resolves correctly from utils/ in dev
+// (tsx runs the .ts in place) but breaks once tsc emits to dist/utils/.
+// process.cwd() is stable across both: npm run dev / npm start always
+// launch with cwd = backend/ (same assumption dotenv's default config()
+// already relies on in db.ts).
+const criteriaDataPath = path.join(process.cwd(), '..', 'shared', 'criteria-data.json');
+const {
+  PRE_CRITERIA,
+  POST_CRITERIA,
+  FUNCTION_MODULES,
+}: {
+  PRE_CRITERIA: CriteriaSection[];
+  POST_CRITERIA: CriteriaSection[];
+  FUNCTION_MODULES: Record<string, FunctionModule>;
+} = JSON.parse(fs.readFileSync(criteriaDataPath, 'utf8'));
+
+async function seedSet(
+  client: PoolClient,
+  sections: CriteriaSection[],
+  criteriaSet: string,
+  codePrefix: string
+): Promise<void> {
   // Skip the whole per-row loop below when this set is already fully seeded —
   // otherwise every server restart re-runs a query per category/item/level
   // (hundreds of round trips) just to no-op on ON CONFLICT DO NOTHING.
@@ -40,7 +85,7 @@ async function seedSet(client, sections, criteriaSet, codePrefix) {
     sectionIndex++;
     // Identify ESG sections by name; everything else is a CORE section.
     const isEsg = /ESG/i.test(section.section);
-    let catCode;
+    let catCode: string;
     if (codePrefix.startsWith('FUNC-')) {
       // Function modules: codePrefix IS the full code (e.g. 'FUNC-M1')
       catCode = codePrefix;
@@ -103,12 +148,12 @@ async function seedSet(client, sections, criteriaSet, codePrefix) {
 // is the complement that makes each track total exactly 100%:
 // 100 − (that track's Core+ESG section weights) — mirrors
 // functionSectionWeightFrom() in src/constants.js.
-function functionWeightFor(criteria) {
+function functionWeightFor(criteria: CriteriaSection[]): number {
   const used = (criteria ?? []).reduce((t, sec) => t + (Number(sec.weight) || 0), 0);
   return Math.max(0, Math.round((100 - used) * 100) / 100);
 }
 
-async function seedCriteriaFromConstants(client) {
+async function seedCriteriaFromConstants(client: PoolClient): Promise<void> {
   await seedSet(client, PRE_CRITERIA, 'pre_eval', 'PRE');
   await seedSet(client, POST_CRITERIA, 'post_eval', 'POST');
   const preFuncW  = functionWeightFor(PRE_CRITERIA);

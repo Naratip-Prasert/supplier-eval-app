@@ -1,4 +1,6 @@
 'use strict';
+import type { Request, Response, NextFunction } from 'express';
+import type { PoolClient } from 'pg';
 const express      = require('express'); // express เป็น framework ที่ทำให้ node.js รับ http request ได้ง่าย
 const cors         = require('cors'); // เช็คว่าโดเมนที่เรียกเข้ามา ได้รับอนุญาตให้ดึงข้อมูลจาก API ของเราไหม
 const cookieParser = require('cookie-parser');
@@ -20,8 +22,8 @@ const allowedOrigins = (process.env.FRONTEND_URL || '')
   .filter(Boolean);
 
 app.use(cors({ // app.use(...) คือการเพิ่ม middleware - บอก express ว่าใช้ cor middleware กับทุก req
-  origin: (origin, cb) => {  //กำหนด function ตรวจสอบ origin
-    const isDevLocalhost = !isProd && /^http:\/\/localhost:\d+$/.test(origin);
+  origin: (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {  //กำหนด function ตรวจสอบ origin
+    const isDevLocalhost = !isProd && !!origin && /^http:\/\/localhost:\d+$/.test(origin);
     if (!origin || isDevLocalhost || allowedOrigins.includes(origin)) cb(null, true);
     else cb(new Error('Not allowed by CORS'));
   },
@@ -36,7 +38,7 @@ app.use(cookieParser());
 // cross-site <form> POST can't set a custom header, so requiring one here
 // forces the same origin-check gate onto every mutating request that the
 // JSON routes already get for free (application/json isn't CORS-simple).
-function requireCustomHeader(req, res, next) {
+function requireCustomHeader(req: Request, res: Response, next: NextFunction) {
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
   if (!req.headers['x-requested-with']) {
     return res.status(403).json({ message: 'Forbidden' });
@@ -46,7 +48,7 @@ function requireCustomHeader(req, res, next) {
 app.use(requireCustomHeader);
 
 // ── Request logger ────────────────────────────────────────────
-app.use((req, res, next) => { // เพิ่ม middleware ที่จะรันกับทุก request — รับ parameter 3 ตัวเสมอ: req (request), res (response), next (ฟังก์ชันที่บอกให้ไปต่อ)
+app.use((req: Request, res: Response, next: NextFunction) => { // เพิ่ม middleware ที่จะรันกับทุก request — รับ parameter 3 ตัวเสมอ: req (request), res (response), next (ฟังก์ชันที่บอกให้ไปต่อ)
   const start = Date.now(); // จดเวลาที่ request เข้ามา (millisecond) — ใช้คำนวณว่า request ใช้เวลานานแค่ไหน
   res.on('finish', () => {
     const ms      = Date.now() - start;
@@ -62,7 +64,7 @@ app.use((req, res, next) => { // เพิ่ม middleware ที่จะร�
 
 const requireAuth = require('./middleware/authMiddleware');
 
-app.get("/", (req, res) => {
+app.get("/", (req: Request, res: Response) => {
   res.json({ message: "Supplier Eval API is running" });
 });
 
@@ -99,7 +101,7 @@ app.use('/api/service-evaluations', requireAuth, require('./routes/serviceEvalua
 const { startCronJobs } = require('./utils/cronJobs');
 
 pool.connect()
-  .then(async client => {
+  .then(async (client: PoolClient) => {
     // Reference data that must always be present and correct — kept as an
     // idempotent UPSERT (not a one-time migration) because seed.sql's copy
     // of this table is stale (old 4-grade scheme with no F, wrong score
@@ -119,7 +121,7 @@ pool.connect()
         label_th  = EXCLUDED.label_th,
         label_en  = EXCLUDED.label_en,
         color_hex = EXCLUDED.color_hex
-    `).catch(err => console.warn('grade_thresholds migration warning:', err.message));
+    `).catch((err: any) => console.warn('grade_thresholds migration warning:', err.message));
 
     // group_labels: per-ESG-subgroup label overrides (Thai/English), sibling
     // to the existing group_weights column — lets an admin rename/add/remove
@@ -127,7 +129,7 @@ pool.connect()
     // instead of those 3 groups being permanently hardcoded in constants.js.
     await client.query(`
       ALTER TABLE evaluation_main_criteria ADD COLUMN IF NOT EXISTS group_labels JSONB;
-    `).catch(err => console.warn('group_labels column migration warning:', err.message));
+    `).catch((err: any) => console.warn('group_labels column migration warning:', err.message));
 
     // ── DEAD-CODE REMOVAL NOTE (2026-07-08) ──────────────────────
     // A long chain of one-time schema/data migrations used to run here on
@@ -147,7 +149,7 @@ pool.connect()
     const { seedCriteriaFromConstants } = require('./utils/seedCriteriaFromConstants');
     await seedCriteriaFromConstants(client)
       .then(() => console.log('✅ evaluation_sub_criteria seeded from shared/criteria-data.json'))
-      .catch(err => console.warn('criteria seed warning:', err.message));
+      .catch((err: any) => console.warn('criteria seed warning:', err.message));
 
     // Create default ADMIN account if none exists. The bootstrap password
     // is randomly generated (not a fixed, guessable default like the old
@@ -178,7 +180,7 @@ pool.connect()
       startCronJobs();
     });
   })
-  .catch(err => {
+  .catch((err: any) => {
     console.error('❌ PostgreSQL connection error:', err.message);
     process.exit(1);
   });

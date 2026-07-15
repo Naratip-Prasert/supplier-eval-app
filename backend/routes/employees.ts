@@ -2,14 +2,15 @@
 // ============================================================
 //  route/employees.js
 // ============================================================
+import type { Request, Response } from 'express';
 const router = require('express').Router();
 const pool   = require('../db');
 const jwt    = require('jsonwebtoken');
 const { AUTH_COOKIE, cookieOptions } = require('../utils/cookieOptions');
 
 // ── GET /api/employees  (ADMIN only) ─────────────────────────
-router.get('/', async (req, res) => {
-  if (req.user.role !== 'ADMIN') {
+router.get('/', async (req: Request, res: Response) => {
+  if (req.user!.role !== 'ADMIN') {
     return res.status(403).json({ message: 'เฉพาะ Admin เท่านั้น' });
   }
   try {
@@ -30,14 +31,14 @@ router.get('/', async (req, res) => {
        ORDER BY e.created_at DESC`
     );
     res.json(result.rows);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/employees error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
 });
 
 // ── GET /api/employees/me ─────────────────────────────────────
-router.get('/me', async (req, res) => {
+router.get('/me', async (req: Request, res: Response) => {
   try {
     const result = await pool.query(
       `SELECT e.employee_id    AS "empId",
@@ -51,11 +52,11 @@ router.get('/me', async (req, res) => {
          LEFT JOIN departments d ON d.id = e.department_id
          LEFT JOIN job_titles  j ON j.id = e.job_title_id
         WHERE e.employee_id = $1 AND e.is_active = TRUE`,
-      [req.user.empId]
+      [req.user!.empId]
     );
     if (result.rows.length === 0) return res.status(404).json({ message: 'ไม่พบผู้ใช้' });
     res.json(result.rows[0]);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/employees/me error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
@@ -65,7 +66,7 @@ router.get('/me', async (req, res) => {
 // Name/email are managed by the organization's identity system (or by an
 // ADMIN), not by the employee themselves — this endpoint only ever touches
 // profile_picture, regardless of what else a caller sends.
-router.patch('/me', async (req, res) => {
+router.patch('/me', async (req: Request, res: Response) => {
   const { profilePicture } = req.body;
 
   if (profilePicture && profilePicture.length > 6 * 1024 * 1024) {
@@ -79,7 +80,7 @@ router.patch('/me', async (req, res) => {
           SET profile_picture = $1,
               updated_at      = NOW()
         WHERE employee_id = $2`,
-      [profilePicture || null, req.user.empId]
+      [profilePicture || null, req.user!.empId]
     );
 
     const updated = await client.query(
@@ -93,16 +94,16 @@ router.patch('/me', async (req, res) => {
          LEFT JOIN departments d ON d.id = e.department_id
          LEFT JOIN job_titles  j ON j.id = e.job_title_id
         WHERE e.employee_id = $1`,
-      [req.user.empId]
+      [req.user!.empId]
     );
 
     const payload  = updated.rows[0];
     const newToken = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '8h' });
 
-    console.log(`[employees] อัปเดตโปรไฟล์: ${req.user.empId}`);
+    console.log(`[employees] อัปเดตโปรไฟล์: ${req.user!.empId}`);
     res.cookie(AUTH_COOKIE, newToken, cookieOptions);
     res.json({ message: 'บันทึกสำเร็จ', user: payload });
-  } catch (err) {
+  } catch (err: any) {
     console.error('PATCH /api/employees/me error:', err);
     res.status(500).json({ message: 'บันทึกไม่สำเร็จ', error: err.message });
   } finally {
@@ -115,8 +116,8 @@ router.patch('/me', async (req, res) => {
 // for the admin role/status editor) — was previously reachable by any
 // authenticated role, letting one logged-in user enumerate every other
 // employee's name/role/department just by guessing employee_id values.
-router.get('/:employeeId', async (req, res) => {
-  if (req.user.role !== 'ADMIN') {
+router.get('/:employeeId', async (req: Request, res: Response) => {
+  if (req.user!.role !== 'ADMIN') {
     return res.status(403).json({ message: 'เฉพาะ Admin เท่านั้น' });
   }
   try {
@@ -133,13 +134,13 @@ router.get('/:employeeId', async (req, res) => {
        LEFT JOIN departments d ON d.id = e.department_id
        LEFT JOIN job_titles  j ON j.id = e.job_title_id
        WHERE e.employee_id = $1 AND e.is_active = TRUE`,
-      [req.params.employeeId.trim()]
+      [(req.params.employeeId as string).trim()]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'ไม่พบรหัสพนักงาน' });
     }
     res.json(result.rows[0]);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/employees/:employeeId error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
@@ -147,8 +148,8 @@ router.get('/:employeeId', async (req, res) => {
 
 // ── PATCH /api/employees/:employeeId  (ADMIN only) ────────────
 // Body: { role?, isActive? }
-router.patch('/:employeeId', async (req, res) => {
-  if (req.user.role !== 'ADMIN') {
+router.patch('/:employeeId', async (req: Request, res: Response) => {
+  if (req.user!.role !== 'ADMIN') {
     return res.status(403).json({ message: 'เฉพาะ Admin เท่านั้น' });
   }
   const { role, isActive } = req.body;
@@ -175,7 +176,7 @@ router.patch('/:employeeId', async (req, res) => {
     );
     if (result.rows.length === 0) return res.status(404).json({ message: 'ไม่พบพนักงาน' });
     res.json({ message: 'อัปเดตสำเร็จ' });
-  } catch (err) {
+  } catch (err: any) {
     console.error('PATCH /api/employees/:employeeId error:', err);
     res.status(500).json({ message: 'อัปเดตไม่สำเร็จ', error: err.message });
   }

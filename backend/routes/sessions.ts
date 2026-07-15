@@ -4,6 +4,7 @@
 //  GET /api/sessions      — evaluation history list (req 6)
 //  GET /api/sessions/:id  — session detail with both evaluations
 // ============================================================
+import type { Request, Response, NextFunction } from 'express';
 const router = require('express').Router();
 const pool   = require('../db');
 
@@ -13,8 +14,8 @@ const pool   = require('../db');
 // อะไรก็ได้) เรียก API ตรงๆ ก็ดึงข้อมูลทุก supplier ได้หมด — ต่างจาก
 // /api/evaluations/:id และ /by-vendor ที่ตั้งใจเปิดให้ทุก role ดูได้
 // (พนักงานประเมิน supplier ไหนก็ได้อยู่แล้วตามดีไซน์เดิมของแอป)
-router.use((req, res, next) => {
-  if (!['ADMIN', 'SUPERVISOR'].includes(req.user?.role)) {
+router.use((req: Request, res: Response, next: NextFunction) => {
+  if (!['ADMIN', 'SUPERVISOR'].includes(req.user?.role ?? '')) {
     return res.status(403).json({ message: 'สิทธิ์ไม่เพียงพอ (ต้องการ ADMIN หรือ SUPERVISOR)' });
   }
   next();
@@ -26,8 +27,9 @@ router.use((req, res, next) => {
 // Optional query params:
 //   ?vendorCode=SUP-001  — filter by supplier
 //   ?status=completed    — filter by status
-router.get('/', async (req, res) => {
-  const { vendorCode, status } = req.query;
+router.get('/', async (req: Request, res: Response) => {
+  const vendorCode = req.query.vendorCode as string | undefined;
+  const status = req.query.status as string | undefined;
 
   try {
     const sessionsResult = await pool.query(
@@ -61,7 +63,7 @@ router.get('/', async (req, res) => {
       return res.json([]);
     }
 
-    const sessionIds = sessionsResult.rows.map(r => r.sessionId);
+    const sessionIds = sessionsResult.rows.map((r: any) => r.sessionId);
 
     // Fetch evaluations summary for all sessions in one query
     const evalsResult = await pool.query(
@@ -82,19 +84,19 @@ router.get('/', async (req, res) => {
     );
 
     // Group evaluations by sessionId
-    const evalsBySession = {};
-    evalsResult.rows.forEach(ev => {
+    const evalsBySession: Record<string, any[]> = {};
+    evalsResult.rows.forEach((ev: any) => {
       if (!evalsBySession[ev.sessionId]) evalsBySession[ev.sessionId] = [];
       evalsBySession[ev.sessionId].push(ev);
     });
 
-    const response = sessionsResult.rows.map(session => ({
+    const response = sessionsResult.rows.map((session: any) => ({
       ...session,
       evaluations: evalsBySession[session.sessionId] ?? [],
     }));
 
     res.json(response);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/sessions error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
@@ -102,7 +104,7 @@ router.get('/', async (req, res) => {
 
 // GET /api/sessions/:id
 // Returns a single session with full detail: both evaluations + all their scores.
-router.get('/:id', async (req, res) => {
+router.get('/:id', async (req: Request, res: Response) => {
   try {
     const sessionResult = await pool.query(
       `SELECT
@@ -155,7 +157,7 @@ router.get('/:id', async (req, res) => {
       [session.sessionId]
     );
 
-    const evalIds = evalsResult.rows.map(e => e.id);
+    const evalIds = evalsResult.rows.map((e: any) => e.id);
 
     // Fetch all scores for these evaluations
     const scoresResult = await pool.query(
@@ -177,19 +179,19 @@ router.get('/:id', async (req, res) => {
     );
 
     // Group scores by evaluationId
-    const scoresByEval = {};
-    scoresResult.rows.forEach(s => {
+    const scoresByEval: Record<string, any[]> = {};
+    scoresResult.rows.forEach((s: any) => {
       if (!scoresByEval[s.evaluationId]) scoresByEval[s.evaluationId] = [];
       scoresByEval[s.evaluationId].push(s);
     });
 
-    const evaluations = evalsResult.rows.map(ev => ({
+    const evaluations = evalsResult.rows.map((ev: any) => ({
       ...ev,
       scores: scoresByEval[ev.id] ?? [],
     }));
 
     res.json({ ...session, evaluations });
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/sessions/:id error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }

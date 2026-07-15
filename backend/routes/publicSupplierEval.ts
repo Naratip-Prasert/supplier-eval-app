@@ -9,6 +9,7 @@
 //  GET  /api/public/supplier-eval/:token   — load who/what to rate
 //  POST /api/public/supplier-eval/:token   — submit ratings
 // ============================================================
+import type { Request, Response } from 'express';
 const router = require('express').Router();
 const pool   = require('../db');
 const { rateLimit } = require('express-rate-limit');
@@ -26,7 +27,7 @@ const publicEvalLimiter = rateLimit({
 });
 router.use(publicEvalLimiter);
 
-async function loadToken(token) {
+async function loadToken(token: string) {
   const result = await pool.query(
     `SELECT t.id, t.session_id AS "sessionId", t.supplier_id AS "supplierId",
             t.expires_at AS "expiresAt", t.used_at AS "usedAt",
@@ -40,9 +41,9 @@ async function loadToken(token) {
 }
 
 // ── GET /:token — who to rate + criteria to rate them on ──────
-router.get('/:token', async (req, res) => {
+router.get('/:token', async (req: Request, res: Response) => {
   try {
-    const row = await loadToken(req.params.token);
+    const row = await loadToken(req.params.token as string);
     if (!row) return res.status(404).json({ message: 'ไม่พบลิงก์นี้' });
     if (row.usedAt) return res.status(410).json({ message: 'ลิงก์นี้ถูกใช้ไปแล้ว' });
     if (new Date(row.expiresAt) < new Date()) return res.status(410).json({ message: 'ลิงก์นี้หมดอายุแล้ว' });
@@ -73,7 +74,7 @@ router.get('/:token', async (req, res) => {
       targets: targetsResult.rows,
       criteria: criteriaResult.rows,
     });
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/public/supplier-eval/:token error:', err);
     res.status(500).json({ message: 'เกิดข้อผิดพลาด', error: err.message });
   }
@@ -81,7 +82,7 @@ router.get('/:token', async (req, res) => {
 
 // ── POST /:token — submit ratings for one or both targets ─────
 // Body: { ratings: [ { targetEmployeeId, role: 'USER'|'GCP', scores: { code: { score, weight? } } } ] }
-router.post('/:token', async (req, res) => {
+router.post('/:token', async (req: Request, res: Response) => {
   const { ratings } = req.body;
   if (!Array.isArray(ratings) || ratings.length === 0) {
     return res.status(400).json({ message: 'ไม่มีข้อมูลคะแนน' });
@@ -118,8 +119,8 @@ router.post('/:token', async (req, res) => {
       `SELECT code, default_weight FROM evaluation_sub_criteria
         WHERE criteria_set = 'service' AND is_active = TRUE`
     );
-    const criteriaMap = {};
-    criteriaResult.rows.forEach(c => { criteriaMap[c.code] = { default_weight: c.default_weight }; });
+    const criteriaMap: Record<string, { default_weight: number }> = {};
+    criteriaResult.rows.forEach((c: any) => { criteriaMap[c.code] = { default_weight: c.default_weight }; });
 
     for (const rating of ratings) {
       const { targetEmployeeId, role, scores } = rating;
@@ -147,7 +148,7 @@ router.post('/:token', async (req, res) => {
 
     await client.query('COMMIT');
     res.json({ message: 'ขอบคุณสำหรับความคิดเห็น' });
-  } catch (err) {
+  } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('POST /api/public/supplier-eval/:token error:', err);
     res.status(500).json({ message: 'เกิดข้อผิดพลาด', error: err.message });

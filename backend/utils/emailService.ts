@@ -1,16 +1,36 @@
 'use strict';
+import type { Resend as ResendClient } from 'resend';
 const { Resend } = require('resend');
 const pool = require('../db');
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend: ResendClient = new Resend(process.env.RESEND_API_KEY);
 
 const FROM    = process.env.EMAIL_FROM || 'Supplier Eval <onboarding@resend.dev>';
 const FE_URL  = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+interface TaskEmailInfo {
+  id: number | string;
+  assigned_email: string;
+  assigned_name?: string | null;
+  due_date: string | Date;
+  eval_type_label?: string;
+}
+
+interface SupplierEmailInfo {
+  supplier_name: string;
+  vendor_code: string;
+}
+
+interface SessionEmailInfo {
+  supplier_name: string;
+  eval_type: string;
+  final_score?: number | string | null;
+}
 
 // Escapes values that ultimately come from uploaded Excel data or
 // free-text supervisor notes before interpolating into email HTML —
 // without this, a crafted supplier name/note could inject markup
 // (fake links, broken layout) into emails sent to other employees.
-function esc(value) {
+function esc(value: unknown): string {
   if (value == null) return '';
   return String(value)
     .replace(/&/g, '&amp;')
@@ -21,7 +41,7 @@ function esc(value) {
 }
 
 // ── shared HTML wrapper ────────────────────────────────────────
-function wrap(titleTh, bodyHtml) {
+function wrap(titleTh: string, bodyHtml: string): string {
   return `
     <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:28px">
       <div style="background:#1a6b1a;padding:18px 24px;border-radius:10px 10px 0 0">
@@ -38,27 +58,39 @@ function wrap(titleTh, bodyHtml) {
 // email_logs exists specifically so send failures (and successes) are
 // visible somewhere other than console output, which most deployments
 // never persist — previously nothing ever wrote to this table at all.
-async function logEmail(taskId, emailType, toEmail, subject, status, errorMsg) {
+async function logEmail(
+  taskId: number | string | null,
+  emailType: string | null,
+  toEmail: string,
+  subject: string,
+  status: 'sent' | 'failed',
+  errorMsg?: string | null
+): Promise<void> {
   await pool.query(
     `INSERT INTO email_logs (task_id, email_type, to_email, subject, status, error_msg)
        VALUES ($1, $2, $3, $4, $5, $6)`,
     [taskId, emailType, toEmail, subject, status, errorMsg || null]
-  ).catch(e => console.warn('[emailService] email_logs insert failed:', e.message));
+  ).catch((e: Error) => console.warn('[emailService] email_logs insert failed:', e.message));
 }
 
-async function send(to, subject, html, { taskId = null, emailType = null } = {}) {
+async function send(
+  to: string,
+  subject: string,
+  html: string,
+  { taskId = null, emailType = null }: { taskId?: number | string | null; emailType?: string | null } = {}
+) {
   try {
     const result = await resend.emails.send({ from: FROM, to: [to], subject, html });
     await logEmail(taskId, emailType, to, subject, 'sent', null);
     return result;
-  } catch (err) {
+  } catch (err: any) {
     await logEmail(taskId, emailType, to, subject, 'failed', err.message);
     throw err;
   }
 }
 
 // ── 1. Invitation ──────────────────────────────────────────────
-async function sendInvitationEmail(task, supplier) {
+async function sendInvitationEmail(task: TaskEmailInfo, supplier: SupplierEmailInfo) {
   const dueStr = new Date(task.due_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
   const evalUrl = `${FE_URL}`;
   const html = wrap('แจ้งการประเมิน Supplier', `
@@ -76,7 +108,7 @@ async function sendInvitationEmail(task, supplier) {
 }
 
 // ── 2. Reminder (7 วันก่อน due) ───────────────────────────────
-async function sendReminderEmail(task, supplier) {
+async function sendReminderEmail(task: TaskEmailInfo, supplier: SupplierEmailInfo) {
   const dueStr = new Date(task.due_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
   const html = wrap('เตือนความจำ: ใกล้ครบกำหนดประเมิน', `
     <p>เรียน <strong>${esc(task.assigned_name || task.assigned_email)}</strong></p>
@@ -88,7 +120,7 @@ async function sendReminderEmail(task, supplier) {
 }
 
 // ── 3. Overdue (3 วันหลัง due) ────────────────────────────────
-async function sendOverdueEmail(task, supplier) {
+async function sendOverdueEmail(task: TaskEmailInfo, supplier: SupplierEmailInfo) {
   const dueStr = new Date(task.due_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
   const html = wrap('เกินกำหนด: ยังไม่ได้ประเมิน', `
     <p>เรียน <strong>${esc(task.assigned_name || task.assigned_email)}</strong></p>
@@ -100,7 +132,7 @@ async function sendOverdueEmail(task, supplier) {
 }
 
 // ── 4. Thank-you (หลัง submit) ────────────────────────────────
-async function sendThankyouEmail(task, supplier) {
+async function sendThankyouEmail(task: TaskEmailInfo, supplier: SupplierEmailInfo) {
   const html = wrap('ขอบคุณสำหรับการประเมิน', `
     <p>เรียน <strong>${esc(task.assigned_name || task.assigned_email)}</strong></p>
     <p>ขอบคุณที่ส่งผลการประเมิน Supplier <strong>${esc(supplier.supplier_name)}</strong> เรียบร้อยแล้ว</p>
@@ -110,7 +142,12 @@ async function sendThankyouEmail(task, supplier) {
 }
 
 // ── 5. Supervisor notification (ทั้ง USER+GCP submit แล้ว) ───────
-async function sendSupervisorNotifyEmail(supervisorEmail, supervisorName, session, reviewDue) {
+async function sendSupervisorNotifyEmail(
+  supervisorEmail: string,
+  supervisorName: string | null | undefined,
+  session: SessionEmailInfo,
+  reviewDue: string | Date
+) {
   const dueStr = new Date(reviewDue).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
   const html = wrap('รอการอนุมัติผลประเมิน', `
     <p>เรียน <strong>${esc(supervisorName || supervisorEmail)}</strong></p>
@@ -127,7 +164,13 @@ async function sendSupervisorNotifyEmail(supervisorEmail, supervisorName, sessio
 }
 
 // ── 6. Supervisor result → GCP + USER ───────────────────────────
-async function sendSupervisorResultEmail(toEmail, toName, supplier, status, notes) {
+async function sendSupervisorResultEmail(
+  toEmail: string,
+  toName: string | null | undefined,
+  supplier: SupplierEmailInfo,
+  status: 'approved' | 'returned' | string,
+  notes?: string | null
+) {
   const isApproved = status === 'approved';
   const titleTh = isApproved ? 'ผลการประเมินได้รับการอนุมัติ' : 'ผลการประเมินถูกส่งคืน';
   const html = wrap(titleTh, `
@@ -144,7 +187,7 @@ async function sendSupervisorResultEmail(toEmail, toName, supplier, status, note
 }
 
 // ── 7. Supplier eval invite (magic-link, no login) ─────────────
-async function sendSupplierEvalInviteEmail(toEmail, supplierName, evalUrl) {
+async function sendSupplierEvalInviteEmail(toEmail: string, supplierName: string, evalUrl: string) {
   const html = wrap('ขอความคิดเห็นเกี่ยวกับการให้บริการ', `
     <p>เรียน <strong>${esc(supplierName)}</strong></p>
     <p>การประเมินรอบล่าสุดของท่านเสร็จสมบูรณ์แล้ว ทางเราขอความคิดเห็นของท่านเกี่ยวกับการให้บริการของทีมงานที่ดูแลท่าน เพื่อนำไปพัฒนาการทำงานร่วมกันต่อไป</p>

@@ -1,4 +1,5 @@
 'use strict';
+import type { Request, Response } from 'express';
 const router  = require('express').Router();
 const pool    = require('../db');
 const bcrypt  = require('bcrypt');
@@ -7,7 +8,7 @@ const requireAuth = require('../middleware/authMiddleware');
 const { AUTH_COOKIE, cookieOptions } = require('../utils/cookieOptions');
 
 // ── POST /api/auth/login ──────────────────────────────────────
-router.post('/login', async (req, res) => {
+router.post('/login', async (req: Request, res: Response) => {
   const { identifier, password } = req.body;
 
   if (!identifier?.trim() || !password) {
@@ -52,14 +53,14 @@ router.post('/login', async (req, res) => {
     console.log(`[auth] เข้าสู่ระบบ: ${emp.employee_id} (${emp.role})`);
     res.cookie(AUTH_COOKIE, token, cookieOptions);
     res.json({ user: payload });
-  } catch (err) {
+  } catch (err: any) {
     console.error('[auth] login error:', err);
     res.status(500).json({ message: 'เกิดข้อผิดพลาด', error: err.message });
   }
 });
 
 // ── POST /api/auth/logout ─────────────────────────────────────
-router.post('/logout', (req, res) => {
+router.post('/logout', (req: Request, res: Response) => {
   res.clearCookie(AUTH_COOKIE, { ...cookieOptions, maxAge: undefined });
   res.json({ message: 'ออกจากระบบแล้ว' });
 });
@@ -67,7 +68,7 @@ router.post('/logout', (req, res) => {
 // ── GET /api/auth/me ───────────────────────────────────────────
 // Lets the frontend restore/verify the session on load without ever being
 // able to read the (httpOnly) cookie or decode the JWT itself.
-router.get('/me', requireAuth, (req, res) => {
+router.get('/me', requireAuth, (req: Request, res: Response) => {
   res.json({ user: req.user });
 });
 
@@ -77,26 +78,26 @@ router.get('/me', requireAuth, (req, res) => {
 // Requires auth so we can check the entered employeeId against the
 // session's own empId — this verifies "you, again", not just "someone
 // who knows a password".
-router.post('/verify-password', requireAuth, async (req, res) => {
+router.post('/verify-password', requireAuth, async (req: Request, res: Response) => {
   const { employeeId, password } = req.body;
   if (!employeeId?.trim() || !password) {
     return res.status(400).json({ message: 'กรุณากรอกรหัสพนักงานและรหัสผ่านของคุณ' });
   }
-  if (employeeId.trim().toUpperCase() !== req.user.empId.toUpperCase()) {
+  if (employeeId.trim().toUpperCase() !== req.user!.empId.toUpperCase()) {
     return res.status(403).json({ message: 'รหัสพนักงานไม่ตรงกับผู้ใช้ที่เข้าสู่ระบบ' });
   }
 
   try {
     const result = await pool.query(
       `SELECT password_hash FROM employees WHERE employee_id = $1 AND is_active = TRUE`,
-      [req.user.empId]
+      [req.user!.empId]
     );
     const hash = result.rows[0]?.password_hash;
     if (!hash || !(await bcrypt.compare(password, hash))) {
       return res.status(401).json({ message: 'รหัสผ่านไม่ถูกต้อง' });
     }
     res.json({ verified: true });
-  } catch (err) {
+  } catch (err: any) {
     console.error('[auth] verify-password error:', err);
     res.status(500).json({ message: 'เกิดข้อผิดพลาด', error: err.message });
   }

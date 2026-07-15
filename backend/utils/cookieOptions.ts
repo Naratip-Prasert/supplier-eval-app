@@ -1,4 +1,5 @@
-'use strict';
+import type { CookieOptions } from 'express';
+
 const isProd = process.env.NODE_ENV === 'production';
 
 const AUTH_COOKIE = 'spe_token';
@@ -7,7 +8,7 @@ const AUTH_COOKIE = 'spe_token';
 // subdomains in production (cross-site from the cookie spec's point of
 // view); 'lax' is fine in dev since localhost:5173/localhost:5000 are
 // same-site (site = registrable domain + scheme, port doesn't count).
-const cookieOptions = {
+const cookieOptions: CookieOptions = {
   httpOnly: true,
   secure: isProd,
   sameSite: isProd ? 'none' : 'lax',

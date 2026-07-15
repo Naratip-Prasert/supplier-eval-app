@@ -29,7 +29,7 @@ async function run() {
   await client.end();
 }
 
-run().catch((err) => {
+run().catch((err: any) => {
   console.error('Init DB failed:', err.message);
   process.exit(1);
 });

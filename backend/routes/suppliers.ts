@@ -5,13 +5,14 @@
 //  GET  /api/suppliers/validate             — validate vendorCode + name (req 8)
 //  GET  /api/suppliers/:vendorCode/permission?employeeId=X  (req 1)
 // ============================================================
+import type { Request, Response } from 'express';
 const router = require('express').Router();
 const pool   = require('../db');
 
 // GET /api/suppliers
 // ADMIN: returns all suppliers (active + inactive) with isActive field.
 // Others: returns only active suppliers (for dropdowns).
-router.get('/', async (req, res) => {
+router.get('/', async (req: Request, res: Response) => {
   const isAdmin = req.user?.role === 'ADMIN';
   try {
     const result = await pool.query(
@@ -24,7 +25,7 @@ router.get('/', async (req, res) => {
              FROM suppliers WHERE is_active = TRUE ORDER BY supplier_name`
     );
     res.json(result.rows);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/suppliers error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
@@ -32,8 +33,9 @@ router.get('/', async (req, res) => {
 
 // GET /api/suppliers/validate?vendorCode=SUP-001&supplierName=ABC+Supply
 // Checks that vendor code AND supplier name both exist and match the same record (req 8).
-router.get('/validate', async (req, res) => {
-  const { vendorCode, supplierName } = req.query;
+router.get('/validate', async (req: Request, res: Response) => {
+  const vendorCode = req.query.vendorCode as string | undefined;
+  const supplierName = req.query.supplierName as string | undefined;
 
   if (!vendorCode || !supplierName) {
     return res.status(400).json({ message: 'กรุณาระบุ vendorCode และ supplierName' });
@@ -57,15 +59,15 @@ router.get('/validate', async (req, res) => {
     }
 
     res.json({ valid: true, supplier: result.rows[0] });
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/suppliers/validate error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
 });
 
 // POST /api/suppliers  (ADMIN only) — add new supplier
-router.post('/', async (req, res) => {
-  if (req.user.role !== 'ADMIN') {
+router.post('/', async (req: Request, res: Response) => {
+  if (req.user!.role !== 'ADMIN') {
     return res.status(403).json({ message: 'เฉพาะ Admin เท่านั้น' });
   }
   const { vendorCode, supplierName, productType } = req.body;
@@ -84,7 +86,7 @@ router.post('/', async (req, res) => {
       [vendorCode.trim().toUpperCase(), supplierName.trim(), productType || 'goods']
     );
     res.status(201).json({ message: 'เพิ่มซัพพลายเออร์สำเร็จ', supplier: result.rows[0] });
-  } catch (err) {
+  } catch (err: any) {
     if (err.code === '23505') {
       return res.status(409).json({ message: 'Vendor Code นี้มีอยู่แล้ว' });
     }
@@ -94,7 +96,7 @@ router.post('/', async (req, res) => {
 });
 
 // GET /api/suppliers/:vendorCode  — fetch single supplier by vendor code
-router.get('/:vendorCode', async (req, res) => {
+router.get('/:vendorCode', async (req: Request, res: Response) => {
   try {
     const result = await pool.query(
       `SELECT vendor_code    AS "vendorCode",
@@ -102,21 +104,21 @@ router.get('/:vendorCode', async (req, res) => {
               product_type   AS "productType"
          FROM suppliers
         WHERE vendor_code = $1 AND is_active = TRUE`,
-      [req.params.vendorCode.trim()]
+      [(req.params.vendorCode as string).trim()]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'ไม่พบรหัสผู้ขาย' });
     }
     res.json(result.rows[0]);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/suppliers/:vendorCode error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
 });
 
 // PATCH /api/suppliers/:vendorCode  (ADMIN only) — update supplier
-router.patch('/:vendorCode', async (req, res) => {
-  if (req.user.role !== 'ADMIN') {
+router.patch('/:vendorCode', async (req: Request, res: Response) => {
+  if (req.user!.role !== 'ADMIN') {
     return res.status(403).json({ message: 'เฉพาะ Admin เท่านั้น' });
   }
   const { supplierName, productType, isActive } = req.body;
@@ -142,12 +144,12 @@ router.patch('/:vendorCode', async (req, res) => {
         supplierName !== undefined ? supplierName.trim() : null,
         productType  !== undefined ? productType : null,
         isActive     !== undefined ? isActive : null,
-        req.params.vendorCode.trim(),
+        (req.params.vendorCode as string).trim(),
       ]
     );
     if (result.rows.length === 0) return res.status(404).json({ message: 'ไม่พบซัพพลายเออร์' });
     res.json({ message: 'อัปเดตสำเร็จ' });
-  } catch (err) {
+  } catch (err: any) {
     console.error('PATCH /api/suppliers/:vendorCode error:', err);
     res.status(500).json({ message: 'อัปเดตไม่สำเร็จ', error: err.message });
   }
@@ -156,9 +158,9 @@ router.patch('/:vendorCode', async (req, res) => {
 // GET /api/suppliers/:vendorCode/permission?employeeId=EMP-001
 // Checks whether a USER employee has permission to evaluate this supplier (req 1).
 // GCP employees always have permission.
-router.get('/:vendorCode/permission', async (req, res) => {
-  const { vendorCode } = req.params;
-  const { employeeId } = req.query;
+router.get('/:vendorCode/permission', async (req: Request, res: Response) => {
+  const vendorCode = req.params.vendorCode as string;
+  const employeeId = req.query.employeeId as string | undefined;
 
   if (!employeeId) {
     return res.status(400).json({ message: 'กรุณาระบุ employeeId' });
@@ -200,7 +202,7 @@ router.get('/:vendorCode/permission', async (req, res) => {
     );
 
     res.json({ hasPermission: permResult.rows.length > 0 });
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/suppliers/:vendorCode/permission error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }

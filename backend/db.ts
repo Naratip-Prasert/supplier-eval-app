@@ -1,5 +1,5 @@
 'use strict';
-const { Pool } = require('pg'); //โหลด class pool มาใช้จาก module pg
+import { Pool } from 'pg'; //โหลด class pool มาใช้จาก module pg
 require('dotenv').config({ quiet: true }); // ดึงค่าจาก .env  มาใช้ จะได้ไม่ต้อง hardcode
 
 const pool = new Pool({
@@ -9,7 +9,7 @@ const pool = new Pool({
     : false,
 });
 
-pool.on('error', (err) => {
+pool.on('error', (err: Error) => {
   console.error('Unexpected PostgreSQL client error:', err.message);
 }); // โยน error ออกทาง console ไม่งั้น backend จะ crash ได้
 

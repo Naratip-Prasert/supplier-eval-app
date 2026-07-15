@@ -7,12 +7,13 @@
 //  Mounted behind requireAuth in server.js — reuses the normal
 //  USER login, no new role.
 // ============================================================
+import type { Request, Response } from 'express';
 const router = require('express').Router();
 const pool   = require('../db');
 const { computeScoreAndGrade } = require('./evaluations');
 
 // ── GET /pending — sessions this USER can now rate their Buyer for ──
-router.get('/pending', async (req, res) => {
+router.get('/pending', async (req: Request, res: Response) => {
   try {
     const result = await pool.query(
       `SELECT es.id AS "sessionId", s.supplier_name AS "supplierName",
@@ -32,17 +33,17 @@ router.get('/pending', async (req, res) => {
                AND se.evaluator_employee_id = me.id
           )
         ORDER BY es.completed_at DESC`,
-      [req.user.empId]
+      [req.user!.empId]
     );
     res.json(result.rows);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/service-evaluations/pending error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
 });
 
 // ── GET /my-feedback — service_evaluations where I'm the target ────
-router.get('/my-feedback', async (req, res) => {
+router.get('/my-feedback', async (req: Request, res: Response) => {
   try {
     const result = await pool.query(
       `SELECT se.id, se.direction, se.total_score AS "totalScore", se.grade,
@@ -56,17 +57,17 @@ router.get('/my-feedback', async (req, res) => {
          LEFT JOIN employees evaluator ON evaluator.id = se.evaluator_employee_id
         WHERE UPPER(me.employee_id) = UPPER($1)
         ORDER BY se.submitted_at DESC`,
-      [req.user.empId]
+      [req.user!.empId]
     );
     res.json(result.rows);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/service-evaluations/my-feedback error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
 });
 
 // ── GET /criteria — the shared "เชิงบริการ" criteria set ──────
-router.get('/criteria', async (req, res) => {
+router.get('/criteria', async (req: Request, res: Response) => {
   try {
     const result = await pool.query(
       `SELECT m.id AS "categoryId", m.name_th AS "categoryNameTh", m.display_order AS "categoryOrder",
@@ -78,14 +79,14 @@ router.get('/criteria', async (req, res) => {
         ORDER BY m.display_order, s.display_order`
     );
     res.json(result.rows);
-  } catch (err) {
+  } catch (err: any) {
     console.error('GET /api/service-evaluations/criteria error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
   }
 });
 
 // ── POST / — submit a rating for one session's Buyer ──────────
-router.post('/', async (req, res) => {
+router.post('/', async (req: Request, res: Response) => {
   const { sessionId, targetEmployeeId, scores } = req.body;
   if (!sessionId || !targetEmployeeId || typeof scores !== 'object') {
     return res.status(400).json({ message: 'กรุณาระบุ sessionId, targetEmployeeId, scores' });
@@ -109,7 +110,7 @@ router.post('/', async (req, res) => {
           AND UPPER(me.employee_id) = UPPER($1)
           AND es.id = $2 AND es.status = 'completed'
           AND gcpEval.employee_id = $3`,
-      [req.user.empId, sessionId, targetEmployeeId]
+      [req.user!.empId, sessionId, targetEmployeeId]
     );
     if (check.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -121,8 +122,8 @@ router.post('/', async (req, res) => {
       `SELECT code, default_weight FROM evaluation_sub_criteria
         WHERE criteria_set = 'service' AND is_active = TRUE`
     );
-    const criteriaMap = {};
-    criteriaResult.rows.forEach(c => { criteriaMap[c.code] = { default_weight: c.default_weight }; });
+    const criteriaMap: Record<string, { default_weight: number }> = {};
+    criteriaResult.rows.forEach((c: any) => { criteriaMap[c.code] = { default_weight: c.default_weight }; });
 
     const { totalScore, grade } = await computeScoreAndGrade(client, scores, criteriaMap);
 
@@ -141,7 +142,7 @@ router.post('/', async (req, res) => {
 
     await client.query('COMMIT');
     res.json({ message: 'บันทึกสำเร็จ' });
-  } catch (err) {
+  } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('POST /api/service-evaluations error:', err);
     res.status(500).json({ message: 'บันทึกไม่สำเร็จ', error: err.message });
