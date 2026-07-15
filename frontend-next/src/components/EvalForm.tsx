@@ -1,0 +1,1913 @@
+// ============================================================
+//  components/EvalForm.tsx
+//  Ported 1:1 from pages/Evalform.jsx (1878 lines) — no logic changes,
+//  only types added. Mounted at app/(app)/eval/page.tsx.
+// ============================================================
+"use client";
+
+import { useState, useEffect, useRef, type ReactNode } from "react";
+import { Header, GreenButton, useModal } from "./index";
+import {
+  getCriteria, isPostEvalType, LEVEL_COLORS, GRADE_MAP, GRADE_GUIDE, getGrade,
+  findEsgSectionIndex, splitEsgGroups, getDisplayCriteriaFrom, FUNCTION_MODULES, functionSectionWeightFrom,
+  type CriteriaEntry, type CriteriaSection,
+} from "../constants";
+import { useCriteriaOverrides, useFunctionOverrides } from "../context/CriteriaContext";
+import { applyOverrides } from "../utils/criteriaOverlay";
+import type { FunctionOverrideMap } from "../utils/criteriaOverlay";
+import { r2, getAhpMain, getAhpLocal, assignEsgSubGroupWeights, initWeights } from "../utils/evalWeightMath";
+import { AlertTriangle, FileText, Plus, Trash2 } from "lucide-react";
+import type { AuthUser } from "../context/AuthContext";
+import type { EvalFormData, EvalResult } from "../context/EvalFlowContext";
+
+const LEVEL_LABELS       = ["ต้องปรับปรุง (Unsatisfactory)", "ต่ำกว่าเกณฑ์ (Below Standard)", "ผ่านเกณฑ์ (Satisfactory)", "ดี (Good)", "ดีเยี่ยม (Excellent)"];
+const LEVEL_SHORT_LABELS = ["ต้องปรับปรุง", "ต่ำกว่าเกณฑ์", "ผ่านเกณฑ์", "ดี", "ดีเยี่ยม"];
+const COLS = "52px 2.8fr 76px 1.1fr 1.1fr 1.1fr 1.1fr 1.1fr 84px 116px";
+
+// ── Payload EvalForm hands back via onDone — structurally satisfies
+// EvalFlowContext's EvalResult (all its required fields present with
+// matching types; extra fields like ws/esgTarget/legalStatus/disqualified
+// ride through EvalResult's index signature). ──────────────────────
+export interface EvalDonePayload {
+  scores: Record<string, number>;
+  notes: Record<string, string>;
+  totalScore: number;
+  grade: string;
+  sectionWeights: Record<number, number>;
+  weights: Record<string, number>;
+  legalStatus?: string | null;
+  ws: { sections: Record<number, number>; items: Record<string, number> };
+  esgTarget: string | null;
+  moduleCode: string | null;
+  customItems: CriteriaEntry[];
+  disqualified?: boolean;
+}
+
+interface EvalFormProps {
+  formData: EvalFormData;
+  savedState: EvalResult | null;
+  user: AuthUser | null;
+  profilePic?: string | null;
+  onBack: () => void;
+  onDone: (result: EvalDonePayload) => void;
+}
+
+// ---- main component ----------------------------------------
+
+export default function EvalForm({ formData, savedState, user, profilePic, onBack, onDone }: EvalFormProps) {
+  const overrideMap    = useCriteriaOverrides(isPostEvalType(formData.evalType));
+  const funcMap         = useFunctionOverrides(isPostEvalType(formData.evalType));
+  const RAW_CRITERIA   = applyOverrides(getCriteria(formData.evalType), overrideMap);
+  const esgSectionIndex = findEsgSectionIndex(RAW_CRITERIA);
+  const esgGroups       = esgSectionIndex !== -1 ? splitEsgGroups(RAW_CRITERIA[esgSectionIndex].items) : null;
+  const esgHoCodes      = esgGroups ? esgGroups.ho.filter((i) => !i.divider).map((i) => i.no!) : [];
+  const esgFactoryCodes = esgGroups ? esgGroups.factory.filter((i) => !i.divider).map((i) => i.no!) : [];
+
+  const { showConfirm, showAlert, ModalEl } = useModal();
+  const [scores,       setScores]       = useState<Record<string, number>>(() => savedState?.scores      ?? {});
+  const [notes,        setNotes]        = useState<Record<string, string>>(() => savedState?.notes       ?? {});
+  const [missingItems, setMissingItems] = useState<CriteriaEntry[] | null>(null); // null = closed, array = open
+  const [legalStatus, setLegalStatus]   = useState<string | null>(() => (savedState?.legalStatus as string | undefined) ?? null);
+
+  // ต้องเลือกก่อนว่าจะประเมินแบบ HO/Store หรือ Factory — สืบจาก savedState
+  // ถ้ามี (resume), ไม่อย่างนั้นเดาจากคะแนนที่บันทึกไว้ก่อนหน้า, ไม่งั้นยังไม่เลือก (null)
+  const [esgTarget, setEsgTarget] = useState<string | null>(() => {
+    if (savedState?.esgTarget) return savedState.esgTarget as string;
+    const sc = savedState?.scores ?? {};
+    if (esgHoCodes.some((c) => sc[c] != null))      return "ho";
+    if (esgFactoryCodes.some((c) => sc[c] != null)) return "factory";
+    return null;
+  });
+
+  // Part2 "Function module" — same idea as the ESG selector above, generalized
+  // to 8 choices (M1-M7 + custom). The Function section always sits right
+  // before ESG in CRITERIA (see getDisplayCriteriaFrom), so its index is exactly
+  // esgSectionIndex and ESG itself shifts to esgSectionIndex + 1.
+  const functionSectionIndex = esgSectionIndex;
+  const esgSectionIndexInCriteria = esgSectionIndex === -1 ? -1 : esgSectionIndex + 1;
+  // Codes must include DB-only modules/items (e.g. an admin-added M8, or an
+  // admin-added 5th item on an existing module) — sourcing this from
+  // FUNCTION_MODULES alone (constants.js, hardcoded M1-M7) silently dropped
+  // those, so switching modules never assigned weight to them nor purged
+  // their stale scores when switching away.
+  const allModuleCodes = Array.from(new Set([
+    ...Object.values(FUNCTION_MODULES).flatMap((m) => m.items.map((i) => i.no!)),
+    ...(funcMap ? Object.values(funcMap).flatMap((m) => (m.items ?? []).map((i) => i.no!)) : []),
+  ]));
+
+  const [moduleCode, setModuleCode] = useState<string | null>(() => (savedState?.moduleCode as string | undefined) ?? null);
+  const [customItems, setCustomItems] = useState<CriteriaEntry[]>(() => (savedState?.customItems as CriteriaEntry[] | undefined) ?? []);
+
+  const funcOverride = (funcMap && moduleCode && moduleCode !== "custom")
+    ? (funcMap[moduleCode] ?? null)
+    : null;
+  const CRITERIA = getDisplayCriteriaFrom(RAW_CRITERIA, esgTarget, moduleCode, customItems, funcOverride);
+
+  const [ws, setWs] = useState<{ sections: Record<number, number>; items: Record<string, number> }>(
+    () => (savedState?.ws as { sections: Record<number, number>; items: Record<string, number> } | undefined) ?? initWeights(CRITERIA)
+  );
+  const sectionWeights = ws.sections;
+  const itemWeights    = ws.items;
+
+  // Re-init weights whenever overrideMap or funcMap loads/reloads (e.g. admin saves changes).
+  // Skipped if: user has already adjusted weights manually, or resuming a saved form.
+  const userAdjustedWeights = useRef(false);
+  useEffect(() => {
+    if (overrideMap === null || savedState?.ws || userAdjustedWeights.current) return;
+    const resolvedFuncOverride = (funcMap && moduleCode && moduleCode !== "custom")
+      ? (funcMap[moduleCode] ?? null)
+      : null;
+    const updatedCriteria = getDisplayCriteriaFrom(
+      applyOverrides(getCriteria(formData.evalType), overrideMap),
+      esgTarget, moduleCode, customItems, resolvedFuncOverride
+    );
+    setWs(initWeights(updatedCriteria));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overrideMap, funcMap]);
+
+  // เมื่อเลือก/เปลี่ยน HO ↔ Factory: ล้างคะแนน/หมายเหตุ/น้ำหนักของกลุ่มที่ไม่ได้เลือก
+  // ทิ้ง (ไม่ใช่แค่ซ่อน) ไม่งั้นค่าที่เหลือค้างจะหลุดไปรวมกับ payload ที่ส่ง backend
+  // และแจกน้ำหนักของ section ESG ใหม่ให้เฉพาะกลุ่มที่เลือก (เว้นแต่กำลัง resume
+  // ค่าที่ตั้งไว้แล้วจาก savedState — ไม่งั้นจะไปทับน้ำหนักที่ผู้ใช้ปรับเองไว้)
+  useEffect(() => {
+    if (esgSectionIndex === -1) return;
+    const chosenCodes = esgTarget === "ho" ? esgHoCodes : esgTarget === "factory" ? esgFactoryCodes : [];
+    const otherCodes   = esgTarget === "ho" ? esgFactoryCodes : esgTarget === "factory" ? esgHoCodes : [...esgHoCodes, ...esgFactoryCodes];
+
+    if (otherCodes.length > 0) {
+      setScores((s) => {
+        if (!otherCodes.some((c) => c in s)) return s;
+        const next = { ...s };
+        otherCodes.forEach((c) => delete next[c]);
+        return next;
+      });
+      setNotes((n) => {
+        if (!otherCodes.some((c) => c in n)) return n;
+        const next = { ...n };
+        otherCodes.forEach((c) => delete next[c]);
+        return next;
+      });
+    }
+
+    setWs((prev) => {
+      const alreadyWeighted = chosenCodes.length > 0 && chosenCodes.some((c) => prev.items[c] != null);
+      const droppable = otherCodes.some((c) => c in prev.items);
+      if (!droppable && (chosenCodes.length === 0 || alreadyWeighted)) return prev;
+
+      const newItems = { ...prev.items };
+      otherCodes.forEach((c) => delete newItems[c]);
+
+      if (chosenCodes.length > 0 && !alreadyWeighted) {
+        // NOTE: esgSectionIndexInCriteria, not esgSectionIndex — the Function
+        // section is always spliced in right before ESG (see getDisplayCriteriaFrom),
+        // so ESG's real slot in ws.sections is shifted by 1. Using the
+        // unshifted index here was reading the Function section's weight (25)
+        // instead of ESG's (15), causing totals like 110% instead of 100%.
+        const sw = prev.sections[esgSectionIndexInCriteria] ?? (RAW_CRITERIA[esgSectionIndex]?.weight ?? 0);
+        // Respect each group's configured groupWeight (from admin/parameter
+        // page) instead of splitting sw evenly across every item — otherwise
+        // switching HO ↔ Factory would discard the ESG1/ESG2/ESG3 ratios.
+        const chosenSection = esgTarget === "ho" || esgTarget === "factory" ? CRITERIA[esgSectionIndexInCriteria] : null;
+        if (chosenSection) assignEsgSubGroupWeights(chosenSection.items, sw, newItems);
+      }
+      return { ...prev, items: newItems };
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [esgTarget]);
+
+  // เมื่อเลือก/เปลี่ยนโมดูล: ล้างคะแนน/หมายเหตุ/น้ำหนักของโค้ดที่ไม่ได้อยู่ในโมดูล
+  // ที่เลือกปัจจุบันทิ้ง แล้วแจกน้ำหนักของ section Function ใหม่ให้เฉพาะโค้ดที่
+  // ใช้อยู่ — ตรรกะเดียวกับ ESG ด้านบน
+  //
+  // sw MUST come from funcOverride (the DB-configured module weight), not
+  // prev.sections[functionSectionIndex] — that slot is seeded at mount from
+  // the "no module chosen yet" fallback (moduleCode is null on a fresh
+  // form), which used to lock it to a hardcoded constant forever. Reading
+  // the stale section weight here silently redistributed items to the
+  // wrong total (e.g. 25% instead of an admin-configured 26%), so the
+  // grand total permanently drifted from 100% for every fresh evaluation.
+  // custom module has no DB row (funcOverride is null then), so it falls to
+  // 100 − (Core+ESG in effect) — the same complement getDisplayCriteriaFrom
+  // uses — keeping the grand total at exactly 100% no matter how admin
+  // rebalanced the other parts.
+  const funcSectionWeight = funcOverride?.totalWeight ?? functionSectionWeightFrom(RAW_CRITERIA);
+  useEffect(() => {
+    if (functionSectionIndex === -1) return;
+    // Prefer funcOverride.items (DB — reflects admin-added items/modules,
+    // e.g. an added M3.5 or a brand-new M8) over the hardcoded constants.js
+    // list; fall back to constants only while the DB hasn't loaded yet.
+    const currentCodes = moduleCode === "custom"
+      ? customItems.map((i) => i.no!)
+      : moduleCode
+        ? (funcOverride?.items?.map((i) => i.no!) ?? FUNCTION_MODULES[moduleCode]?.items.map((i) => i.no!) ?? [])
+        : [];
+    const otherFixedCodes = allModuleCodes.filter((c) => !currentCodes.includes(c));
+
+    const staleCustomCodes = (obj: Record<string, unknown>) => Object.keys(obj).filter((c) => c.startsWith("CUSTOM.") && !currentCodes.includes(c));
+
+    setScores((s) => {
+      const toDelete = [...otherFixedCodes, ...staleCustomCodes(s)];
+      if (!toDelete.some((c) => c in s)) return s;
+      const next = { ...s };
+      toDelete.forEach((c) => delete next[c]);
+      return next;
+    });
+    setNotes((n) => {
+      const toDelete = [...otherFixedCodes, ...staleCustomCodes(n)];
+      if (!toDelete.some((c) => c in n)) return n;
+      const next = { ...n };
+      toDelete.forEach((c) => delete next[c]);
+      return next;
+    });
+
+    setWs((prev) => {
+      const toDelete = [...otherFixedCodes, ...staleCustomCodes(prev.items)];
+      const sw = funcSectionWeight;
+      const weightInSync = prev.sections[functionSectionIndex] === sw;
+      const allWeighted = currentCodes.length > 0 && currentCodes.every((c) => prev.items[c] != null) && weightInSync;
+      const droppable = toDelete.some((c) => c in prev.items);
+      if (!droppable && weightInSync && (currentCodes.length === 0 || allWeighted)) return prev;
+
+      const newItems = { ...prev.items };
+      toDelete.forEach((c) => delete newItems[c]);
+
+      if (currentCodes.length > 0 && !allWeighted) {
+        const each = r2(sw / currentCodes.length);
+        let rem = sw;
+        currentCodes.forEach((code, i) => {
+          if (i === currentCodes.length - 1) newItems[code] = Math.max(0, r2(rem));
+          else { newItems[code] = each; rem -= each; }
+        });
+      }
+      return { ...prev, sections: { ...prev.sections, [functionSectionIndex]: sw }, items: newItems };
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moduleCode, customItems, funcSectionWeight, funcOverride]);
+
+  const allItems        = CRITERIA.flatMap((s) => s.items.filter((i): i is CriteriaEntry & { no: string } => !i.divider && i.no != null));
+  const answered        = allItems.filter((item) => scores[item.no] != null).length;
+
+  // The in-app "กลับหน้าหลัก" button already warns before discarding
+  // entered scores, but closing the tab/refreshing bypassed that entirely
+  // — there's no autosave, so a refresh meant total data loss with zero
+  // warning.
+  useEffect(() => {
+    if (answered === 0) return;
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [answered]);
+  const total           = allItems.length;
+  const totalItemWeight = allItems.reduce((s, item) => s + (itemWeights[item.no] ?? 0), 0);
+
+  // คะแนน = Σ(lv/maxLv × itemWeight) / totalItemWeight × 100
+  const totalScore = (() => {
+    if (totalItemWeight === 0) return 0;
+    const raw = allItems.reduce((s, item) => {
+      const lv    = scores[item.no];
+      const maxLv = item.levelValues ? Math.max(...item.levelValues) : 5;
+      const iw    = itemWeights[item.no] ?? 0;
+      return lv ? s + (lv / maxLv) * iw : s;
+    }, 0);
+    return (raw / totalItemWeight) * 100;
+  })();
+
+  const grade      = getGrade(totalScore);
+  const gradeColor = GRADE_MAP[grade];
+  const evalLabel  = isPostEvalType(formData.evalType) ? "Post" : "Pre";
+
+  const handleSectionWeightChange = (si: number, newVal: number | string) => {
+    userAdjustedWeights.current = true;
+    const clamped = Math.max(0, Math.min(100, Number(newVal) || 0));
+    setWs((prev) => {
+      const lastSi = CRITERIA.length - 1;
+      const bufSi  = si === lastSi ? lastSi - 1 : lastSi;
+
+      // section ที่แก้ = clamped, buffer section = 100 - ผลรวมของที่เหลือ
+      const newSections = { ...prev.sections, [si]: clamped };
+      const othersSum   = CRITERIA.reduce((s, _, i) => {
+        if (i === bufSi) return s;
+        return s + (i === si ? clamped : (prev.sections[i] ?? 0));
+      }, 0);
+      newSections[bufSi] = Math.max(0, r2(100 - othersSum));
+
+      // helper: scale items ใน section ให้รวม = sw ใหม่ (สัดส่วนเดิม)
+      const newItems = { ...prev.items };
+      const scaleItems = (idx: number) => {
+        const sw        = newSections[idx];
+        const realItems = CRITERIA[idx].items.filter((i): i is CriteriaEntry & { no: string } => !i.divider && i.no != null);
+        const oldSum    = realItems.reduce((s, it) => s + (prev.items[it.no] ?? 0), 0);
+        if (oldSum > 0) {
+          let rem = sw;
+          realItems.forEach((item, ii) => {
+            if (ii === realItems.length - 1) { newItems[item.no] = Math.max(0, r2(rem)); }
+            else { const w = r2(((prev.items[item.no] ?? 0) / oldSum) * sw); newItems[item.no] = w; rem -= w; }
+          });
+        } else {
+          const each = r2(sw / (realItems.length || 1));
+          let rem = sw;
+          realItems.forEach((item, ii) => {
+            if (ii === realItems.length - 1) { newItems[item.no] = Math.max(0, r2(rem)); }
+            else { newItems[item.no] = each; rem -= each; }
+          });
+        }
+      };
+
+      scaleItems(si);
+      if (bufSi !== si) scaleItems(bufSi);
+
+      return { sections: newSections, items: newItems };
+    });
+  };
+
+  const handleItemWeightChange = (no: string, si: number, newVal: number | string) => {
+    userAdjustedWeights.current = true;
+    setWs((prev) => {
+      const secTotal  = prev.sections[si] ?? 0;
+      const clamped   = Math.max(0, Math.min(secTotal, Number(newVal) || 0));
+      const realItems = CRITERIA[si].items.filter((i): i is CriteriaEntry & { no: string } => !i.divider && i.no != null);
+      if (realItems.length <= 1) return { ...prev, items: { ...prev.items, [no]: clamped } };
+
+      const lastItem   = realItems[realItems.length - 1];
+      // ถ้าแก้ตัวสุดท้าย → ตัวก่อนสุดท้ายรับ มิฉะนั้น → ตัวสุดท้ายรับเสมอ
+      const bufferItem = no === lastItem.no
+        ? realItems[realItems.length - 2]
+        : lastItem;
+
+      const newItems  = { ...prev.items, [no]: clamped };
+      const othersSum = realItems
+        .filter((i) => i.no !== bufferItem.no)
+        .reduce((s, i) => s + (newItems[i.no] ?? 0), 0);
+      newItems[bufferItem.no] = Math.max(0, r2(secTotal - othersSum));
+
+      return { ...prev, items: newItems };
+    });
+  };
+
+  const handleSubmitDisqualified = async () => {
+    const ok = await showConfirm(
+      "ผู้ประเมินจะถูก Disqualified ทันที\nยืนยันส่งผลการประเมิน 'ไม่ผ่าน' ใช่ไหม?",
+      "ส่งผล — ไม่ผ่าน (Disqualified)"
+    );
+    if (ok) onDone({ scores: {}, notes: {}, totalScore: 0, grade: "F", sectionWeights, weights: itemWeights, disqualified: true, legalStatus: "fail", ws, esgTarget, moduleCode, customItems });
+  };
+
+  const handleBack = async () => {
+    const ok = await showConfirm("ต้องการกลับหน้าหลักใช่ไหม?\nข้อมูลที่กรอกไว้ทั้งหมดจะหายไป", "กลับหน้าหลัก");
+    if (ok) onBack();
+  };
+
+  const handleSubmit = () => {
+    if (legalStatus !== "pass") return;
+    if (esgSectionIndex !== -1 && !esgTarget) {
+      showAlert(
+        "กรุณาเลือกประเภทที่จะประเมินในส่วน ESG ก่อน (สำนักงานใหญ่/สาขา หรือ โรงงาน)",
+        "ยังไม่เลือกประเภท ESG"
+      );
+      return;
+    }
+    if (functionSectionIndex !== -1 && !moduleCode) {
+      showAlert(
+        "กรุณาเลือกโมดูลที่จะประเมินใน Part 2 ก่อน (M1-M7 หรือ อื่นๆ กำหนดเอง)",
+        "ยังไม่เลือกโมดูล"
+      );
+      return;
+    }
+    // The "น้ำหนักรวม ≠ 100%" indicator next to the sticky bar used to be
+    // purely cosmetic — it could turn red and the form would still submit.
+    // Block here too, matching the same severity as a missing score.
+    if (r2(totalItemWeight) !== 100) {
+      showAlert(
+        `น้ำหนักรวมขณะนี้คือ ${r2(totalItemWeight)}% ต้องรวมให้ได้ 100% ก่อนส่งผลการประเมิน`,
+        "น้ำหนักไม่ครบ 100%"
+      );
+      return;
+    }
+    const unanswered = allItems.filter((item) => !scores[item.no]);
+    if (unanswered.length > 0) {
+      setMissingItems(unanswered);
+      return;
+    }
+    onDone({ scores, notes, totalScore, grade, sectionWeights, weights: itemWeights, legalStatus, ws, esgTarget, moduleCode, customItems });
+  };
+
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#f4f6f4", fontFamily: "Sarabun, sans-serif", paddingBottom: 100 }}>
+      {ModalEl}
+      {missingItems && (
+        <MissingScoresModal
+          items={missingItems}
+          criteria={CRITERIA}
+          answered={answered}
+          total={total}
+          onClose={() => setMissingItems(null)}
+        />
+      )}
+      <Header
+        titleOverride={`SPES - ${evalLabel} Evaluation`}
+        backLabel="← กลับหน้าหลัก"
+        onBack={handleBack}
+        user={user}
+        profilePic={profilePic}
+      />
+
+      <div style={{ maxWidth: 1280, margin: "0 auto", padding: "16px 16px 0" }}>
+        <InfoBar formData={formData} evalLabel={evalLabel} />
+        <LegalComplianceCard
+          status={legalStatus}
+          onChange={setLegalStatus}
+          onSubmitDisqualified={handleSubmitDisqualified}
+        />
+
+        <div style={{
+          opacity: legalStatus !== "pass" ? 0.42 : 1,
+          pointerEvents: legalStatus !== "pass" ? "none" : "auto",
+          transition: "opacity 0.25s",
+        }}>
+
+        {/* Scoring guide */}
+        <div style={{
+          marginBottom: 12, background: "#fff", borderRadius: 8,
+          border: "2px solid #2e7d32", boxShadow: "0 2px 10px rgba(46,125,50,0.12)",
+          overflow: "hidden",
+        }}>
+          {/* hint bar */}
+          <div style={{
+            background: "#e8f5e9", borderBottom: "2px solid #a5d6a7",
+            borderLeft: "5px solid #2e7d32",
+            padding: "11px 16px", display: "flex", alignItems: "center", gap: 10,
+          }}>
+            <span style={{
+              background: "#1b5e20", color: "#fff", borderRadius: 5,
+              padding: "4px 12px", fontSize: 12, fontWeight: 800, letterSpacing: 0.5,
+              flexShrink: 0,
+            }}>TIP</span>
+            <span style={{ fontSize: 14, color: "#1a3c1a", fontWeight: 500 }}>
+              คลิกช่อง <span style={{
+                background: "#fff", border: "1.5px solid #2e7d32",
+                borderRadius: 4, padding: "2px 8px", fontWeight: 800, color: "#1b5e20",
+              }}>น้ำหนัก%</span>{" "}
+              ที่หัว Section เพื่อตั้งน้ำหนัก — หัวข้อใน Section จะปรับสัดส่วนตามอัตโนมัติ
+            </span>
+          </div>
+          {/* level legend */}
+          <div style={{
+            display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center",
+            padding: "8px 14px",
+          }}>
+            <span style={{ fontSize: 11, color: "#718096", fontWeight: 600, marginRight: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>Level:</span>
+            {LEVEL_LABELS.map((lbl, i) => (
+              <span key={i} style={{
+                display: "inline-flex", alignItems: "center", gap: 5,
+                background: LEVEL_COLORS[i] + "18", border: `1px solid ${LEVEL_COLORS[i]}80`,
+                borderRadius: 5, padding: "3px 10px", fontSize: 12,
+              }}>
+                <span style={{
+                  background: LEVEL_COLORS[i], color: "#fff", borderRadius: 3,
+                  width: 18, height: 18, display: "inline-flex",
+                  alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700,
+                }}>{i + 1}</span>
+                <span style={{ color: "#2d3748", fontWeight: 500 }}>{lbl}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Table — the desktop grid (COLS = 10 fixed/fr columns) is
+            unreadable below ~700px: each column gets squeezed to a sliver
+            a few px wide and Thai text wraps character-by-character. Below
+            that width, show a stacked card layout instead (same handlers/
+            state, just different markup) rather than the grid. */}
+        <style>{`
+          .score-table-desktop { display: block; }
+          .score-table-mobile { display: none; }
+          @media (max-width: 700px) {
+            .score-table-desktop { display: none; }
+            .score-table-mobile { display: block; }
+          }
+        `}</style>
+
+        <div className="score-table-desktop" style={{ borderRadius: 10, overflow: "hidden", border: "1.5px solid #c8d8c8", marginBottom: 16, background: "#fff" }}>
+          <TableHeader />
+          {CRITERIA.map((section, si) => (
+            <div key={si}>
+              {si === 0 && <PartBanner label="Part 1 — Core" />}
+              {si === functionSectionIndex && <PartBanner label="Part 2 — Function Module" />}
+              {si === esgSectionIndexInCriteria && <PartBanner label="Part 3 — ESG" />}
+              <SectionHeaderRow
+                section={section}
+                secWeight={sectionWeights[si] ?? 0}
+                ahpW={si === functionSectionIndex ? null : si === esgSectionIndexInCriteria ? 6.94 : getAhpMain(section)}
+              />
+              {si === functionSectionIndex && (
+                <ModuleSelector value={moduleCode} onChange={setModuleCode} funcMap={funcMap} />
+              )}
+              {si === functionSectionIndex && moduleCode === "custom" && (
+                <CustomModuleBuilder items={customItems} onChange={setCustomItems} />
+              )}
+              {si === esgSectionIndexInCriteria && (
+                <EsgTargetSelector value={esgTarget} onChange={setEsgTarget} />
+              )}
+              {section.items.map((item, ii) =>
+                item.divider
+                  ? <DividerRow key={item.label} label={item.label!} level={item.level} groupWeight={item.groupWeight} />
+                  : (
+                    <ScoreRow
+                      key={item.no}
+                      item={item}
+                      weight={itemWeights[item.no!] ?? 0}
+                      selected={scores[item.no!]}
+                      note={notes[item.no!] || ""}
+                      onSelect={(lv) => setScores((s) => ({ ...s, [item.no!]: lv }))}
+                      onNote={(v)   => setNotes((n)  => ({ ...n, [item.no!]: v }))}
+                      shaded={ii % 2 !== 0}
+                      ahpW={getAhpLocal(item.no)}
+                    />
+                  )
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="score-table-mobile" style={{ borderRadius: 10, overflow: "hidden", border: "1.5px solid #c8d8c8", marginBottom: 16, background: "#fff" }}>
+          {CRITERIA.map((section, si) => (
+            <div key={si}>
+              {si === 0 && <PartBanner label="Part 1 — Core" />}
+              {si === functionSectionIndex && <PartBanner label="Part 2 — Function Module" />}
+              {si === esgSectionIndexInCriteria && <PartBanner label="Part 3 — ESG" />}
+              <SectionHeaderMobile
+                section={section}
+                secWeight={sectionWeights[si] ?? 0}
+                ahpW={si === functionSectionIndex ? null : si === esgSectionIndexInCriteria ? 6.94 : getAhpMain(section)}
+              />
+              {si === functionSectionIndex && (
+                <ModuleSelector value={moduleCode} onChange={setModuleCode} funcMap={funcMap} />
+              )}
+              {si === functionSectionIndex && moduleCode === "custom" && (
+                <CustomModuleBuilder items={customItems} onChange={setCustomItems} />
+              )}
+              {si === esgSectionIndexInCriteria && (
+                <EsgTargetSelector value={esgTarget} onChange={setEsgTarget} />
+              )}
+              {section.items.map((item, ii) =>
+                item.divider
+                  ? <DividerMobile key={item.label} label={item.label!} level={item.level} groupWeight={item.groupWeight} />
+                  : (
+                    <ScoreCardMobile
+                      key={item.no}
+                      item={item}
+                      weight={itemWeights[item.no!] ?? 0}
+                      selected={scores[item.no!]}
+                      note={notes[item.no!] || ""}
+                      onSelect={(lv) => setScores((s) => ({ ...s, [item.no!]: lv }))}
+                      onNote={(v)   => setNotes((n)  => ({ ...n, [item.no!]: v }))}
+                      shaded={ii % 2 !== 0}
+                      ahpW={getAhpLocal(item.no)}
+                    />
+                  )
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Scoring Criteria table */}
+        <div style={{
+          background: "#fff", border: "2px solid #2e7d32", borderRadius: 8,
+          boxShadow: "0 2px 10px rgba(46,125,50,0.12)", overflow: "hidden", marginBottom: 16,
+        }}>
+          <div style={{
+            padding: "13px 18px", borderBottom: "1px solid #c8d8c8",
+            background: "linear-gradient(90deg,#1b5e20,#2e7d32)",
+            fontWeight: 700, fontSize: 14, color: "#fff", letterSpacing: 0.3,
+          }}>
+            เกณฑ์การตัดสิน / Scoring Criteria
+          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: "#f8faf8" }}>
+                {["เกรด", "คะแนน (%)", "สถานะ"].map(h => (
+                  <th key={h} style={{
+                    padding: "8px 16px", textAlign: "left", fontWeight: 600,
+                    fontSize: 12, color: "#718096", borderBottom: "1px solid #e0e6e0",
+                  }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {GRADE_GUIDE.map((g, i) => (
+                <tr key={g.g} style={{ background: i % 2 === 0 ? "#fff" : "#fafcfa", borderBottom: "1px solid #f0f4f0" }}>
+                  <td style={{ padding: "9px 16px" }}>
+                    <span style={{
+                      background: g.color, color: "#fff",
+                      borderRadius: 5, padding: "3px 12px",
+                      fontWeight: 800, fontSize: 14, display: "inline-block",
+                    }}>{g.g}</span>
+                  </td>
+                  <td style={{ padding: "9px 16px", fontWeight: 600, color: "#2d3748" }}>{g.range}</td>
+                  <td style={{ padding: "9px 16px", color: g.color, fontWeight: 600 }}>{g.label}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        </div>{/* /locked wrapper */}
+      </div>
+
+      {/* Sticky score bar — 3 flex children (progress / score+grade /
+          submit button) with no wrap used to overflow the viewport on
+          mobile, pushing the Submit button off-screen to the right with
+          no way to reach it. Stack into rows below 700px instead. */}
+      <style>{`
+        @media (max-width: 700px) {
+          .sticky-score-bar { flex-direction: column !important; align-items: stretch !important; padding: 10px 14px !important; gap: 8px !important; }
+          .sticky-score-progress { flex-wrap: wrap; }
+          .sticky-score-totals { justify-content: center !important; }
+          .sticky-score-submit { width: 100%; }
+        }
+      `}</style>
+      <div className="sticky-score-bar" style={{
+        position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 100,
+        background: "#fff", borderTop: "2px solid #a5d6a7",
+        boxShadow: "0 -4px 20px rgba(0,0,0,0.10)",
+        padding: "10px 24px",
+        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16,
+      }}>
+        <div className="sticky-score-progress" style={{ display: "flex", alignItems: "center", gap: 12, flex: 1 }}>
+          <span style={{ fontSize: 13, color: "#555", whiteSpace: "nowrap" }}>
+            ตอบแล้ว <b style={{ color: "#1b5e20" }}>{answered}</b>/{total} ข้อ
+          </span>
+          <div style={{ flex: 1, height: 8, background: "#e0e0e0", borderRadius: 4, maxWidth: 200, minWidth: 60 }}>
+            <div style={{
+              height: "100%", borderRadius: 4, background: "#2e7d32",
+              width: `${total > 0 ? (answered / total) * 100 : 0}%`,
+              transition: "width 0.3s",
+            }} />
+          </div>
+          <span style={{ fontSize: 12, color: "#888", whiteSpace: "nowrap" }}>
+            น้ำหนักรวม:{" "}
+            <b style={{ color: r2(totalItemWeight) === 100 ? "#1b5e20" : "#e65100" }}>{r2(totalItemWeight)}%</b>
+            {r2(totalItemWeight) !== 100 && <span style={{ color: "#e65100" }}> ≠ 100%</span>}
+          </span>
+        </div>
+
+        <div className="sticky-score-totals" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#444" }}>คะแนนรวม:</span>
+          <span style={{ fontSize: 28, fontWeight: 800, color: "#1b5e20", lineHeight: 1 }}>
+            {totalScore.toFixed(1)}
+          </span>
+          <span style={{ fontSize: 13, color: "#888" }}>/100</span>
+          <span style={{
+            background: gradeColor, color: "#fff", borderRadius: 8,
+            padding: "6px 20px", fontSize: 20, fontWeight: 800,
+            boxShadow: `0 2px 8px ${gradeColor}66`,
+          }}>{grade}</span>
+        </div>
+
+        <GreenButton
+          onClick={handleSubmit}
+          style={{
+            padding: "10px 32px", fontSize: 15,
+            ...(legalStatus !== "pass" && { opacity: 0.38, cursor: "not-allowed", filter: "grayscale(40%)" }),
+          }}
+          className="sticky-score-submit"
+        >
+          Submit Supplier Evaluation
+        </GreenButton>
+      </div>
+    </div>
+  );
+}
+
+// ---- Sub-components ----------------------------------------
+
+function LegalComplianceCard({ status, onChange, onSubmitDisqualified }: {
+  status: string | null; onChange: (v: string) => void; onSubmitDisqualified: () => void;
+}) {
+  const isFail = status === "fail";
+  const isPass = status === "pass";
+
+  const headerBg = isFail
+    ? "linear-gradient(90deg,#b71c1c,#e53935)"
+    : isPass
+    ? "linear-gradient(90deg,#1b5e20,#2e7d32)"
+    : "linear-gradient(90deg,#bf360c,#e64a19)";
+
+  return (
+    <div style={{
+      marginBottom: 12, background: "#fff", borderRadius: 8,
+      border: `2px solid ${isFail ? "#b71c1c" : isPass ? "#2e7d32" : "#e64a19"}`,
+      boxShadow: "0 2px 10px rgba(0,0,0,0.08)",
+      overflow: "hidden",
+      transition: "border-color 0.2s",
+    }}>
+      {/* Header */}
+      <div style={{
+        background: headerBg, padding: "10px 16px",
+        display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+      }}>
+        <span style={{
+          background: "rgba(255,255,255,0.22)", color: "#fff", borderRadius: 5,
+          padding: "3px 10px", fontSize: 11, fontWeight: 800, letterSpacing: 0.5, flexShrink: 0,
+        }}>
+          ขั้นตอนที่ 1 — บังคับ
+        </span>
+        <span style={{ fontSize: 14, color: "#fff", fontWeight: 700 }}>
+          การปฏิบัติตามกฎหมายและข้อบังคับที่เกี่ยวข้อง
+          <span style={{ fontWeight: 400, fontSize: 13 }}> (Legal & Regulatory Compliance)</span>
+        </span>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "rgba(255,255,255,0.88)", fontWeight: 600, flexShrink: 0 }}>
+          {!status && "⚠ กรุณาเลือกสถานะก่อน — ยังทำประเมินไม่ได้"}
+          {isPass && "✓ ผ่านการตรวจสอบ — สามารถดำเนินการประเมินต่อได้"}
+          {isFail && "ไม่สารมารถดำเนินการประเมินต่อได้ และต้องส่งผลการประเมินทันที"}
+        </span>
+      </div>
+
+      {/* Options row */}
+      <div style={{ padding: "14px 16px", display: "flex", gap: 12, alignItems: "stretch", flexWrap: "wrap" }}>
+        {/* Fail option */}
+        <LegalOption
+          selected={isFail}
+          onClick={() => onChange("fail")}
+          badge="ไม่ผ่าน (Disqualified)"
+          badgeColor="#b71c1c"
+          activeColor="#b71c1c"
+          activeBg="#fff5f5"
+          label="ไม่ปฏิบัติตามกฎหมาย มีประวัติถูกดำเนินคดี"
+        />
+
+        {/* Submit button — appears right next to fail when selected */}
+        {isFail && (
+          <button
+            onClick={onSubmitDisqualified}
+            style={{
+              background: "linear-gradient(135deg,#b71c1c,#e53935)",
+              color: "#fff", border: "none", borderRadius: 8,
+              padding: "10px 20px", fontSize: 14, fontWeight: 700,
+              cursor: "pointer", fontFamily: "Sarabun, sans-serif",
+              boxShadow: "0 4px 14px rgba(183,28,28,0.35)",
+              whiteSpace: "nowrap", alignSelf: "center", flexShrink: 0,
+              letterSpacing: 0.2,
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.86")}
+            onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
+          >
+            ส่งผลการประเมิน →
+          </button>
+        )}
+
+        {/* Pass option */}
+        <LegalOption
+          selected={isPass}
+          onClick={() => onChange("pass")}
+          badge="ผ่าน"
+          badgeColor="#2e7d32"
+          activeColor="#2e7d32"
+          activeBg="#f1f8e9"
+          label="ปฏิบัติตามกฎหมายครบถ้วน ไม่มีประวัติถูกดำเนินคดี มีใบอนุญาตครบถ้วนตาม TOR"
+        />
+      </div>
+    </div>
+  );
+}
+
+function LegalOption({ selected, onClick, badge, badgeColor, activeColor, activeBg, label }: {
+  selected: boolean; onClick: () => void; badge: string; badgeColor: string; activeColor: string; activeBg: string; label: string;
+}) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        flex: 1, minWidth: 240,
+        border: `2px solid ${selected ? activeColor : hovered ? activeColor + "66" : "#e0e0e0"}`,
+        borderRadius: 8, padding: "12px 14px",
+        background: selected ? activeBg : hovered ? activeBg : "#fafafa",
+        cursor: "pointer", transition: "all 0.15s",
+        display: "flex", alignItems: "flex-start", gap: 10,
+      }}
+    >
+      {/* Radio dot */}
+      <div style={{
+        width: 18, height: 18, borderRadius: "50%", flexShrink: 0, marginTop: 2,
+        border: `2px solid ${selected ? activeColor : "#ccc"}`,
+        background: selected ? activeColor : "transparent",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        transition: "all 0.15s",
+      }}>
+        {selected && <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#fff" }} />}
+      </div>
+      <div style={{ flex: 1, lineHeight: 1.5 }}>
+        <span style={{ fontSize: 13, fontWeight: selected ? 700 : 500, color: selected ? activeColor : "#444" }}>
+          {label}
+        </span>
+        {" "}
+        <span style={{
+          background: badgeColor, color: "#fff",
+          borderRadius: 4, padding: "1px 8px", fontSize: 11, fontWeight: 700,
+          verticalAlign: "middle", whiteSpace: "nowrap",
+        }}>
+          {badge}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function InfoBar({ formData, evalLabel }: { formData: EvalFormData; evalLabel: string }) {
+  const now   = new Date();
+  const refNo = `SPE-${evalLabel.toUpperCase()}-${now.getFullYear()}${String(now.getMonth()+1).padStart(2,"0")}-AUTO`;
+  return (
+    <div className="info-bar" style={{
+      background: "#fff", border: "1px solid #e0e6e0", borderRadius: 8,
+      boxShadow: "0 1px 4px rgba(0,0,0,0.05)",
+      padding: "12px 18px", marginBottom: 12,
+      display: "flex", alignItems: "center", gap: 18,
+    }}>
+      <style>{`
+        @media (max-width: 700px) {
+          .info-bar { flex-direction: column !important; align-items: flex-start !important; }
+          .info-bar-category { border-right: none !important; padding-right: 0 !important; border-bottom: 1px solid #e0e6e0; padding-bottom: 10px; margin-bottom: 10px; width: 100%; }
+          .info-bar-grid { grid-template-columns: 1fr !important; width: 100%; }
+          .info-bar-grid > div { word-break: break-word; }
+        }
+      `}</style>
+      <div className="info-bar-category" style={{
+        fontSize: 11, color: "#718096", fontWeight: 600,
+        letterSpacing: 0.5, textTransform: "uppercase",
+        borderRight: "1px solid #e0e6e0", paddingRight: 18, flexShrink: 0,
+      }}>
+        Consumer / Packaging<br />Retail / Manufacturer
+      </div>
+      <div className="info-bar-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "5px 28px", fontSize: 13, flex: 1, minWidth: 0 }}>
+        {([
+          ["ชื่อผู้ขาย/ผู้ให้บริการ",    formData.supplierName || "—"],
+          ["เลขประจำตัวผู้เสียภาษี/Tax ID",    formData.vendorCode   || "—"],
+          ["เลขที่อ้างอิง",               refNo],
+          ["หน่วยงาน",                    formData.dept         || "—"],
+          ["ชื่อผู้ประเมิน/รหัสพนักงาน", formData.empId        || "—"],
+          ["รอบการประเมิน",               formData.period       || "—"],
+        ] as [string, string][]).map(([label, val]) => (
+          <div key={label} style={{ display: "flex", gap: 4, minWidth: 0 }}>
+            <span style={{ color: "#718096", flexShrink: 0 }}>{label}:</span>
+            <span style={{ color: "#1a202c", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis" }}>{val}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TableHeader() {
+  return (
+    <div style={{
+      display: "grid", gridTemplateColumns: COLS,
+      background: "#1b5e20", color: "#fff",
+      fontSize: 13, fontWeight: 700, letterSpacing: 0.2,
+      padding: "12px 6px", gap: 4, textAlign: "center",
+      alignItems: "center",
+    }}>
+      <div style={{ fontSize: 12 }}>ลำดับ</div>
+      <div style={{ textAlign: "left", paddingLeft: 10, fontSize: 13 }}>หัวข้อการประเมิน / รายละเอียด</div>
+      <div style={{ fontSize: 12, lineHeight: 1.4 }}>น้ำหนัก<br/>(%)</div>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <div key={n} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+          <span style={{
+            background: LEVEL_COLORS[n - 1], color: "#fff", borderRadius: "50%",
+            width: 24, height: 24, display: "flex", alignItems: "center",
+            justifyContent: "center", fontSize: 13, fontWeight: 800,
+            boxShadow: `0 1px 4px ${LEVEL_COLORS[n-1]}88`,
+          }}>{n}</span>
+          <span style={{ fontSize: 10, opacity: 0.9, lineHeight: 1.3, textAlign: "center" }}>
+            {LEVEL_SHORT_LABELS[n - 1]}
+          </span>
+        </div>
+      ))}
+      <div style={{ fontSize: 12, lineHeight: 1.4 }}>คะแนน<br/>ที่ได้</div>
+      <div style={{ fontSize: 12 }}>หมายเหตุ</div>
+    </div>
+  );
+}
+
+function PartBanner({ label }: { label: string }) {
+  return (
+    <div style={{
+      gridColumn: "1 / -1", background: "#1a1a2e", color: "#fff",
+      padding: "7px 18px", fontSize: 11.5, fontWeight: 700,
+      letterSpacing: 1, textTransform: "uppercase",
+    }}>
+      {label}
+    </div>
+  );
+}
+
+const MODULE_LABELS: Record<string, string> = {
+  m1: "M1 · Maintenance / Project",
+  m2: "M2 · Logistics / Transport",
+  m3: "M3 · Calibration / Lab",
+  m4: "M4 · Food / OEM",
+  m5: "M5 · Raw Material / RM-PM",
+  m6: "M6 · Warehouse / 3PL",
+  m7: "M7 · IT / Software / Service",
+};
+
+// Module choices must include any module admin added beyond M1-M7 (e.g. M8)
+// — building this list from the hardcoded MODULE_LABELS alone meant a new
+// module never appeared as a selectable pill here even though it existed
+// in the DB and Parameter page. funcMap keys are the source of truth for
+// which modules currently exist; MODULE_LABELS only supplies friendlier
+// names for the known ones. "custom" is always appended last.
+function buildModuleOptions(funcMap: FunctionOverrideMap | null): [string, string][] {
+  const keys = new Set(Object.keys(MODULE_LABELS));
+  if (funcMap) Object.keys(funcMap).forEach((k) => keys.add(k));
+  const sorted = Array.from(keys).sort((a, b) => {
+    const na = parseInt(a.replace(/\D/g, ""), 10) || 0;
+    const nb = parseInt(b.replace(/\D/g, ""), 10) || 0;
+    return na - nb;
+  });
+  const options: [string, string][] = sorted.map((k) => [k, MODULE_LABELS[k] ?? (funcMap?.[k]?.nameTh || k.toUpperCase())]);
+  options.push(["custom", "อื่นๆ (กำหนดเอง)"]);
+  return options;
+}
+
+function ModuleSelector({ value, onChange, funcMap }: {
+  value: string | null; onChange: (v: string) => void; funcMap: FunctionOverrideMap | null;
+}) {
+  const pill = (active: boolean): React.CSSProperties => ({
+    padding: "7px 14px", borderRadius: 20, fontSize: 12, fontWeight: 700,
+    cursor: "pointer", border: active ? "1.5px solid #6b3fa0" : "1.5px solid #d8cce8",
+    background: active ? "#6b3fa0" : "#fff", color: active ? "#fff" : "#4a3a60",
+    whiteSpace: "nowrap",
+  });
+  return (
+    <div style={{
+      gridColumn: "1 / -1", background: "#f8f4ff", borderTop: "1.5px solid #d8cce8",
+      borderBottom: "1.5px solid #d8cce8", padding: "12px 18px",
+      display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+    }}>
+      <span style={{ fontSize: 13, fontWeight: 700, color: "#5b2d90", width: "100%" }}>
+        เลือกโมดูลที่จะประเมิน (Part 2 — Function Module):
+      </span>
+      {buildModuleOptions(funcMap).map(([code, label]) => (
+        <button key={code} type="button" style={pill(value === code)} onClick={() => onChange(code)}>
+          {label}
+        </button>
+      ))}
+      {!value && (
+        <span style={{ fontSize: 12, color: "#9333ea", width: "100%" }}>
+          ⚠ กรุณาเลือกโมดูลก่อนกรอกแบบประเมินส่วนนี้
+        </span>
+      )}
+    </div>
+  );
+}
+
+function CustomModuleBuilder({ items, onChange }: {
+  items: CriteriaEntry[]; onChange: (updater: (prev: CriteriaEntry[]) => CriteriaEntry[]) => void;
+}) {
+  // ใช้ functional update (onChange = setCustomItems ของ parent) แทนการ
+  // คำนวณ array ใหม่จาก items (prop) ตรงๆ — ถ้าเรียก addItem ติดกันเร็วมาก
+  // (เช่นดับเบิลคลิกโดยไม่ตั้งใจ) ก่อน React re-render ทั้งสองครั้งจะอ่าน
+  // items.length จาก snapshot เดิมเหมือนกัน ทำให้ item ที่ 2 code ซ้ำกับที่ 1
+  // และการเรียกครั้งหลังจะทับการเรียกครั้งแรกทิ้งไปเลย (เพราะ setState
+  // แทนที่ทั้ง array ไม่ใช่ merge) — functional update กันปัญหานี้ได้เพราะ
+  // React การันตีว่าจะรันต่อจาก state ล่าสุดจริงเสมอ
+  const addItem = () => {
+    onChange(prev => [...prev, { no: `CUSTOM.${prev.length + 1}`, title: "", levels: ["", "", ""], levelValues: [1, 3, 5] }]);
+  };
+  const removeItem = (idx: number) => {
+    onChange(prev => prev.filter((_, i) => i !== idx).map((it, i) => ({ ...it, no: `CUSTOM.${i + 1}` })));
+  };
+  const updateItem = (idx: number, patch: Partial<CriteriaEntry>) => {
+    onChange(prev => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
+  };
+  const inputStyle: React.CSSProperties = {
+    width: "100%", fontSize: 12.5, padding: "6px 9px", borderRadius: 6,
+    border: "1px solid #d8cce8", outline: "none", boxSizing: "border-box",
+    fontFamily: "inherit",
+  };
+  return (
+    <div style={{ gridColumn: "1 / -1", background: "#fcfaff", borderBottom: "1.5px solid #d8cce8", padding: "12px 18px" }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: "#5b2d90", marginBottom: 10 }}>
+        กำหนดหัวข้อประเมินเอง — พิมพ์ชื่อหัวข้อและคำอธิบายแต่ละระดับ (1 / 3 / 5)
+      </div>
+      {items.map((item, idx) => (
+        <div key={item.no} style={{
+          background: "#fff", border: "1px solid #e4d8f4", borderRadius: 8,
+          padding: 12, marginBottom: 10,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#6b3fa0", flexShrink: 0 }}>{item.no}</span>
+            <input
+              value={item.title}
+              onChange={(e) => updateItem(idx, { title: e.target.value })}
+              placeholder="ชื่อหัวข้อที่จะประเมิน"
+              style={{ ...inputStyle, fontWeight: 600 }}
+            />
+            <button
+              type="button" onClick={() => removeItem(idx)} title="ลบหัวข้อนี้"
+              style={{ background: "none", border: "none", cursor: "pointer", flexShrink: 0, display: "flex", padding: 4 }}
+            >
+              <Trash2 size={15} style={{ color: "#c62828" }} />
+            </button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+            {[0, 1, 2].map((li) => (
+              <div key={li}>
+                <div style={{ fontSize: 10.5, color: "#94a3b8", marginBottom: 3 }}>คำอธิบายระดับ {[1, 3, 5][li]}</div>
+                <input
+                  value={item.levels?.[li] ?? ""}
+                  onChange={(e) => updateItem(idx, { levels: (item.levels ?? []).map((l, j) => (j === li ? e.target.value : l)) })}
+                  placeholder={`ระดับ ${[1, 3, 5][li]}`}
+                  style={inputStyle}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      <button
+        type="button" onClick={addItem}
+        style={{
+          display: "flex", alignItems: "center", gap: 6,
+          background: "#fff", border: "1.5px dashed #6b3fa0", borderRadius: 8,
+          padding: "8px 14px", cursor: "pointer", color: "#6b3fa0",
+          fontSize: 12.5, fontWeight: 700, fontFamily: "inherit",
+        }}
+      >
+        <Plus size={14} /> เพิ่มหัวข้อ
+      </button>
+      {items.length === 0 && (
+        <div style={{ fontSize: 12, color: "#9333ea", marginTop: 8 }}>
+          ⚠ ยังไม่มีหัวข้อ — กรุณาเพิ่มอย่างน้อย 1 หัวข้อ
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EsgTargetSelector({ value, onChange }: { value: string | null; onChange: (v: string) => void }) {
+  const pill = (active: boolean): React.CSSProperties => ({
+    padding: "8px 16px", borderRadius: 20, fontSize: 12.5, fontWeight: 700,
+    cursor: "pointer", border: active ? "1.5px solid #1558a0" : "1.5px solid #c8d4e0",
+    background: active ? "#1558a0" : "#fff", color: active ? "#fff" : "#3a4a60",
+    whiteSpace: "nowrap",
+  });
+  return (
+    <div style={{
+      gridColumn: "1 / -1", background: "#fffbea", borderTop: "1.5px solid #fde68a",
+      borderBottom: "1.5px solid #fde68a", padding: "12px 18px",
+      display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+    }}>
+      <span style={{ fontSize: 13, fontWeight: 700, color: "#92400e" }}>
+        เลือกประเภทที่จะประเมิน ESG:
+      </span>
+      <button type="button" style={pill(value === "ho")} onClick={() => onChange("ho")}>
+        สำนักงานใหญ่ / สาขา / Retail Store (HO / Store)
+      </button>
+      <button type="button" style={pill(value === "factory")} onClick={() => onChange("factory")}>
+        โรงงาน / สถานประกอบการผลิต (Factory)
+      </button>
+      {!value && (
+        <span style={{ fontSize: 12, color: "#b45309" }}>
+          ⚠ กรุณาเลือกก่อนกรอกแบบประเมินส่วนนี้
+        </span>
+      )}
+    </div>
+  );
+}
+
+function DividerRow({ label, level, groupWeight }: { label: string; level?: number; groupWeight?: number }) {
+  const isMain = level === 1;
+  return (
+    <div style={{
+      gridColumn: "1 / -1",
+      background: isMain ? "#f0f4fa" : "#f7f9fc",
+      borderTop: isMain ? "1.5px solid #b8cce4" : "1px solid #dde6f0",
+      borderBottom: isMain ? "1.5px solid #b8cce4" : "1px solid #dde6f0",
+      padding: isMain ? "8px 18px" : "6px 28px",
+      display: "flex", alignItems: "center", gap: 8,
+    }}>
+      {isMain && (
+        <span style={{
+          width: 3, height: 14, background: "#1558a0",
+          borderRadius: 2, display: "inline-block", flexShrink: 0,
+        }} />
+      )}
+      <span style={{
+        fontSize: isMain ? 13 : 12,
+        fontWeight: isMain ? 700 : 600,
+        color: isMain ? "#1558a0" : "#4a6080",
+        letterSpacing: 0.1,
+      }}>
+        {label}
+      </span>
+      {level === 2 && (
+        <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: "#1558a0" }}>
+          {r2(groupWeight ?? 100 / 3)}%
+        </span>
+      )}
+    </div>
+  );
+}
+
+function SectionHeaderRow({ section, secWeight, ahpW }: { section: CriteriaSection; secWeight: number; ahpW: number | null }) {
+  return (
+    <div style={{
+      display: "grid", gridTemplateColumns: COLS, gap: 4,
+      background: "linear-gradient(90deg,#1b5e20,#2e7d32)",
+      color: "#fff", alignItems: "center",
+    }}>
+      <div style={{ gridColumn: "1 / 3", padding: "10px 16px", fontSize: 14, fontWeight: 700, letterSpacing: 0.3 }}>
+        {section.section}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "6px 4px" }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", padding: "4px 10px" }}>
+          {secWeight}%
+          {ahpW != null && <span style={{ fontSize: 12, fontWeight: 400, opacity: 0.75, marginLeft: 3 }}>({ahpW}%)</span>}
+        </span>
+      </div>
+
+      <div style={{ gridColumn: "4 / 11" }} />
+    </div>
+  );
+}
+
+function ScoreRow({ item, weight, selected, note, onSelect, onNote, shaded, ahpW }: {
+  item: CriteriaEntry; weight: number; selected: number | undefined; note: string;
+  onSelect: (lv: number) => void; onNote: (v: string) => void; shaded: boolean; ahpW: number | null;
+}) {
+  const levelValues = item.levelValues || [1, 2, 3, 4, 5];
+  const maxLv       = Math.max(...levelValues);
+  const rowScore    = selected ? ((selected / maxLv) * weight).toFixed(2) : "—";
+
+  return (
+    <div style={{
+      display: "grid", gridTemplateColumns: COLS,
+      borderTop: "1px solid #e8ece8", gap: 4, alignItems: "stretch",
+      background: selected
+        ? shaded ? "#f0faf0" : "#f6fcf6"
+        : shaded ? "#f8faf8" : "#fff",
+      transition: "background 0.15s",
+    }}>
+      <div style={{
+        padding: "14px 4px", textAlign: "center", fontSize: 12,
+        fontWeight: 800, color: "#1b5e20", letterSpacing: 0.3,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        borderRight: "1px solid #e8ece8",
+      }}>
+        {item.no}
+      </div>
+
+      <div style={{
+        padding: "12px 10px", fontSize: 13, lineHeight: 1.7,
+        color: "#1a1a1a",
+        display: "flex", flexDirection: "column", justifyContent: "center",
+        borderRight: "1px solid #e8ece8",
+      }}>
+        {item.calcType === "capital-ratio" ? (() => {
+          const lines = (item.title ?? "").split("\n");
+          const instr = lines.pop();
+          return (
+            <>
+              <span style={{ fontWeight: 500, whiteSpace: "pre-line" }}>{lines.join("\n")}</span>
+              <span style={{
+                display: "inline-block", marginTop: 7,
+                background: "#fff3e0", border: "2px solid #fb8c00",
+                borderLeft: "5px solid #e65100",
+                borderRadius: 6, padding: "6px 12px",
+                fontSize: 12, color: "#bf360c", fontWeight: 700,
+                lineHeight: 1.5,
+              }}>
+                {instr}
+              </span>
+            </>
+          );
+        })() : (
+          <span style={{ fontWeight: 500, whiteSpace: "pre-line" }}>{item.title}</span>
+        )}
+        {item.calcType === "capital-ratio" && (
+          <CapitalRatioCalc item={item} selected={selected} onSelect={onSelect} />
+        )}
+      </div>
+
+      <div style={{ padding: "8px 4px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2 }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: "#1b5e20", padding: "4px 10px" }}>
+          {weight}%
+          {ahpW != null && <span style={{ fontSize: 11, fontWeight: 400, color: "#888", marginLeft: 2 }}>({ahpW}%)</span>}
+        </span>
+      </div>
+
+      {item.calcType === "capital-ratio"
+        ? [1, 2, 3, 4, 5].map((lv) => {
+            const isSelected = selected === lv;
+            return (
+              <div key={lv} title="ใช้ปุ่มคำนวณ เพื่อเลือก Level" style={{
+                padding: "8px 5px", cursor: "not-allowed",
+                background: isSelected ? LEVEL_COLORS[lv - 1] + "22" : "#f7f7f7",
+                border: `2px solid ${isSelected ? LEVEL_COLORS[lv - 1] : "#e4e4e4"}`,
+                borderRadius: 7, margin: "6px 3px",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                boxShadow: isSelected ? `0 1px 5px ${LEVEL_COLORS[lv - 1]}40` : "none",
+              }}>
+                <div style={{
+                  fontSize: 12, lineHeight: 1.5, textAlign: "center",
+                  color: isSelected ? "#1a1a1a" : "#aaa",
+                  whiteSpace: "pre-line", wordBreak: "break-word",
+                  fontWeight: isSelected ? 700 : 400,
+                }}>
+                  {item.levels?.[lv - 1]}
+                </div>
+              </div>
+            );
+          })
+        : [1, 2, 3, 4, 5].map((lv) => {
+            const available  = levelValues.includes(lv);
+            const isSelected = selected === lv;
+            return (
+              <div
+                key={lv}
+                onClick={() => available && onSelect(lv)}
+                style={{
+                  padding: "8px 5px",
+                  cursor: available ? "pointer" : "default",
+                  background: isSelected ? LEVEL_COLORS[lv - 1] + "22" : available ? "#fafafa" : "#f5f5f5",
+                  border: `2px solid ${isSelected ? LEVEL_COLORS[lv - 1] : available ? "#e0e0e0" : "transparent"}`,
+                  borderRadius: 7, margin: "6px 3px",
+                  opacity: available ? 1 : 0.12,
+                  transition: "all 0.15s",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  boxShadow: isSelected ? `0 1px 5px ${LEVEL_COLORS[lv - 1]}40` : "none",
+                }}
+                onMouseEnter={(e) => { if (available && !isSelected) e.currentTarget.style.background = LEVEL_COLORS[lv - 1] + "18"; }}
+                onMouseLeave={(e) => { if (available && !isSelected) e.currentTarget.style.background = "#fafafa"; }}
+              >
+                {available && (
+                  <div style={{
+                    fontSize: 12, lineHeight: 1.5, textAlign: "center",
+                    color: "#1a1a1a",
+                    whiteSpace: "pre-line", wordBreak: "break-word",
+                    fontWeight: isSelected ? 700 : 400,
+                  }}>
+                    {item.levels?.[lv - 1]}
+                  </div>
+                )}
+              </div>
+            );
+          })
+      }
+
+      <div style={{
+        padding: "12px 4px", textAlign: "center", fontSize: 15, fontWeight: 800,
+        color: selected ? "#1b5e20" : "#ccc",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        borderLeft: "1px solid #e8ece8",
+      }}>
+        {rowScore}
+      </div>
+
+      <div style={{ padding: "6px 6px", display: "flex", alignItems: "center" }}>
+        <NoteCell itemNo={item.no ?? ""} value={note} onChange={onNote} />
+      </div>
+    </div>
+  );
+}
+
+// ---- Mobile-only equivalents of TableHeader/SectionHeaderRow/DividerRow/
+// ScoreRow — the desktop versions are a 10-column CSS grid that has no
+// room to breathe below ~700px (each column collapses to a few px wide).
+// These reuse the exact same props/handlers, just render as stacked
+// cards/lists instead of grid columns, and show level descriptions as a
+// vertical selectable list instead of 5 side-by-side slivers.
+function SectionHeaderMobile({ section, secWeight, ahpW }: { section: CriteriaSection; secWeight: number; ahpW: number | null }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+      background: "linear-gradient(90deg,#1b5e20,#2e7d32)", color: "#fff",
+      padding: "10px 14px",
+    }}>
+      <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: 0.3 }}>{section.section}</div>
+      <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", flexShrink: 0, padding: "4px 10px" }}>
+        {secWeight}%
+        {ahpW != null && <span style={{ fontSize: 12, fontWeight: 400, opacity: 0.75, marginLeft: 3 }}>({ahpW}%)</span>}
+      </span>
+    </div>
+  );
+}
+
+function DividerMobile({ label, level, groupWeight }: { label: string; level?: number; groupWeight?: number }) {
+  const isMain = level === 1;
+  return (
+    <div style={{
+      background: isMain ? "#f0f4fa" : "#f7f9fc",
+      borderTop: isMain ? "1.5px solid #b8cce4" : "1px solid #dde6f0",
+      borderBottom: isMain ? "1.5px solid #b8cce4" : "1px solid #dde6f0",
+      padding: isMain ? "8px 14px" : "6px 22px",
+      display: "flex", alignItems: "center", gap: 8,
+    }}>
+      {isMain && <span style={{ width: 3, height: 14, background: "#1558a0", borderRadius: 2, flexShrink: 0 }} />}
+      <span style={{ fontSize: isMain ? 13 : 12, fontWeight: isMain ? 700 : 600, color: isMain ? "#1558a0" : "#4a6080" }}>
+        {label}
+      </span>
+      {level === 2 && (
+        <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: "#1558a0" }}>
+          {r2(groupWeight ?? 100 / 3)}%
+        </span>
+      )}
+    </div>
+  );
+}
+
+function ScoreCardMobile({ item, weight, selected, note, onSelect, onNote, shaded, ahpW }: {
+  item: CriteriaEntry; weight: number; selected: number | undefined; note: string;
+  onSelect: (lv: number) => void; onNote: (v: string) => void; shaded: boolean; ahpW: number | null;
+}) {
+  const levelValues = item.levelValues || [1, 2, 3, 4, 5];
+  const maxLv       = Math.max(...levelValues);
+  const rowScore    = selected ? ((selected / maxLv) * weight).toFixed(2) : "—";
+  const isCalc      = item.calcType === "capital-ratio";
+
+  const titleLines = isCalc ? (item.title ?? "").split("\n") : null;
+  const calcInstr   = isCalc ? titleLines!.pop() : null;
+
+  return (
+    <div style={{
+      borderTop: "1px solid #e8ece8", padding: "14px 14px 12px",
+      background: selected ? (shaded ? "#f0faf0" : "#f6fcf6") : (shaded ? "#f8faf8" : "#fff"),
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8 }}>
+        <span style={{ fontSize: 12, fontWeight: 800, color: "#1b5e20" }}>ข้อ {item.no}</span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: "#1b5e20", flexShrink: 0 }}>
+          {weight}%
+          {ahpW != null && <span style={{ fontSize: 11, fontWeight: 400, color: "#aaa", marginLeft: 2 }}>({ahpW}%)</span>}
+        </span>
+      </div>
+
+      <div style={{ fontSize: 13.5, lineHeight: 1.7, color: "#1a1a1a", marginBottom: 10, whiteSpace: "pre-line" }}>
+        {isCalc ? titleLines!.join("\n") : item.title}
+      </div>
+      {isCalc && (
+        <div style={{
+          marginBottom: 10, background: "#fff3e0", border: "2px solid #fb8c00", borderLeft: "5px solid #e65100",
+          borderRadius: 6, padding: "6px 12px", fontSize: 12, color: "#bf360c", fontWeight: 700, lineHeight: 1.5,
+        }}>
+          {calcInstr}
+        </div>
+      )}
+      {isCalc && <CapitalRatioCalc item={item} selected={selected} onSelect={onSelect} />}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+        {[1, 2, 3, 4, 5].map((lv) => {
+          const available  = levelValues.includes(lv);
+          if (!available) return null;
+          const isSelected  = selected === lv;
+          const clickable   = !isCalc && available;
+          return (
+            <div
+              key={lv}
+              onClick={() => clickable && onSelect(lv)}
+              style={{
+                display: "flex", alignItems: "flex-start", gap: 8,
+                padding: "8px 10px", cursor: clickable ? "pointer" : "default",
+                background: isSelected ? LEVEL_COLORS[lv - 1] + "1c" : "#fafafa",
+                border: `1.5px solid ${isSelected ? LEVEL_COLORS[lv - 1] : "#e0e0e0"}`,
+                borderRadius: 8,
+              }}
+            >
+              <span style={{
+                background: LEVEL_COLORS[lv - 1], color: "#fff", borderRadius: "50%",
+                width: 20, height: 20, flexShrink: 0, fontSize: 11, fontWeight: 800,
+                display: "flex", alignItems: "center", justifyContent: "center", marginTop: 1,
+              }}>
+                {lv}
+              </span>
+              <span style={{
+                fontSize: 12.5, lineHeight: 1.5, color: isSelected ? "#1a1a1a" : "#555",
+                fontWeight: isSelected ? 700 : 400, whiteSpace: "pre-line", wordBreak: "break-word",
+              }}>
+                {item.levels?.[lv - 1]}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 12, color: "#718096" }}>คะแนนที่ได้</span>
+        <span style={{ fontSize: 16, fontWeight: 800, color: selected ? "#1b5e20" : "#ccc" }}>{rowScore}</span>
+      </div>
+
+      <NoteCell itemNo={item.no ?? ""} value={note} onChange={onNote} />
+    </div>
+  );
+}
+
+// ---- CapitalRatioCalc: popup calculator สำหรับข้อ 4.3 / 5.3 -------------------
+function CapitalRatioCalc({ item, selected, onSelect }: {
+  item: CriteriaEntry; selected: number | undefined; onSelect: (lv: number) => void;
+}) {
+  const [open,     setOpen]     = useState(false);
+  const [capital,  setCapital]  = useState("");
+  const [value,    setValue]    = useState("");
+  const [numContracts, setNumContracts] = useState("");
+
+  const ratio = (() => {
+    const c = parseFloat(capital);
+    const v = parseFloat(value);
+    const n = parseFloat(numContracts);
+    if (!c || !v || !n || n === 0) return null;
+    return c / (v / n);
+  })();
+
+  const calcLevel = (r: number | null): number | null => {
+    if (r === null) return null;
+    const t = item.calcThresholds; // [t0, t1, t2, t3] → L1 if r<t0, L2 if r<t1, ...
+    if (!t) return null;
+    if (r < t[0]) return 1;
+    if (r < t[1]) return 2;
+    if (r < t[2]) return 3;
+    if (r < t[3]) return 4;
+    return 5;
+  };
+
+  const autoLevel = calcLevel(ratio);
+
+  const confirm = () => {
+    if (autoLevel) { onSelect(autoLevel); setOpen(false); }
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); if (e.key === "Enter") confirm(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, autoLevel]);
+
+  const levelColor = autoLevel ? LEVEL_COLORS[autoLevel - 1] : "#ccc";
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        title="เปิดเครื่องคำนวณ Capital Ratio"
+        style={{
+          marginTop: 6, fontSize: 11, padding: "3px 10px", borderRadius: 20,
+          border: "1.5px solid #1565c0", background: selected ? "#e3f2fd" : "#f0f4ff",
+          color: "#1565c0", cursor: "pointer", fontFamily: "Sarabun, sans-serif",
+          fontWeight: 600, display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap",
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = "#bbdefb")}
+        onMouseLeave={(e) => (e.currentTarget.style.background = selected ? "#e3f2fd" : "#f0f4ff")}
+      >
+        🧮 คำนวณ Capital Ratio {selected ? `(L${selected})` : ""}
+      </button>
+
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{
+            position: "fixed", inset: 0, zIndex: 9990,
+            background: "rgba(0,0,0,0.45)",
+          }} />
+          <div style={{
+            position: "fixed", zIndex: 9991,
+            top: "50%", left: "50%",
+            transform: "translate(-50%, -50%)",
+            width: "min(480px, 92vw)",
+            background: "#fff", borderRadius: 14,
+            boxShadow: "0 24px 64px rgba(0,0,0,0.28)",
+            overflow: "hidden", fontFamily: "Sarabun, sans-serif",
+          }}>
+            {/* header */}
+            <div style={{ background: "#1565c0", color: "#fff", padding: "14px 20px" }}>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>🧮 คำนวณ Capital Ratio — ข้อ {item.no}</div>
+              <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>
+                สูตร: ทุนจดทะเบียน ÷ (มูลค่างาน ÷ จำนวนงาน)
+              </div>
+            </div>
+
+            {/* inputs */}
+            <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
+              {[
+                { label: "(1) ทุนจดทะเบียน (บาท)", val: capital,      set: setCapital },
+                { label: "(2) มูลค่างานรวม (บาท)",  val: value,        set: setValue },
+                { label: "(3) จำนวนงาน (สัญญา)",    val: numContracts, set: setNumContracts },
+              ].map(({ label, val, set }) => (
+                <div key={label}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#444", marginBottom: 6 }}>{label}</div>
+                  <input
+                    type="number"
+                    min={0}
+                    value={val}
+                    onChange={(e) => set(e.target.value)}
+                    placeholder="0"
+                    style={{
+                      width: "100%", boxSizing: "border-box",
+                      fontSize: 15, padding: "10px 12px",
+                      border: "1.5px solid #90caf9", borderRadius: 8,
+                      outline: "none", fontFamily: "Sarabun, sans-serif",
+                    }}
+                    onFocus={(e) => (e.target.style.borderColor = "#1565c0")}
+                    onBlur={(e)  => (e.target.style.borderColor = "#90caf9")}
+                  />
+                </div>
+              ))}
+
+              {/* result box */}
+              <div style={{
+                background: autoLevel ? levelColor + "18" : "#f5f5f5",
+                border: `2px solid ${autoLevel ? levelColor : "#e0e0e0"}`,
+                borderRadius: 10, padding: "14px 18px",
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+              }}>
+                <div>
+                  <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>Ratio = (1) ÷ [(2) ÷ (3)]</div>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: autoLevel ? levelColor : "#aaa" }}>
+                    {ratio !== null ? ratio.toFixed(3) + "x" : "—"}
+                  </div>
+                </div>
+                {autoLevel && (
+                  <div style={{
+                    textAlign: "center",
+                    background: levelColor, color: "#fff",
+                    borderRadius: 10, padding: "8px 18px",
+                    boxShadow: `0 2px 12px ${levelColor}66`,
+                  }}>
+                    <div style={{ fontSize: 11, opacity: 0.9 }}>ระดับที่ได้</div>
+                    <div style={{ fontSize: 28, fontWeight: 900, lineHeight: 1 }}>L{autoLevel}</div>
+                    <div style={{ fontSize: 10, opacity: 0.85, marginTop: 2 }}>{item.levels?.[autoLevel - 1]}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* footer */}
+            <div style={{ padding: "0 24px 20px", display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button
+                onClick={() => setOpen(false)}
+                style={{
+                  background: "#f5f5f5", color: "#555", border: "1.5px solid #d0d0d0",
+                  borderRadius: 8, padding: "10px 24px", fontSize: 14, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "Sarabun, sans-serif",
+                }}
+              >
+                ยกเลิก
+              </button>
+              <button
+                onClick={confirm}
+                disabled={!autoLevel}
+                style={{
+                  background: autoLevel ? "#1565c0" : "#bbb", color: "#fff", border: "none",
+                  borderRadius: 8, padding: "10px 28px", fontSize: 14, fontWeight: 700,
+                  cursor: autoLevel ? "pointer" : "not-allowed", fontFamily: "Sarabun, sans-serif",
+                }}
+              >
+                ใช้ Level {autoLevel ?? "?"} ✓
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+// ---- MissingScoresModal -------------------------------------------------------
+function MissingScoresModal({ items, criteria, answered, total, onClose }: {
+  items: CriteriaEntry[]; criteria: CriteriaSection[]; answered: number; total: number; onClose: () => void;
+}) {
+  const missingNos = new Set(items.map((i) => i.no));
+
+  return (
+    <>
+      <style>{`
+        @keyframes _missIn {
+          from { opacity: 0; transform: translate(-50%, -54%) scale(0.92); }
+          to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        }
+        @keyframes _missOverlay { from { opacity: 0; } to { opacity: 1; } }
+      `}</style>
+
+      {/* Backdrop */}
+      <div
+        onClick={onClose}
+        style={{
+          position: "fixed", inset: 0, zIndex: 9998,
+          background: "rgba(0,0,0,0.52)",
+          animation: "_missOverlay 0.18s ease",
+        }}
+      />
+
+      {/* Modal card */}
+      <div style={{
+        position: "fixed", zIndex: 9999,
+        top: "50%", left: "50%",
+        transform: "translate(-50%, -50%)",
+        width: "min(520px, 94vw)",
+        background: "#fff", borderRadius: 16,
+        boxShadow: "0 28px 72px rgba(0,0,0,0.30)",
+        overflow: "hidden",
+        fontFamily: "Sarabun, sans-serif",
+        animation: "_missIn 0.22s cubic-bezier(.34,1.3,.64,1)",
+      }}>
+
+        {/* Header */}
+        <div style={{
+          background: "linear-gradient(135deg, #b71c1c, #e53935)",
+          padding: "18px 22px",
+          display: "flex", alignItems: "center", gap: 14,
+        }}>
+          <div style={{
+            width: 44, height: 44, borderRadius: "50%",
+            background: "rgba(255,255,255,0.18)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0,
+          }}><AlertTriangle size={22} color="#fff" /></div>
+          <div>
+            <div style={{ color: "#fff", fontWeight: 800, fontSize: 17, letterSpacing: 0.3 }}>
+              ประเมินยังไม่ครบ
+            </div>
+            <div style={{ color: "rgba(255,255,255,0.8)", fontSize: 12, marginTop: 2 }}>
+              กรุณาให้คะแนนทุกหัวข้อก่อนส่งผลการประเมิน
+            </div>
+          </div>
+          <div style={{ marginLeft: "auto", flexShrink: 0 }}>
+            <div style={{
+              background: "rgba(255,255,255,0.22)", borderRadius: 10,
+              padding: "6px 14px", textAlign: "center",
+            }}>
+              <div style={{ color: "#fff", fontSize: 22, fontWeight: 900, lineHeight: 1 }}>
+                {items.length}
+              </div>
+              <div style={{ color: "rgba(255,255,255,0.8)", fontSize: 10 }}>หัวข้อที่ขาด</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Progress bar */}
+        <div style={{ padding: "14px 22px 0" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#666", marginBottom: 6 }}>
+            <span>ความคืบหน้าการประเมิน</span>
+            <span style={{ fontWeight: 700, color: answered === total ? "#2e7d32" : "#e53935" }}>
+              {answered} / {total} หัวข้อ
+            </span>
+          </div>
+          <div style={{ height: 8, background: "#f0f0f0", borderRadius: 99, overflow: "hidden" }}>
+            <div style={{
+              height: "100%", borderRadius: 99,
+              background: answered === total ? "#2e7d32" : "linear-gradient(90deg,#e53935,#ff7043)",
+              width: `${total > 0 ? (answered / total) * 100 : 0}%`,
+              transition: "width 0.4s",
+            }} />
+          </div>
+        </div>
+
+        {/* Missing items list — grouped by section */}
+        <div style={{ padding: "14px 22px 4px" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#333", marginBottom: 8 }}>
+            หัวข้อที่ยังไม่ได้ให้คะแนน:
+          </div>
+          <div style={{
+            maxHeight: 280, overflowY: "auto",
+            border: "1.5px solid #fce4e4", borderRadius: 10,
+            background: "#fff8f8",
+          }}>
+            {criteria.map((section, si) => {
+              const sectionMissing = section.items.filter(
+                (i) => !i.divider && missingNos.has(i.no)
+              );
+              if (sectionMissing.length === 0) return null;
+
+              const sectionLabel = section.section.replace(/^\d+\.\s*/, "").split("/")[0].trim();
+              return (
+                <div key={si}>
+                  {/* Section sub-header */}
+                  <div style={{
+                    padding: "8px 14px",
+                    background: "#fdecea",
+                    borderBottom: "1px solid #fce4e4",
+                    fontSize: 12, fontWeight: 700, color: "#c62828",
+                    display: "flex", alignItems: "center", gap: 6,
+                  }}>
+                    <span style={{
+                      background: "#e53935", color: "#fff",
+                      borderRadius: 4, padding: "1px 7px", fontSize: 11,
+                    }}>
+                      {si + 1}
+                    </span>
+                    {sectionLabel}
+                    <span style={{
+                      marginLeft: "auto", background: "#c62828", color: "#fff",
+                      borderRadius: 99, padding: "1px 8px", fontSize: 10, fontWeight: 700,
+                    }}>
+                      ขาด {sectionMissing.length}
+                    </span>
+                  </div>
+
+                  {/* Items */}
+                  {sectionMissing.map((item, idx) => (
+                    <div
+                      key={item.no}
+                      style={{
+                        padding: "9px 14px",
+                        borderBottom: idx < sectionMissing.length - 1 ? "1px solid #fce4e4" : "none",
+                        display: "flex", alignItems: "flex-start", gap: 10,
+                        background: idx % 2 === 0 ? "#fff8f8" : "#fff",
+                      }}
+                    >
+                      <span style={{
+                        background: "#e53935", color: "#fff",
+                        borderRadius: 6, padding: "2px 8px",
+                        fontSize: 11, fontWeight: 800, flexShrink: 0, marginTop: 1,
+                      }}>
+                        {item.no}
+                      </span>
+                      <span style={{
+                        fontSize: 12, color: "#444", lineHeight: 1.5,
+                        overflow: "hidden", display: "-webkit-box",
+                        WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+                      }}>
+                        {item.title}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: "16px 22px 20px", display: "flex", justifyContent: "flex-end" }}>
+          <button
+            onClick={onClose}
+            style={{
+              background: "linear-gradient(135deg, #b71c1c, #e53935)",
+              color: "#fff", border: "none", borderRadius: 10,
+              padding: "11px 32px", fontSize: 14, fontWeight: 700,
+              cursor: "pointer", fontFamily: "Sarabun, sans-serif",
+              boxShadow: "0 4px 14px rgba(229,57,53,0.4)",
+              letterSpacing: 0.3,
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.88")}
+            onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
+          >
+            ปิดและแก้ไข
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ---- NoteCell: คลิกแล้วป๊อปอัพกลางจอ ----------------------------------------
+function NoteCell({ itemNo, value, onChange }: { itemNo: string; value: string; onChange: (v: string) => void }) {
+  const [open,  setOpen]  = useState(false);
+  const [draft, setDraft] = useState(value);
+
+  const openPopup = () => { setDraft(value); setOpen(true); };
+  const save      = () => { onChange(draft); setOpen(false); };
+  const cancel    = () => { setDraft(value); setOpen(false); };
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape")               cancel();
+      if (e.key === "Enter" && e.ctrlKey)   save();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, draft]);
+
+  return (
+    <>
+      {/* trigger cell */}
+      <div
+        onClick={openPopup}
+        style={{
+          width: "100%", minHeight: 36, cursor: "pointer",
+          borderRadius: 6, padding: "4px 8px",
+          border: value ? "1.5px solid #a5d6a7" : "1.5px dashed #ccc",
+          background: value ? "#f1f8e9" : "#fafafa",
+          display: "flex", alignItems: "center",
+          transition: "border-color 0.15s, background 0.15s",
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#2e7d32"; e.currentTarget.style.background = "#e8f5e9"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.borderColor = value ? "#a5d6a7" : "#ccc"; e.currentTarget.style.background = value ? "#f1f8e9" : "#fafafa"; }}
+      >
+        {value ? (
+          <span style={{
+            fontSize: 11, color: "#333", lineHeight: 1.4,
+            overflow: "hidden", display: "-webkit-box",
+            WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+          }}>
+            {value}
+          </span>
+        ) : (
+          <span style={{ fontSize: 11, color: "#bbb", fontStyle: "italic" }}>+ หมายเหตุ</span>
+        )}
+      </div>
+
+      {/* modal กลางจอ */}
+      {open && (
+        <>
+          {/* backdrop */}
+          <div
+            onClick={save}
+            style={{
+              position: "fixed", inset: 0, zIndex: 9990,
+              background: "rgba(0,0,0,0.45)",
+            }}
+          />
+          {/* popup card */}
+          <div style={{
+            position: "fixed", zIndex: 9991,
+            top: "50%", left: "50%",
+            transform: "translate(-50%, -50%)",
+            width: "min(560px, 90vw)",
+            background: "#fff",
+            borderRadius: 14,
+            boxShadow: "0 24px 64px rgba(0,0,0,0.28)",
+            overflow: "hidden",
+            fontFamily: "Sarabun, sans-serif",
+            animation: "notePopIn 0.18s cubic-bezier(.34,1.3,.64,1)",
+          }}>
+            <style>{`@keyframes notePopIn { from { opacity:0; transform:translate(-50%,-54%) scale(0.93); } to { opacity:1; transform:translate(-50%,-50%) scale(1); } }`}</style>
+
+            {/* header */}
+            <div style={{
+              background: "#1b5e20", color: "#fff",
+              padding: "14px 20px",
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+            }}>
+              <span style={{ fontSize: 16, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
+                <FileText size={16} /> หมายเหตุ — ข้อ {itemNo}
+              </span>
+              <span style={{ fontSize: 12, opacity: 0.75 }}>ไม่จำกัดจำนวนตัวอักษร</span>
+            </div>
+
+            {/* body */}
+            <div style={{ padding: "18px 20px 12px" }}>
+              <textarea
+                autoFocus
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="พิมพ์หมายเหตุได้เลย..."
+                rows={7}
+                style={{
+                  width: "100%", boxSizing: "border-box",
+                  fontSize: 14, fontFamily: "Sarabun, sans-serif",
+                  border: "1.5px solid #a5d6a7", borderRadius: 8,
+                  padding: "10px 12px", outline: "none",
+                  resize: "vertical", lineHeight: 1.7, color: "#222",
+                }}
+                onFocus={(e) => (e.target.style.borderColor = "#2e7d32")}
+                onBlur={(e)  => (e.target.style.borderColor = "#a5d6a7")}
+              />
+              <div style={{ fontSize: 11, color: "#aaa", marginTop: 6, textAlign: "right" }}>
+                {draft.length} ตัวอักษร &nbsp;·&nbsp; Ctrl+Enter = บันทึก &nbsp;·&nbsp; Esc = ยกเลิก
+              </div>
+            </div>
+
+            {/* footer */}
+            <div style={{
+              padding: "10px 20px 18px",
+              display: "flex", justifyContent: "flex-end", gap: 10,
+            }}>
+              <button
+                onClick={cancel}
+                style={{
+                  background: "#f5f5f5", color: "#555",
+                  border: "1.5px solid #d0d0d0", borderRadius: 8,
+                  padding: "10px 24px", fontSize: 14, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "Sarabun, sans-serif",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "#e0e0e0")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "#f5f5f5")}
+              >
+                ยกเลิก
+              </button>
+              <button
+                onClick={save}
+                style={{
+                  background: "#2e7d32", color: "#fff", border: "none",
+                  borderRadius: 8, padding: "10px 32px", fontSize: 14,
+                  fontWeight: 700, cursor: "pointer", fontFamily: "Sarabun, sans-serif",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "#1b5e20")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "#2e7d32")}
+              >
+                บันทึก ✓
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  );
+}

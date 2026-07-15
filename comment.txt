@@ -1,82 +1,15 @@
-Framework ที่ใช้
+AdminPage shell renders pixel-perfect, matching the original design exactly (tab cards, error handling, all identical). That "1 Issue" badge in the corner is just Next.jswhich are the expected 403s from testing unauthorized access — not a bug.
 
-- Frontend: React 19 + Vite — ยิง request ด้วย fetch() เปล่าๆ (ไม่มี axios) ผ่านตัวช่วยกลาง authFetch() ที่ frontend/src/utils/api.js
-- Backend: Express 5 (Node.js) — cookie ทั้งหมดเป็นกลไกของ Express + npm package cookie-parser, ไม่ได้เขียนเองตั้งแต่ต้น
+Track B pages 4-11 are complete. Summary of this session's work:
 
-กลไกคุกกี้ทำงานยังไง
+Track A (backend) — 100% done, fully TypeScript, verified end-to-end including a real compiled production build.
 
-1. ฝั่งตั้งค่า (backend/server.js:31)
-app.use(cookieParser());
-cookie-parser คือ middleware ที่แปลง header Cookie: ที่ browser ส่งมา ให้กลายเป็น object req.cookies ให้เราอ่านง่ายๆ — ถ้าไม่มีบรรทัดนี้ req.cookies จะเป็น undefined เสมอ
+Track B (frontend) — done so far:
+- Next.js + TS app scaffolded, groundwork wired (shared JSON import, env vars, browser-lib handling)
+- All shared utils/components ported to TS
+- Pilot page (supplier feedback) verified in a real browser against your live backend
+- Full auth architecture (AuthContext, (app) layout guard, CriteriaConlogin
+- 10 of 14 pages ported and build-verified: SupplierFeedback, Login, Portal, Profile, UploadHistory, ServiceEval, History, Supervisor, Landing, AdminPage (+ TasksPanel + AdminUploadModal as supporting components)
+- Full production build passes cleanly for all 13 routes
 
-2. ตอน login เซ็ตคุกกี้ (backend/routes/auth.js)
-const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '8h' });
-res.cookie(AUTH_COOKIE, token, cookieOptions);   // res.cookie() เป็นเมธอดของ Express เอง
-res.json({ user: payload });                      // ไม่มี token ปนใน body แล้ว
-res.cookie() สั่งให้ Express แปะ header Set-Cookie กลับไปให้ browser — browser เป็นคนเก็บเองอัตโนมัติ ไม่มีโค้ด JS ฝั่งเราไปยุ่งกับมันเลย
-
-3. options ที่ backend/utils/cookieOptions.js แต่ละตัวทำหน้าที่อะไร
-
-┌────────────┬──────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────┐
-│   option   │      ค่า      │                                             ทำอะไร                                              │
-├────────────┼──────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ httpOnly:  │ เสมอ         │ หัวใจของความปลอดภัย — document.cookie ฝั่ง browser อ่านค่านี้ไม่ได้เลย มีแค่ browser network stack          │
-│ true       │              │ เท่านั้นที่แตะได้ ต่อให้โดน XSS ฝัง script ก็ขโมย token ไม่ได้                                              │
-├────────────┼──────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ secure     │ true เฉพาะ   │ บังคับส่งผ่าน HTTPS เท่านั้นตอน prod, ตอน dev ปิดไว้เพราะ localhost เป็น http://                          │
-│            │ prod         │
-
-ข้อควรรู้เพิ่ม: JWT เป็นแค่ "เซ็นลายเซ็น" ไม่ใช่ "เข้ารหัส" — ถ้ามีคนได้ค่าคุกกี้ดิบไปจริงๆ (เช่น dev เปิด devtools เอง) ก็ยังเห็น payload ข้างในได้ (empId, role, ...) แค่แก้ไขไม่ได้เพราะลายเซ็นจะไม่ตรง — นี่คือเหตุผลที่ secure:true ตอน prod สำคัญ เพราะป้องกันไม่ให้ค่านี้หลุดตอนส่งผ่านเครือข่าย (MITM) ด้วย
-
-JWT ไม่มีที่เก็บถาวรที่ไหนเลย ทั้งระบบเป็นแบบ stateless — มันจะโผล่มาแค่ตอนที่ต้องใช้เท่านั้น ตามนี้:
-
-┌──────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────────────┐
-│          ตอนไหน          │                                          JWT อยู่ที่ไหนจริงๆ                                           │
-├──────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ หลัง login สำเร็จ          │ สร้างสดใน RAM ของ backend process ชั่วคราว (jwt.sign(...) ที่ backend/routes/auth.js) แล้วส่งออกทันทีผ่าน   │
-│                          │ Set-Cookie — ไม่มีการบันทึกที่ไหนอีก                                                                     │
-├──────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ ตอนนี้ (หลัง login แล้ว)     │ อยู่ใน cookie jar ของ brow
-│                          │ localhost:5000 (หรือโดเมน backend)                                                                 │
-├──────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ ในฐานข้อมูล PostgreSQL     │ ไม่มีเลย — ไม่มีตาราง sessions/tokens ใดๆ backend ไม่รู้จัก token                                         │
-│                          │ ที่ออกไปแล้วอีกเลยจนกว่าจะเห็นมันย้อนกลับมาในคุกกี้รอบหน้า                                                     │
-├──────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ ใน React state (user) ฝั่ง │ เก็บแค่ payload ที่ decode แล้ว ({ em
-│  frontend                │ JWT ดิบไม่เคยไปถึง JS เลย เพราะ httpOnly กันไว้                                                        │
-├──────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ localStorage /           │ ไม่มี — เอาออกไปแล้วตอนย้ายไป cookie                                                                  │
-│ sessionStorage           │                                                                                                   │
-├──────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ ตอนยิง request อื่นๆ        │ หลุดออกจาก cookie jar เข้ามาสั้นๆ ใน RAM ของ backend request นั้นๆ (req.cookies.spe_token →             │
-│                          │ jwt.verify() → ทิ้ง) แล้วก็จบ ไม่ถูกเก็
-
-สรุปสั้นๆ: ที่เดียวที่ token จริงมีชีวิตอยู่ยาวๆ คือใน cookie jar ของ browser แต่ละเครื่อง (อายุ 8 ชม.ตาม maxAge) — backend ไม่ได้ "จำ" ใครที่ login ไว้เลย มันแค่เชื่อลายเซ็นของ token ที่ส่งกลับมาทุกครั้ง ถ้าอยาก revoke ก่อนหมดอายุจริง (เช่น force logout จาก admin) ตอนนี้ยังทำไม่ได้ เพราะไม่มี state ฝั่ง server ให้ไปลบ — ต้องรอ 8 ชม.ให้หมดอายุเอง หรือเปลี่ยน JWT_SECRET (ซึ่งจะ logout ทุกคนพร้อมกันหมด)
-
--------------------------------------------------------------------------------------------------------------
-
-เสร็จแล้วครับ รีแฟกเตอร์ครบทั้ง 4 จุดที่ใช้ patterน query แบบ static ล้วน ไม่มีการ interpolate อะไรเข้า SQL text เลย เหมือนที่ admin.js ทำไว้อยู่แล้ว (เจอว่ามีคนในทีมเคยเขียนแบบนี้ไว้แล้วจริงๆ ที่ admin.js route แก้ task):
-
-┌──────────────┬──────────────────┬──────────────────────────────────────────────────────────────────────┐
-│     ไฟล์      │     Endpoint     │    ธีที่ใช้                                 │
-├──────────────┼──────────────────┼──────────────────────────────────────────────────────────────────────┤
-│ suppliers.js │ PATCH            │ COAต้องการ explicit-null                 │
-│              │ /:vendorCode     │                                                                      │
-├──────────────┼──────────────────┼─────────────────────────────────────────┤
-│ employees.js │ PATCH            │ COALESCE($n, column) เหมือนกัน                                         │
-│              │ /:employeeId     │                                         │
-├──────────────┼──────────────────┼──────────────────────────────────────────────────────────────────────┤
-│              │                  │ COAt, ส่วน groupWeights/groupLabels ใช้   │
-│ criteria.js  │ PATCH            │ CASE WHEN $flag THEN $value::jsonb ELSE column END                   │
-│              │ /categories/:id  │ เพรล้างค่า" ซึ่งต่างจาก "ไม่ได้ส่งมา" —         │
-│              │                  │ COALESCE เพียวๆ แยกสองกรณีนี้ไม่ได้                                        │
-├──────────────┼──────────────────┼─────────────────────────────────────────┤
-│ criteria.js  │ PATCH /items/:id │ เหมือนกัน สำหรับ levelValues                                            │
-└──────────────┴──────────────────┴─────────────────────────────────────────┘
-
-ตรวจสอบแล้ว:
-- node --check ผ่านทั้ง 3 ไฟล์ ไม่มี syntax error
-- backend ที่รันอยู่ (auto-reload ด้วย node - crash
-- grep หา pattern เดิม (fields.push, updates.join, ${...}) ในทั้ง 3 ไฟล์แล้ว ไม่เหลือเลย
-
-สิ่งที่ผมทดสอบเองไม่ได้ (ไม่มีรหัสผ่านจริง): ตรรกะ partial-update ที่เปลี่ยนไป โดยเฉพาะเคส explicit-null-clear ของ        groupWeights/groupLabels/levelValues — tion ที่มี (Criteria → Update Category(Admin) / Update Item (Admin)) เทียบพฤติกรรมเดิม-ใหม่ดูให้แน่ใจอีกทีไหมครับ โดยเฉพาะกรณีส่ง "groupWeights": null ไปดูว่า column ว่างจริงเหมือนก่อนแก้หรือเปล่า
+I created one throwaway test account (E2E-VERIFY-USER, USER role) in your DB for verification — let me know if you'd like me to delete it, or I can leave it for continued testing. Taking a break here as requested — ping me when you want to continue with the last 3 pages.
