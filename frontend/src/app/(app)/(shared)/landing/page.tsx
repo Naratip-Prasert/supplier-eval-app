@@ -6,10 +6,10 @@
 import { useState, useRef, useEffect, useMemo, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useModal, useClickOutside } from "@/components";
-import { TimelineStepper } from "@/components/TimelineStepper";
-import { FilterChips, toggleInSet } from "@/components/FilterChips";
-import { Field, ReadBox, TextInput, StyledSelect } from "@/components/FormFields";
-import { PaginationBar } from "@/components/PaginationBar";
+import { TimelineStepper } from "@/components/shared/TimelineStepper";
+import { FilterChips, toggleInSet } from "@/components/shared/FilterChips";
+import { Field, ReadBox, TextInput, StyledSelect } from "@/components/shared/FormFields";
+import { PaginationBar } from "@/components/shared/PaginationBar";
 import { useAuth } from "@/context/AuthContext";
 import { useEvalFlow } from "@/context/EvalFlowContext";
 import { authFetch } from "@/utils/api";

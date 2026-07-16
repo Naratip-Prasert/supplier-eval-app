@@ -9,7 +9,7 @@
 
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
 import { authFetch } from "../utils/api";
-import { buildOverrideMap, buildFunctionOverrideMap, type OverrideMap, type FunctionOverrideMap } from "../utils/criteriaOverlay";
+import { buildOverrideMap, buildFunctionOverrideMap, type OverrideMap, type FunctionOverrideMap } from "../utils/shared/criteriaOverlay";
 
 interface CriteriaContextValue {
   preMap: OverrideMap | null;

@@ -13,7 +13,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { useEvalFlow } from "@/context/EvalFlowContext";
-import ResultView from "@/components/ResultView";
+import ResultView from "@/components/shared/ResultView";
 
 export default function EvalResultPage() {
   const router = useRouter();

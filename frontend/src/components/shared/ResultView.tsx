@@ -11,7 +11,7 @@ import { useState, useEffect, useRef } from "react";
 import { Header, GreenButton, useModal, useClickOutside } from "@/components";
 import { isPostEvalType, GRADE_MAP, GRADE_GUIDE, getCriteria, getScoredCriteriaFrom, type CriteriaEntry } from "@/constants";
 import { useCriteriaOverrides, useFunctionOverrides } from "@/context/CriteriaContext";
-import { applyOverrides } from "@/utils/criteriaOverlay";
+import { applyOverrides } from "@/utils/shared/criteriaOverlay";
 import { authFetch } from "@/utils/api";
 import { Download, Printer, CheckCircle2, XCircle } from "lucide-react";
 import type { EvalFormData, EvalResult } from "@/context/EvalFlowContext";

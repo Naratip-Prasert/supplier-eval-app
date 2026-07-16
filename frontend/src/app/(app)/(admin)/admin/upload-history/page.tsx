@@ -10,7 +10,7 @@ import { useRouter } from "next/navigation";
 import { Header } from "@/components";
 import { authFetch } from "@/utils/api";
 import { ArrowLeft, RefreshCw, AlertCircle, Search, ArrowDownUp, CalendarRange, X } from "lucide-react";
-import { PaginationBar } from "@/components/PaginationBar";
+import { PaginationBar } from "@/components/shared/PaginationBar";
 
 const PAGE_SIZE = 10;
 const SORT_LABEL: Record<string, string> = { asc: "อัพโหลดเก่าสุดก่อน", desc: "อัพโหลดล่าสุดก่อน" };

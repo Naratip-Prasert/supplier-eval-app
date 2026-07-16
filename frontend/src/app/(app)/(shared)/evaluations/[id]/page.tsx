@@ -15,7 +15,7 @@ import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { getCriteria, type CriteriaEntry } from "@/constants";
 import { authFetch } from "@/utils/api";
-import ResultView from "@/components/ResultView";
+import ResultView from "@/components/shared/ResultView";
 import type { EvalFormData, EvalResult } from "@/context/EvalFlowContext";
 
 interface Loaded {

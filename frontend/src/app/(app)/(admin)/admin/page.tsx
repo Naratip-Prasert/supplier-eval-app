@@ -9,15 +9,15 @@
 import { useState, useEffect, useCallback, useRef, Suspense, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Header, useClickOutside } from "@/components";
-import { PaginationBar } from "@/components/PaginationBar";
+import { PaginationBar } from "@/components/shared/PaginationBar";
 import { useAuth, type AuthUser } from "@/context/AuthContext";
 import { authFetch } from "@/utils/api";
-import TasksPanel from "@/components/TasksPanel";
-import AdminCriteriaEditor from "@/components/AdminCriteriaEditor";
-import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter, type DateFilter } from "@/utils/dateFilter";
-import { SESSION_STATUS_LABELS, SESSION_STATUS_COLORS, getDisplayStatus } from "@/utils/statusLabels";
-import { TimelineStepper } from "@/components/TimelineStepper";
-import { FilterChips, toggleInSet } from "@/components/FilterChips";
+import TasksPanel from "@/components/admin/TasksPanel";
+import AdminCriteriaEditor from "@/components/admin/AdminCriteriaEditor";
+import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter, type DateFilter } from "@/utils/shared/dateFilter";
+import { SESSION_STATUS_LABELS, SESSION_STATUS_COLORS, getDisplayStatus } from "@/utils/shared/statusLabels";
+import { TimelineStepper } from "@/components/shared/TimelineStepper";
+import { FilterChips, toggleInSet } from "@/components/shared/FilterChips";
 import {
   Users, ClipboardList, Upload,
   ArrowLeft, Search, RefreshCw, X,

@@ -6,19 +6,19 @@
 "use client";
 
 import { useState, useEffect, useRef, type ReactNode } from "react";
-import { Header, GreenButton, useModal } from "./index";
+import { Header, GreenButton, useModal } from "../index";
 import {
   getCriteria, isPostEvalType, LEVEL_COLORS, GRADE_MAP, GRADE_GUIDE, getGrade,
   findEsgSectionIndex, splitEsgGroups, getDisplayCriteriaFrom, FUNCTION_MODULES, functionSectionWeightFrom,
   type CriteriaEntry, type CriteriaSection,
-} from "../constants";
-import { useCriteriaOverrides, useFunctionOverrides } from "../context/CriteriaContext";
-import { applyOverrides } from "../utils/criteriaOverlay";
-import type { FunctionOverrideMap } from "../utils/criteriaOverlay";
-import { r2, getAhpMain, getAhpLocal, assignEsgSubGroupWeights, initWeights } from "../utils/evalWeightMath";
+} from "../../constants";
+import { useCriteriaOverrides, useFunctionOverrides } from "../../context/CriteriaContext";
+import { applyOverrides } from "../../utils/shared/criteriaOverlay";
+import type { FunctionOverrideMap } from "../../utils/shared/criteriaOverlay";
+import { r2, getAhpMain, getAhpLocal, assignEsgSubGroupWeights, initWeights } from "../../utils/shared/evalWeightMath";
 import { AlertTriangle, FileText, Plus, Trash2 } from "lucide-react";
-import type { AuthUser } from "../context/AuthContext";
-import type { EvalFormData, EvalResult } from "../context/EvalFlowContext";
+import type { AuthUser } from "../../context/AuthContext";
+import type { EvalFormData, EvalResult } from "../../context/EvalFlowContext";
 
 const LEVEL_LABELS       = ["ต้องปรับปรุง (Unsatisfactory)", "ต่ำกว่าเกณฑ์ (Below Standard)", "ผ่านเกณฑ์ (Satisfactory)", "ดี (Good)", "ดีเยี่ยม (Excellent)"];
 const LEVEL_SHORT_LABELS = ["ต้องปรับปรุง", "ต่ำกว่าเกณฑ์", "ผ่านเกณฑ์", "ดี", "ดีเยี่ยม"];

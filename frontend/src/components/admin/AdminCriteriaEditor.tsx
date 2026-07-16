@@ -9,15 +9,15 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
-import { authFetch } from "../utils/api";
-import { useCriteriaReload } from "../context/CriteriaContext";
+import { authFetch } from "../../utils/api";
+import { useCriteriaReload } from "../../context/CriteriaContext";
 import {
   r2adm, isEsgCategory, isEsgFactory, getCriteriaSetFromCode, nextItemCode,
   computeEffectiveWeights, computeEsgEffectiveWeights,
   getCatBuffer, getItemBuffer, getEsgItemBuffer, scaleItemsToTotal, scaleSectionItemsToTotal,
   buildSeedPayload,
   type AdminItem, type AdminSection,
-} from "../utils/weightMath";
+} from "../../utils/admin/weightMath";
 import {
   ChevronDown, ChevronRight,
   Save, RefreshCw, AlertCircle, CheckCircle2, X, Download, Trash2,

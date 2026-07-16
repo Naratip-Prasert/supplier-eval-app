@@ -5,7 +5,7 @@
 //  ได้ output เดียวกันเสมอ ไม่ผูกกับ state/closure ของ component) ทำให้
 //  ทดสอบและอ่านง่ายกว่าเดิมที่ฝังอยู่ใน 2000+ บรรทัดของหน้า Admin
 // ============================================================
-import { PRE_CRITERIA, POST_CRITERIA, FUNCTION_MODULES, functionSectionWeightFrom } from "../constants";
+import { PRE_CRITERIA, POST_CRITERIA, FUNCTION_MODULES, functionSectionWeightFrom } from "../../constants";
 
 export interface AdminItem {
   id: string;

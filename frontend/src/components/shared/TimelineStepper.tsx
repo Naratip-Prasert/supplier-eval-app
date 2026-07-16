@@ -6,7 +6,7 @@
 "use client";
 
 import { Clock } from "lucide-react";
-import { SESSION_STAGES, getDisplayStatus, stageIndexFor } from "../utils/statusLabels";
+import { SESSION_STAGES, getDisplayStatus, stageIndexFor } from "../../utils/shared/statusLabels";
 
 interface TimelineStepperProps {
   status: string;

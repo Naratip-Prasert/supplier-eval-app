@@ -12,7 +12,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { useEvalFlow } from "@/context/EvalFlowContext";
-import EvalForm, { type EvalDonePayload } from "@/components/EvalForm";
+import EvalForm, { type EvalDonePayload } from "@/components/shared/EvalForm";
 
 export default function EvalPage() {
   const router = useRouter();

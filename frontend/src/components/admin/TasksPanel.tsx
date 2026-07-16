@@ -13,7 +13,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Header, useModal, useClickOutside } from "@/components";
-import { PaginationBar } from "@/components/PaginationBar";
+import { PaginationBar } from "@/components/shared/PaginationBar";
 import { authFetch } from "@/utils/api";
 import { isOverdue } from "@/utils/date";
 import { DUE_DATE_SORT_LABEL as SORT_LABEL } from "@/constants";
@@ -22,10 +22,10 @@ import {
   ArrowDownUp, MailCheck, Square, CheckSquare, Lock, History, CalendarRange,
   SlidersHorizontal,
 } from "lucide-react";
-import AdminUploadModal from "@/components/AdminUploadModal";
-import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter, type DateFilter } from "@/utils/dateFilter";
-import { SESSION_STATUS_LABELS, SESSION_STATUS_COLORS, getDisplayStatus } from "@/utils/statusLabels";
-import { FilterChips, toggleInSet } from "@/components/FilterChips";
+import AdminUploadModal from "@/components/admin/AdminUploadModal";
+import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter, type DateFilter } from "@/utils/shared/dateFilter";
+import { SESSION_STATUS_LABELS, SESSION_STATUS_COLORS, getDisplayStatus } from "@/utils/shared/statusLabels";
+import { FilterChips, toggleInSet } from "@/components/shared/FilterChips";
 
 const TASK_STATUS_COLORS: Record<string, { bg: string; color: string; label: string }> = {
   pending:   { bg: "#fff8e1", color: "#f57f17", label: "รอประเมิน" },
