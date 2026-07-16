@@ -1,0 +1,231 @@
+============================================================
+ supplier-eval-app — โครงสร้างโปรเจกต์
+ (อัปเดตหลัง migration TypeScript + Next.js และจัดโฟลเดอร์ตาม role)
+============================================================
+
+ภาพรวม: ระบบประเมินซัพพลายเออร์ (Supplier Evaluation) — พนักงาน 4 role
+(USER, GCP, ADMIN, SUPERVISOR) ประเมินซัพพลายเออร์ตามเกณฑ์ที่ตั้งไว้,
+มี cron ส่งอีเมลแจ้งเตือนรายวัน, และมี magic-link ให้ซัพพลายเออร์ประเมิน
+กลับ (cross-evaluation)
+
+Repo root:
+  backend/         — Express + TypeScript API (พอร์ต 5000)
+  frontend/        — Next.js + TypeScript (App Router, พอร์ต 3000) ตัวจริงที่ใช้งาน
+  frontend-old/    — Vite + React เดิม เก็บไว้เผื่อ rollback (จะลบทิ้งหลังผ่าน 1 release)
+  database/        — schema.sql, seed.sql, เอกสารออกแบบ DB
+  shared/           — criteria-data.json ไฟล์เดียว ใช้ร่วมกันทั้ง backend และ frontend
+                      (ห้าม copy ซ้ำ — เป็น source of truth ของเกณฑ์การประเมินทั้งหมด)
+  postman/         — Postman collection + environment สำหรับทดสอบ API
+  dist/            — ผลลัพธ์จาก backend build (tsc compile) — ไม่ต้องแก้มือ
+  request.txt      — โน้ตคำขอจากผู้ใช้ (ประวัติ requirement)
+  comment.txt      — โน้ตความคืบหน้าที่ผมทิ้งไว้ระหว่างงาน (progress log)
+  TECHNICAL_SPEC.md — เอกสารสเปกเทคนิคของระบบ
+  README.md        — วิธีติดตั้ง/รันโปรเจกต์
+
+
+============================================================
+ backend/  —  Express + TypeScript API
+============================================================
+
+server.ts
+  จุดรวมทุกอย่าง: ตั้งค่า CORS, cookie-parser, CSRF guard (เช็ค header
+  X-Requested-With), rate limiter สำหรับ /login และ /verify-password,
+  mount ทุก route group (ดูด้านล่าง), bootstrap DB ตอน start (seed เกณฑ์,
+  สร้างบัญชี ADMIN เริ่มต้นถ้ายังไม่มีเลยในระบบ), และสั่ง startCronJobs()
+
+db.ts
+  สร้าง pg Pool เดียวที่ทุกไฟล์ import ใช้ร่วมกัน (connection pooling ไปยัง
+  Neon Postgres) — อ่าน DATABASE_URL จาก .env
+
+types/express.d.ts
+  ขยาย type ของ Express Request ให้มี req.user (AuthUser: empId, fullName,
+  role, email, department, jobTitle) — มาจากการ decode JWT ใน middleware
+
+--- middleware/ ---
+  authMiddleware.ts   — requireAuth: อ่าน JWT จาก httpOnly cookie (spe_token),
+                        verify แล้วแปะ req.user, 401 ถ้าไม่มี/หมดอายุ/ไม่ถูกต้อง
+  requireRole.ts      — requireRole(...roles): factory คืน middleware เช็คว่า
+                        req.user.role อยู่ใน roles ที่กำหนดไหม ถ้าไม่ 403 ข้อความ
+                        รูปแบบเดียวกันหมด "สิทธิ์ไม่เพียงพอ (ต้องการ X)"
+                        *** สำคัญ: รวมจุดเช็ค role ที่เคยกระจัดกระจาย 12+ จุด
+                        ใน 7 ไฟล์ให้เหลือจุดเดียว ***
+
+--- routes/  (จัดกลุ่มตาม "ใครเรียกได้") ---
+  แต่ละไฟล์ในนี้ "บาง" มาก มีแค่ path + middleware + เรียก controller
+  ตรงไหนไม่มี requireRole() ต่อท้าย = เปิดให้ authenticated ทุก role เรียกได้
+
+  routes/public/
+    auth.ts                — POST /login, /logout (ไม่ auth) + GET /me,
+                             POST /verify-password (auth แต่ไม่เช็ค role)
+    publicSupplierEval.ts  — GET/POST /api/public/supplier-eval/:token
+                             *** ไม่ผ่าน requireAuth เลย *** ซัพพลายเออร์
+                             ไม่มี login ในระบบนี้ เข้าผ่าน magic-link
+                             token ที่ส่งทางอีเมลเท่านั้น (one-time, มีวันหมดอายุ)
+
+  routes/admin/
+    admin.ts  — ทุก route ในไฟล์นี้ requireRole('ADMIN') ทั้งไฟล์ (router.use)
+                มี: อัปโหลด Excel/CSV (pre-post, periodic), จัดการ evaluation_tasks
+                (list/remind/edit/remind-all), ลบ session, ดู upload batch
+                history, ดูรายละเอียด service-evaluations
+                *** ไฟล์ที่ใหญ่/ซับซ้อนที่สุดในระบบ (multer อัปโหลดไฟล์,
+                parse Excel ด้วย XLSX, สร้าง supplier+session+task พร้อมกัน) ***
+
+  routes/supervisor/
+    supervisor.ts  — requireRole('SUPERVISOR','ADMIN') ทั้งไฟล์: ดูคิวรอ
+                     อนุมัติ (queue), ประวัติ (history), approve/return
+                     session, แก้ไข note ของตัวเอง (เช็ค ADMIN-หรือ-เจ้าของ
+                     note เพิ่มเติมใน controller — ไม่ใช่แค่ requireRole เฉยๆ)
+    sessions.ts    — requireRole('ADMIN','SUPERVISOR') ทั้งไฟล์: list/detail
+                     ของทุก evaluation session ในระบบ (ใช้แสดงหน้าประวัติ)
+
+  routes/shared/
+    (ไฟล์กลุ่มนี้ "ผสม" ระหว่าง route ที่ authenticated-ทุกคน กับ ADMIN-only
+     อยู่ในไฟล์เดียวกัน จึงไม่แยกเป็นโฟลเดอร์ role เดียว — ตั้งใจ)
+    evaluations.ts        — POST / (ส่งผลประเมิน, logic ซับซ้อนสุดในระบบ:
+                            คำนวณคะแนน, เช็ค session ซ้ำ, แจ้งเตือน supervisor
+                            อัตโนมัติเมื่อครบ USER+GCP), GET /my, /my-tasks,
+                            /my-timeline (authenticated ทุก role), GET /,
+                            /all (ADMIN/SUPERVISOR only)
+    employees.ts          — GET/PATCH /me (ทุก role แก้ตัวเองได้), GET /,
+                            GET/PATCH /:employeeId (ADMIN only — จัดการ role
+                            คนอื่น, เปิด/ปิดบัญชี)
+    suppliers.ts          — GET / , /validate, /:vendorCode (ทุก role อ่านได้),
+                            POST /, PATCH /:vendorCode (ADMIN only)
+    criteria.ts            — GET / (โครงสร้างเกณฑ์การประเมินทั้งหมด — ทุก role
+                            อ่านได้), ที่เหลือทั้งหมด (แก้ไข/ลบ/เรียงลำดับ/seed)
+                            เป็น ADMIN only — คือ backend ของหน้า "เปลี่ยนเกณฑ์
+                            และ Parameter" ใน Admin
+    serviceEvaluations.ts  — cross-evaluation #4: USER ประเมิน Buyer (GCP) ที่
+                            ทำงานด้วยกันหลัง session เสร็จ (ทุก role authenticated
+                            แต่เช็คสิทธิ์เฉพาะคนใน session นั้นๆ ใน controller)
+
+--- controllers/  (logic จริงทั้งหมด — SQL query, คำนวณ — อยู่ที่นี่) ---
+  โครงสร้าง mirror กับ routes/ เป๊ะๆ (1 route file = 1 controller file)
+  admin/admin.controller.ts               — logic ของ admin.ts ทั้งหมด
+  public/auth.controller.ts               — login/logout/me/verify-password
+  public/publicSupplierEval.controller.ts — magic-link token flow
+  shared/evaluations.controller.ts        — *** export computeScoreAndGrade()
+                                            ใช้ร่วมกับ serviceEvaluations และ
+                                            publicSupplierEval controller ***
+                                            สูตร: Σ(score/5 × weight) / totalWeight
+                                            × 100 แล้ว lookup grade จาก
+                                            grade_thresholds table
+  shared/employees.controller.ts
+  shared/suppliers.controller.ts
+  shared/criteria.controller.ts
+  shared/serviceEvaluations.controller.ts
+  supervisor/supervisor.controller.ts
+  supervisor/sessions.controller.ts
+
+--- utils/ ---
+  cookieOptions.ts             — ค่า httpOnly/secure/sameSite/maxAge ของ
+                                 auth cookie (ใช้ตอน login/logout/patch-me)
+  emailService.ts               — ส่งอีเมลทุกแบบผ่าน Resend (เชิญประเมิน,
+                                 เตือน, เกินกำหนด, ขอบคุณ, แจ้ง supervisor,
+                                 แจ้งผลอนุมัติ/ตีกลับ, เชิญซัพพลายเออร์ประเมินกลับ)
+  cronJobs.ts                   — cron รายวัน 08:00 เวลาไทย: ส่งเตือน/แจ้ง
+                                 เกินกำหนด/ขอบคุณอัตโนมัติที่พลาดไป
+  seedCriteriaFromConstants.ts  — เติมข้อมูลเกณฑ์การประเมินเริ่มต้นจาก
+                                 shared/criteria-data.json ตอน server start
+                                 (idempotent — ไม่ทับของที่ admin แก้ไว้แล้ว)
+
+scripts/init-db.ts — รัน schema.sql + seed.sql ครั้งเดียวตอนติดตั้งระบบใหม่
+                     (ไม่ได้รันตอน server ทำงานปกติ)
+
+
+============================================================
+ frontend/  —  Next.js + TypeScript (App Router)
+============================================================
+
+src/app/layout.tsx        — root layout (font, <html>/<body> พื้นฐาน)
+src/app/(public)/          — route group: ไม่ต้อง login, ไม่ผ่าน AuthGate
+  page.tsx                — "/" bootstrap: เช็ค session แล้วเด้งไป /login
+                            หรือ /portal
+  login/page.tsx           — "/login"
+  supplier-feedback/[token]/page.tsx  — "/supplier-feedback/:token"
+                            หน้า magic-link ให้ซัพพลายเออร์ประเมิน User/GCP
+                            กลับ (ไม่มี login, ใช้ token ใน URL ล้วนๆ)
+
+src/app/(app)/layout.tsx   — *** สำคัญมาก *** ครอบทุกหน้าที่ต้อง login:
+                            CriteriaProvider > AuthProvider > AuthGate >
+                            EvalFlowProvider เช็ค session แล้วเด้งไป /login
+                            ถ้ายังไม่ login — route group (admin)/(shared)/
+                            (supervisor) ข้างในไม่กระทบ layout นี้เลย
+  (admin)/                — เฉพาะหน้า ADMIN (backend gate ด้วย ADMIN เท่านั้น)
+    admin/page.tsx         — "/admin" หน้าหลัก Admin (พนักงาน, งานประเมิน,
+                            ผลและประวัติ, ผลประเมินเชิงบริการ, เปลี่ยนเกณฑ์)
+    admin/upload-history/page.tsx  — "/admin/upload-history"
+  (supervisor)/
+    supervisor/page.tsx    — "/supervisor" คิวรออนุมัติ + ประวัติ approve/return
+  (shared)/                — ใช้ร่วมกันหลาย role (มี role-branch ในไฟล์เดียว
+                            หรือไม่มี role logic เลย — เจตนา ไม่บังคับแยก)
+    portal/page.tsx         — "/portal" หน้าแรกหลัง login, module card ตาม role
+    profile/page.tsx        — "/profile"
+    history/page.tsx        — "/history" (USER/GCP เห็นของตัวเอง, ADMIN เห็นหมด)
+    landing/page.tsx        — "/landing" list งานที่ต้องประเมิน + เลือก
+                            supplier เพื่อเริ่มประเมิน (ADMIN มีฟอร์มกรอกเองด้วย)
+    eval/page.tsx           — "/eval" ฟอร์มให้คะแนนจริง (EvalForm component)
+    eval/result/page.tsx    — "/eval/result" หน้าสรุปผลหลังส่ง (fresh submit)
+    evaluations/[id]/page.tsx — "/evaluations/:id" ดูผลย้อนหลัง (read-only,
+                            มาจาก history/supervisor/admin/result ผ่าน ?from=)
+    service-eval/page.tsx   — "/service-eval" USER ให้คะแนน Buyer(GCP) กลับ
+
+src/components/
+  index.tsx                — Header, GreenButton, GreenInput, PasswordInput,
+                            CustomSelect, Logo, Clock, useModal, useClickOutside
+                            *** ใช้แทบทุกหน้า ไม่ได้ย้ายเข้า shared/ เพราะ
+                            เป็น barrel หลักของทั้งแอปอยู่แล้ว ***
+  admin/                   — AdminCriteriaEditor.tsx (หน้าแก้เกณฑ์, ไฟล์ใหญ่
+                            สุดในแอป), AdminUploadModal.tsx (อัปโหลด Excel),
+                            TasksPanel.tsx (จัดการ evaluation_tasks)
+  shared/                  — EvalForm.tsx (ฟอร์มให้คะแนน, ไม่มี role logic
+                            เลย ใช้ร่วมทุก role ที่ประเมินได้), ResultView.tsx
+                            (แสดงผล+radar chart+export Excel, ใช้ทั้งหน้า
+                            fresh-result และ read-only history), FilterChips,
+                            FormFields, PaginationBar, TimelineStepper
+
+src/context/
+  AuthContext.tsx          — session state, fetch /api/auth/me ตอน mount
+  CriteriaContext.tsx       — โหลด override เกณฑ์จาก DB (admin แก้ไว้) มา
+                            ทับ constants.ts ตอน runtime โดยไม่ต้อง deploy ใหม่
+  EvalFlowContext.tsx       — ส่ง formData/result ผ่าน 1 hop เดียว
+                            (/landing → /eval → /eval/result) — จำเป็นเพราะ
+                            ADMIN กรอกฟอร์มเองไม่มี session id ให้ fetch ใหม่
+
+src/utils/
+  api.ts                    — authFetch(): fetch wrapper กลาง (httpOnly cookie,
+                            X-Requested-With header, รองรับ FormData)
+  date.ts                    — isOverdue()
+  admin/weightMath.ts        — คำนวณ/จัดสรรน้ำหนักเกณฑ์ ใช้เฉพาะ
+                            AdminCriteriaEditor เท่านั้น (business logic
+                            เฉพาะ admin จริงๆ)
+  shared/
+    criteriaOverlay.ts      — merge ข้อมูล DB ทับ constants.ts (ใช้ทั้ง
+                            CriteriaContext และ AdminCriteriaEditor)
+    dateFilter.tsx           — DateFilterBar component
+    evalWeightMath.ts        — คำนวณน้ำหนักตอนเริ่มฟอร์ม ใช้ใน EvalForm
+                            *** จุดที่เคยมีบั๊กเรื่องน้ำหนักเยอะสุดในแอป ***
+    statusLabels.ts          — label/สี ของสถานะ session
+
+src/constants.ts            — getCriteria(), PRE_CRITERIA/POST_CRITERIA
+                            (import จาก shared/criteria-data.json),
+                            FUNCTION_MODULES (M1-M7), GRADE_MAP, ฯลฯ
+                            *** ข้อมูลเกณฑ์ทั้งหมดอ้างอิงไฟล์นี้เป็นฐาน
+                            ก่อนถูก override ด้วยข้อมูลจาก DB ***
+src/styles/theme.ts          — ROLE_THEME (สีตาม role ทั้ง 4), GRADE_COLOR
+
+
+============================================================
+ จุดที่ควรรู้ก่อนแก้โค้ดต่อ
+============================================================
+1. URL ของทุกหน้าไม่เปลี่ยนเลยจากการจัดโฟลเดอร์ (route group ใน Next.js
+   ไม่กระทบ URL) — ถ้าจะเพิ่มหน้าใหม่ อย่าลืมเลือกกลุ่มให้ตรง role จริง
+2. requireRole() (backend) คือจุดเดียวที่ควรแก้ถ้าจะเปลี่ยน logic การเช็ค
+   สิทธิ์ — อย่าเขียน role check แบบ inline ในไฟล์ route/controller อีก
+3. shared/criteria-data.json คือ source of truth เกณฑ์การประเมิน —
+   ทั้ง backend (seedCriteriaFromConstants) และ frontend (constants.ts)
+   อ่านไฟล์เดียวกันนี้ ห้าม copy แยก
+4. computeScoreAndGrade() (backend) ใช้ร่วมกัน 3 endpoint (ส่งผลประเมิน,
+   ประเมิน Buyer, ประเมินกลับจากซัพพลายเออร์) — แก้สูตรคะแนนที่เดียวพอ
+5. frontend-old/ (Vite เดิม) ยังไม่ลบ — เก็บไว้เผื่อ rollback ชั่วคราว
+   เท่านั้น ไม่ต้องแก้โค้ดในนี้อีกแล้ว
