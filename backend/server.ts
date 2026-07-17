@@ -91,6 +91,20 @@ const loginLimiter = rateLimit({
 app.use('/api/auth/login', loginLimiter);
 app.use('/api/auth/verify-password', loginLimiter);
 
+// Blanket cap on every other /api route — /login and /verify-password
+// already have their own tighter limiter above (this one still applies to
+// them too, but its window is wide enough never to bind first). Without
+// this, an authenticated-but-malicious/compromised client (or a script
+// hitting a public route) could hammer any endpoint with no limit at all.
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'มีการเรียกใช้งานบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่' },
+});
+app.use('/api', apiLimiter);
+
 app.use('/api/auth',        require('./routes/public/auth'));          // public
 app.use('/api/evaluations', requireAuth, require('./routes/shared/evaluations'));
 app.use('/api/employees',   requireAuth, require('./routes/shared/employees'));
