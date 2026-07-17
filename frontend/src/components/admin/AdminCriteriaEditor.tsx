@@ -1676,6 +1676,19 @@ export default function AdminCriteriaEditor() {
       const esgBuf = isEsgItem
         ? getEsgItemBuffer(esgPool!, itemSec!.totalWeight, itemSec!.groupWeights, id, payload.defaultWeight!)
         : null;
+      // Computed up front (not after the PATCH) so a last-item edit that
+      // can't be redistributed is rejected before anything hits the server
+      // — previously this ran after the item's own PATCH had already
+      // committed, and its tooLarge flag was never even checked, so the
+      // edited item's new weight was saved with no sibling compensating it.
+      const nonEsgBuf = (!isEsgItem && payload.defaultWeight != null && itemSec)
+        ? getItemBuffer(itemSec, id, payload.defaultWeight)
+        : null;
+      if (nonEsgBuf?.tooLarge) {
+        setSaving(null);
+        showToast("น้ำหนักเกิน — แก้ตัวก่อนหน้าก่อน", "error");
+        return;
+      }
       const body = { ...foundItem, ...payload, ...(esgBuf ? { defaultWeight: esgBuf.clamped } : {}) };
       try {
         const r = await authFetch(`/api/criteria/items/${id}`, {
@@ -1692,19 +1705,15 @@ export default function AdminCriteriaEditor() {
               body: JSON.stringify({ nameTh: it.nameTh, defaultWeight: w }),
             });
           }));
-        } else if (!isEsgItem && payload.defaultWeight != null && itemSec) {
-          // Non-ESG: buffer against the whole section pool as before
-          const buf = getItemBuffer(itemSec, id, payload.defaultWeight);
-          if (buf.adjustments) {
-            await Promise.all(Object.entries(buf.adjustments).map(([itemId, w]) => {
-              const it = itemSec!.items.find(x => x.id === itemId);
-              if (!it) return Promise.resolve();
-              return authFetch(`/api/criteria/items/${itemId}`, {
-                method: "PATCH",
-                body: JSON.stringify({ nameTh: it.nameTh, defaultWeight: w }),
-              });
-            }));
-          }
+        } else if (nonEsgBuf?.adjustments) {
+          await Promise.all(Object.entries(nonEsgBuf.adjustments).map(([itemId, w]) => {
+            const it = itemSec!.items.find(x => x.id === itemId);
+            if (!it) return Promise.resolve();
+            return authFetch(`/api/criteria/items/${itemId}`, {
+              method: "PATCH",
+              body: JSON.stringify({ nameTh: it.nameTh, defaultWeight: w }),
+            });
+          }));
         }
         showToast("บันทึกรายการสำเร็จ");
         reloadContext();

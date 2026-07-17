@@ -195,7 +195,11 @@ export function getCatBuffer(pool: AdminSection[], editedId: string, newVal: num
     }
   }
 
-  if (remaining > 0.005) return { adjustments: {}, tooLarge: true };
+  // abs(), not a bare > check — a same-magnitude decrease on the last item
+  // (no candidates after it to absorb the freed weight either) must fail
+  // the same way an unabsorbable increase does, or the freed weight just
+  // vanishes from the section's total instead of the edit being rejected.
+  if (Math.abs(remaining) > 0.005) return { adjustments: {}, tooLarge: true };
   return { adjustments };
 }
 
@@ -231,7 +235,9 @@ export function getItemBuffer(sec: AdminSection, editedId: string, newVal: numbe
     }
   }
 
-  if (remaining > 0.005) return { adjustments: {}, tooLarge: true };
+  // Same reasoning as getCatBuffer: abs() so an unabsorbable decrease on the
+  // last item fails too, instead of silently shrinking the section's total.
+  if (Math.abs(remaining) > 0.005) return { adjustments: {}, tooLarge: true };
   return { adjustments };
 }
 
