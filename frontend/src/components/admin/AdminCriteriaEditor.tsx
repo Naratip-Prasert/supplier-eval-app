@@ -212,7 +212,10 @@ function LevelsModal({ item, onClose, onSave, saving }: {
     <div style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 8888,
       display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
-    }} onClick={e => e.target === e.currentTarget && onClose()}>
+    }}>
+      {/* Clicking the backdrop no longer closes this — a modal full of typed-in
+          level descriptions used to vanish (losing everything) from one stray
+          click outside it. Cancel/X/save are the only ways out now. */}
       <div style={{
         background: "#fff", borderRadius: 16, padding: 28, width: "100%", maxWidth: 660,
         maxHeight: "90vh", overflowY: "auto", boxShadow: "0 8px 40px rgba(0,0,0,.2)",
