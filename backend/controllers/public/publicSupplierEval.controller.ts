@@ -62,7 +62,7 @@ async function getToken(req: Request, res: Response) {
     });
   } catch (err: any) {
     console.error('GET /api/public/supplier-eval/:token error:', err);
-    res.status(500).json({ message: 'เกิดข้อผิดพลาด', error: err.message });
+    res.status(500).json({ message: 'เกิดข้อผิดพลาด' });
   }
 }
 
@@ -137,7 +137,7 @@ async function submitToken(req: Request, res: Response) {
   } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('POST /api/public/supplier-eval/:token error:', err);
-    res.status(500).json({ message: 'เกิดข้อผิดพลาด', error: err.message });
+    res.status(500).json({ message: 'เกิดข้อผิดพลาด' });
   } finally {
     client.release();
   }

@@ -26,7 +26,7 @@ async function listSuppliers(req: Request, res: Response) {
     res.json(result.rows);
   } catch (err: any) {
     console.error('GET /api/suppliers error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 
@@ -60,7 +60,7 @@ async function validateSupplier(req: Request, res: Response) {
     res.json({ valid: true, supplier: result.rows[0] });
   } catch (err: any) {
     console.error('GET /api/suppliers/validate error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 
@@ -87,7 +87,7 @@ async function createSupplier(req: Request, res: Response) {
       return res.status(409).json({ message: 'Vendor Code นี้มีอยู่แล้ว' });
     }
     console.error('POST /api/suppliers error:', err);
-    res.status(500).json({ message: 'เพิ่มไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'เพิ่มไม่สำเร็จ' });
   }
 }
 
@@ -108,7 +108,7 @@ async function getSupplier(req: Request, res: Response) {
     res.json(result.rows[0]);
   } catch (err: any) {
     console.error('GET /api/suppliers/:vendorCode error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 
@@ -144,7 +144,7 @@ async function updateSupplier(req: Request, res: Response) {
     res.json({ message: 'อัปเดตสำเร็จ' });
   } catch (err: any) {
     console.error('PATCH /api/suppliers/:vendorCode error:', err);
-    res.status(500).json({ message: 'อัปเดตไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'อัปเดตไม่สำเร็จ' });
   }
 }
 
@@ -197,7 +197,7 @@ async function checkPermission(req: Request, res: Response) {
     res.json({ hasPermission: permResult.rows.length > 0 });
   } catch (err: any) {
     console.error('GET /api/suppliers/:vendorCode/permission error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 

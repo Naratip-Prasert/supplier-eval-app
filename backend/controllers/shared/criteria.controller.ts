@@ -150,7 +150,7 @@ async function getCriteria(req: Request, res: Response) {
     res.json(response);
   } catch (err: any) {
     console.error('GET /api/criteria error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 
@@ -176,7 +176,7 @@ async function deleteCategory(req: Request, res: Response) {
   } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('DELETE /api/criteria/categories/:id error:', err);
-    res.status(500).json({ message: 'ลบหัวข้อไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ลบหัวข้อไม่สำเร็จ' });
   } finally {
     client.release();
   }
@@ -235,7 +235,7 @@ async function updateCategory(req: Request, res: Response) {
     res.json({ message: 'อัปเดตหัวข้อสำเร็จ' });
   } catch (err: any) {
     console.error('PATCH /api/criteria/categories/:id error:', err);
-    res.status(500).json({ message: 'อัปเดตไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'อัปเดตไม่สำเร็จ' });
   }
 }
 
@@ -371,7 +371,7 @@ async function createCategory(req: Request, res: Response) {
   } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('POST /api/criteria/categories error:', err);
-    res.status(500).json({ message: 'เพิ่มหัวข้อไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'เพิ่มหัวข้อไม่สำเร็จ' });
   } finally {
     client.release();
   }
@@ -486,7 +486,7 @@ async function createItem(req: Request, res: Response) {
   } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('POST /api/criteria/items error:', err);
-    res.status(500).json({ message: 'เพิ่มรายการไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'เพิ่มรายการไม่สำเร็จ' });
   } finally {
     client.release();
   }
@@ -504,7 +504,7 @@ async function deleteItem(req: Request, res: Response) {
     res.json({ message: 'ลบรายการสำเร็จ' });
   } catch (err: any) {
     console.error('DELETE /api/criteria/items/:id error:', err);
-    res.status(500).json({ message: 'ลบไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ลบไม่สำเร็จ' });
   }
 }
 
@@ -556,7 +556,7 @@ async function updateItem(req: Request, res: Response) {
     res.json({ message: 'อัปเดตรายการสำเร็จ' });
   } catch (err: any) {
     console.error('PATCH /api/criteria/items/:id error:', err);
-    res.status(500).json({ message: 'อัปเดตไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'อัปเดตไม่สำเร็จ' });
   }
 }
 
@@ -588,7 +588,7 @@ async function updateItemLevels(req: Request, res: Response) {
   } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('PATCH /api/criteria/items/:id/levels error:', err);
-    res.status(500).json({ message: 'อัปเดตไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'อัปเดตไม่สำเร็จ' });
   } finally {
     client.release();
   }
@@ -615,7 +615,7 @@ async function reorder(req: Request, res: Response) {
   } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('PUT /api/criteria/reorder error:', err);
-    res.status(500).json({ message: 'เรียงลำดับไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'เรียงลำดับไม่สำเร็จ' });
   } finally {
     client.release();
   }
@@ -732,7 +732,7 @@ async function seed(req: Request, res: Response) {
   } catch (err: any) {
     if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('POST /api/criteria/seed error:', err);
-    res.status(500).json({ message: 'นำเข้าข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'นำเข้าข้อมูลไม่สำเร็จ' });
   } finally {
     if (client) client.release();
   }

@@ -29,7 +29,7 @@ async function listEmployees(req: Request, res: Response) {
     res.json(result.rows);
   } catch (err: any) {
     console.error('GET /api/employees error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 
@@ -54,7 +54,7 @@ async function getMe(req: Request, res: Response) {
     res.json(result.rows[0]);
   } catch (err: any) {
     console.error('GET /api/employees/me error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 
@@ -101,7 +101,7 @@ async function updateMe(req: Request, res: Response) {
     res.json({ message: 'บันทึกสำเร็จ', user: payload });
   } catch (err: any) {
     console.error('PATCH /api/employees/me error:', err);
-    res.status(500).json({ message: 'บันทึกไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'บันทึกไม่สำเร็จ' });
   } finally {
     client.release();
   }
@@ -135,7 +135,7 @@ async function getEmployee(req: Request, res: Response) {
     res.json(result.rows[0]);
   } catch (err: any) {
     console.error('GET /api/employees/:employeeId error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 
@@ -168,7 +168,7 @@ async function updateEmployee(req: Request, res: Response) {
     res.json({ message: 'อัปเดตสำเร็จ' });
   } catch (err: any) {
     console.error('PATCH /api/employees/:employeeId error:', err);
-    res.status(500).json({ message: 'อัปเดตไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'อัปเดตไม่สำเร็จ' });
   }
 }
 

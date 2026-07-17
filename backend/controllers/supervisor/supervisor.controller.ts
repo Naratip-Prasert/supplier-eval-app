@@ -90,7 +90,7 @@ async function queue(req: Request, res: Response) {
     res.json(response);
   } catch (err: any) {
     console.error('GET /api/supervisor/queue error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 
@@ -125,7 +125,7 @@ async function history(req: Request, res: Response) {
     res.json(result.rows);
   } catch (err: any) {
     console.error('GET /api/supervisor/history error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 
@@ -225,7 +225,7 @@ async function approve(req: Request, res: Response) {
   } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('POST /api/supervisor/approve error:', err);
-    res.status(500).json({ message: 'เกิดข้อผิดพลาด', error: err.message });
+    res.status(500).json({ message: 'เกิดข้อผิดพลาด' });
   } finally {
     client.release();
   }
@@ -319,7 +319,7 @@ async function returnSession(req: Request, res: Response) {
   } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('POST /api/supervisor/return error:', err);
-    res.status(500).json({ message: 'เกิดข้อผิดพลาด', error: err.message });
+    res.status(500).json({ message: 'เกิดข้อผิดพลาด' });
   } finally {
     client.release();
   }
@@ -363,7 +363,7 @@ async function updateReviewNotes(req: Request, res: Response) {
     res.json({ message: 'บันทึกหมายเหตุสำเร็จ' });
   } catch (err: any) {
     console.error('PATCH /api/supervisor/reviews/:id/notes error:', err);
-    res.status(500).json({ message: 'เกิดข้อผิดพลาด', error: err.message });
+    res.status(500).json({ message: 'เกิดข้อผิดพลาด' });
   }
 }
 

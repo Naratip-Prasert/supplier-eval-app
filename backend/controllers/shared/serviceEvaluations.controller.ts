@@ -37,7 +37,7 @@ async function pending(req: Request, res: Response) {
     res.json(result.rows);
   } catch (err: any) {
     console.error('GET /api/service-evaluations/pending error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 
@@ -61,7 +61,7 @@ async function myFeedback(req: Request, res: Response) {
     res.json(result.rows);
   } catch (err: any) {
     console.error('GET /api/service-evaluations/my-feedback error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 
@@ -80,7 +80,7 @@ async function criteria(req: Request, res: Response) {
     res.json(result.rows);
   } catch (err: any) {
     console.error('GET /api/service-evaluations/criteria error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 
@@ -144,7 +144,7 @@ async function submit(req: Request, res: Response) {
   } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('POST /api/service-evaluations error:', err);
-    res.status(500).json({ message: 'บันทึกไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'บันทึกไม่สำเร็จ' });
   } finally {
     client.release();
   }

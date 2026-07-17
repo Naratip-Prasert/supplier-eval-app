@@ -53,7 +53,7 @@ async function login(req: Request, res: Response) {
     res.json({ user: payload });
   } catch (err: any) {
     console.error('[auth] login error:', err);
-    res.status(500).json({ message: 'เกิดข้อผิดพลาด', error: err.message });
+    res.status(500).json({ message: 'เกิดข้อผิดพลาด' });
   }
 }
 
@@ -97,7 +97,7 @@ async function verifyPassword(req: Request, res: Response) {
     res.json({ verified: true });
   } catch (err: any) {
     console.error('[auth] verify-password error:', err);
-    res.status(500).json({ message: 'เกิดข้อผิดพลาด', error: err.message });
+    res.status(500).json({ message: 'เกิดข้อผิดพลาด' });
   }
 }
 

@@ -391,7 +391,7 @@ async function createEvaluation(req: Request, res: Response) {
       return res.status(409).json({ message: 'คุณได้ส่งผลการประเมินสำหรับรายการนี้แล้ว' });
     }
     console.error('POST /api/evaluations error:', err);
-    res.status(500).json({ message: 'บันทึกไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'บันทึกไม่สำเร็จ' });
   } finally {
     client.release();
   }
@@ -422,7 +422,7 @@ async function listSessions(req: Request, res: Response) {
     res.json(result.rows);
   } catch (err: any) {
     console.error('GET /api/evaluations error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 
@@ -458,7 +458,7 @@ async function listAllEvaluations(req: Request, res: Response) {
     res.json(result.rows);
   } catch (err: any) {
     console.error('GET /api/evaluations/all error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 
@@ -492,7 +492,7 @@ async function listMyEvaluations(req: Request, res: Response) {
     res.json(result.rows);
   } catch (err: any) {
     console.error('GET /api/evaluations/my error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 
@@ -530,7 +530,7 @@ async function myTasks(req: Request, res: Response) {
     res.json(result.rows);
   } catch (err: any) {
     console.error('GET /api/evaluations/my-tasks error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 
@@ -573,7 +573,7 @@ async function myTimeline(req: Request, res: Response) {
     res.json(result.rows);
   } catch (err: any) {
     console.error('GET /api/evaluations/my-timeline error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 
@@ -604,7 +604,7 @@ async function byVendor(req: Request, res: Response) {
     res.json(result.rows);
   } catch (err: any) {
     console.error('GET /api/evaluations/by-vendor error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 
@@ -673,7 +673,7 @@ async function getById(req: Request, res: Response) {
     res.json({ ...evaluation, scores: scoresResult.rows });
   } catch (err: any) {
     console.error('GET /api/evaluations/:id error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 

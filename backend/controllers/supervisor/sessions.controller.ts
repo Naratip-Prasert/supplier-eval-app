@@ -84,7 +84,7 @@ async function listSessions(req: Request, res: Response) {
     res.json(response);
   } catch (err: any) {
     console.error('GET /api/sessions error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 
@@ -179,7 +179,7 @@ async function getSession(req: Request, res: Response) {
     res.json({ ...session, evaluations });
   } catch (err: any) {
     console.error('GET /api/sessions/:id error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 

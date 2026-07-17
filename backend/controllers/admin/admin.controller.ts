@@ -256,7 +256,7 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
         [err.message, batchId]).catch(() => {});
     }
     console.error('POST /api/admin/upload/pre-post error:', err);
-    res.status(500).json({ message: 'อัพโหลดไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'อัพโหลดไม่สำเร็จ' });
   } finally {
     client.release();
   }
@@ -426,7 +426,7 @@ async function uploadPeriodic(req: RequestWithFile, res: Response) {
         [err.message, batchId]).catch(() => {});
     }
     console.error('POST /api/admin/upload/periodic error:', err);
-    res.status(500).json({ message: 'อัพโหลดไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'อัพโหลดไม่สำเร็จ' });
   } finally {
     client.release();
   }
@@ -468,7 +468,7 @@ async function listTasks(req: Request, res: Response) {
     res.json(result.rows);
   } catch (err: any) {
     console.error('GET /api/admin/tasks error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 
@@ -496,7 +496,7 @@ async function remindTask(req: Request, res: Response) {
     res.json({ message: 'ส่ง reminder สำเร็จ', email: task.assigned_email });
   } catch (err: any) {
     console.error('POST /api/admin/tasks/:id/remind error:', err);
-    res.status(500).json({ message: 'ส่ง reminder ไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ส่ง reminder ไม่สำเร็จ' });
   }
 }
 
@@ -585,7 +585,7 @@ async function updateTask(req: Request, res: Response) {
     res.json({ message: 'แก้ไขสำเร็จ', id: result.rows[0].id });
   } catch (err: any) {
     console.error('PATCH /api/admin/tasks/:id error:', err);
-    res.status(500).json({ message: 'แก้ไขไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'แก้ไขไม่สำเร็จ' });
   }
 }
 
@@ -624,7 +624,7 @@ async function deleteSession(req: Request, res: Response) {
   } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('DELETE /api/admin/sessions/:sessionId error:', err);
-    res.status(500).json({ message: 'ลบไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ลบไม่สำเร็จ' });
   } finally {
     client.release();
   }
@@ -661,7 +661,7 @@ async function remindAllTasks(req: Request, res: Response) {
     res.json({ message: 'ส่ง reminder ทั้งหมดสำเร็จ', sent, failed, total: taskResult.rows.length });
   } catch (err: any) {
     console.error('POST /api/admin/tasks/remind-all error:', err);
-    res.status(500).json({ message: 'ส่ง reminder ทั้งหมดไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ส่ง reminder ทั้งหมดไม่สำเร็จ' });
   }
 }
 
@@ -726,7 +726,7 @@ async function listBatches(req: Request, res: Response) {
     res.json(result.rows);
   } catch (err: any) {
     console.error('GET /api/admin/batches error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 
@@ -759,7 +759,7 @@ async function listServiceEvaluations(req: Request, res: Response) {
     res.json(result.rows);
   } catch (err: any) {
     console.error('GET /api/admin/service-evaluations error:', err);
-    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
 

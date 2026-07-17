@@ -2,6 +2,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import type { PoolClient } from 'pg';
 const express      = require('express'); // express เป็น framework ที่ทำให้ node.js รับ http request ได้ง่าย
+const helmet       = require('helmet'); // ตั้ง security headers มาตรฐาน (CSP, HSTS, X-Frame-Options ฯลฯ) และปิด X-Powered-By
 const cors         = require('cors'); // เช็คว่าโดเมนที่เรียกเข้ามา ได้รับอนุญาตให้ดึงข้อมูลจาก API ของเราไหม
 const cookieParser = require('cookie-parser');
 
@@ -10,6 +11,11 @@ const pool = require('./db'); // ./db already calls dotenv.config() — no need 
 const app  = express(); //สร้าง Express Application — app คือ object หลักที่เราจะ config ทุกอย่างลงไป
 const PORT = process.env.PORT || 5000;
 const isProd = process.env.NODE_ENV === 'production';
+
+// This is a pure JSON API (no HTML/inline scripts ever served from here —
+// the frontend is a separate Next.js app on Vercel), so helmet's default
+// CSP has nothing to break; defaults are safe as-is.
+app.use(helmet());
 
 // Production origins come from FRONTEND_URL (comma-separated if there's more
 // than one, e.g. a Vercel preview + the production domain) — local dev
