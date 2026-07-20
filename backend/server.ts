@@ -96,9 +96,14 @@ app.use('/api/auth/verify-password', loginLimiter);
 // them too, but its window is wide enough never to bind first). Without
 // this, an authenticated-but-malicious/compromised client (or a script
 // hitting a public route) could hammer any endpoint with no limit at all.
+// 300/15min turned out way too low for real admin usage — the Criteria
+// Editor alone fires 4 GET requests (pre/post × core/function) on every tab
+// switch, and a single bulk weight-save can burn through dozens of PATCH
+// calls in seconds. This is meant to catch a runaway script, not throttle
+// a human clicking through the Admin UI.
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 300,
+  limit: 3000,
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: 'มีการเรียกใช้งานบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่' },
