@@ -89,36 +89,63 @@ export default function ResultView({ formData, result, user, profilePic, onBack,
     : scoredCriteria;
   // History view only: `getCriteria()` + applyOverrides always reflects
   // whatever criteria exist *today* — is_active=false items are filtered
-  // out of it entirely (see criteriaOverlay.ts). Two failure modes without
-  // the logic below:
-  //  1. An item added to the Parameter page after this evaluation was
-  //     submitted shows up as an extra blank row that was never scored.
-  //  2. An item deleted from the Parameter page vanishes from the live
-  //     structure entirely — even though this evaluation genuinely scored
-  //     it — silently dropping real history instead of just relabeling it.
-  // Fix: reconstruct case 2's rows from the score/title/category snapshots
-  // (placed into the section whose live label matches the snapshotted
-  // category name, or a new trailing section if that category is gone
-  // too), then drop case 1's rows as before.
+  // out entirely (see criteriaOverlay.ts), and a soft-deleted category code
+  // can be reactivated later with completely different content (same row,
+  // new name_th — see criteria.controller.ts createCategory). Three failure
+  // modes without the logic below:
+  //  1. An item added after this evaluation was submitted shows up as an
+  //     extra blank row that was never scored.
+  //  2. An item whose category was deleted vanishes from the live structure
+  //     entirely — even though this evaluation genuinely scored it.
+  //  3. An item whose category was deleted THEN reactivated with different
+  //     content re-appears, but grouped under that new content's section
+  //     label instead of what it actually was at submit time.
+  // Fix: every scored item is grouped by its category_name_th_snapshot when
+  // one exists — regardless of whether that label still matches any live
+  // section — falling back to wherever it's found live only when there's no
+  // snapshot to compare against (pre-snapshot-feature evaluations).
   const categorySnapshots = result.categorySnapshots;
   let CRITERIA = withTitles;
   if (readOnly) {
-    const knownCodes = new Set(withTitles.flatMap(sec => sec.items.filter(i => i.no).map(i => i.no as string)));
+    const scoredCodes = new Set(Object.keys(scores));
+    const belongsToLiveSection = (code: string, sectionLabel: string) => {
+      const snap = categorySnapshots?.[code];
+      return !snap || snap === sectionLabel;
+    };
     const orphanBySection = new Map<string, CriteriaEntry[]>();
-    Object.keys(scores).forEach(code => {
+    const pushOrphan = (code: string, label: string, item: CriteriaEntry) => {
+      (orphanBySection.get(label) ?? orphanBySection.set(label, []).get(label)!).push(item);
+    };
+    // Pass 1: pull mismatched items (case 3) out of whichever live section
+    // they happen to sit in today, rerouting them to their snapshotted label.
+    const withoutMismatches = withTitles.map(sec => {
+      const kept: CriteriaEntry[] = [];
+      sec.items.forEach(item => {
+        if (item.divider || !item.no || !scoredCodes.has(item.no) || belongsToLiveSection(item.no, sec.section)) {
+          kept.push(item);
+          return;
+        }
+        pushOrphan(item.no, categorySnapshots![item.no], item);
+      });
+      return { ...sec, items: kept };
+    });
+    // Pass 2: fully-deleted items (case 2) that never matched any live
+    // section at all.
+    const knownCodes = new Set(withTitles.flatMap(sec => sec.items.filter(i => i.no).map(i => i.no as string)));
+    scoredCodes.forEach(code => {
       if (knownCodes.has(code)) return;
       const label = categorySnapshots?.[code] ?? "หัวข้ออื่นๆ (ถูกลบแล้ว)";
-      const item: CriteriaEntry = { no: code, title: titleSnapshots?.[code] ?? code };
-      (orphanBySection.get(label) ?? orphanBySection.set(label, []).get(label)!).push(item);
+      pushOrphan(code, label, { no: code, title: titleSnapshots?.[code] ?? code });
     });
-    const withOrphans = withTitles.map(sec => {
+    const merged = withoutMismatches.map(sec => {
       const extra = orphanBySection.get(sec.section);
       if (!extra) return sec;
       orphanBySection.delete(sec.section);
       return { ...sec, items: [...sec.items, ...extra] };
     });
-    orphanBySection.forEach((items, label) => withOrphans.push({ section: label, weight: 0, items }));
-    CRITERIA = withOrphans.map(sec => ({
+    orphanBySection.forEach((items, label) => merged.push({ section: label, weight: 0, items }));
+    // Case 1: drop items with no recorded score (added after submission).
+    CRITERIA = merged.map(sec => ({
       ...sec,
       items: sec.items.filter(item => item.divider || (item.no && scores[item.no] != null)),
     }));
