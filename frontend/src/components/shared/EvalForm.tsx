@@ -357,6 +357,21 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
     if (ok) onBack();
   };
 
+  // Dev/QA helper — fills every visible item at its highest level so the
+  // form can be submitted in one click while testing, instead of clicking
+  // through every row by hand. Only touches `scores`; ESG track / Function
+  // module still need picking manually since there's no single "right"
+  // default to guess for those.
+  const handleFillMaxScores = () => {
+    setScores((s) => {
+      const next = { ...s };
+      allItems.forEach((item) => {
+        next[item.no] = item.levelValues ? Math.max(...item.levelValues) : 5;
+      });
+      return next;
+    });
+  };
+
   const handleSubmit = () => {
     if (legalStatus !== "pass") return;
     if (esgSectionIndex !== -1 && !esgTarget) {
@@ -413,6 +428,20 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
       />
 
       <div style={{ maxWidth: 1280, margin: "0 auto", padding: "16px 16px 0" }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+          <button
+            type="button"
+            onClick={handleFillMaxScores}
+            title="เติมคะแนนเต็มทุกข้อ (สำหรับทดสอบ) — ยังต้องเลือก ESG/Module เองถ้ามี"
+            style={{
+              background: "#fff3e0", color: "#e65100", border: "1.5px dashed #ffb74d",
+              borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 700,
+              cursor: "pointer", fontFamily: "Sarabun, sans-serif",
+            }}
+          >
+            🧪 TEST — เติมคะแนนเต็มทุกข้อ
+          </button>
+        </div>
         <InfoBar formData={formData} evalLabel={evalLabel} />
         <LegalComplianceCard
           status={legalStatus}

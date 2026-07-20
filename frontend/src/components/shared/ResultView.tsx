@@ -71,10 +71,34 @@ export default function ResultView({ formData, result, user, profilePic, onBack,
   const funcOverride = (funcMap && result.moduleCode && result.moduleCode !== "custom")
     ? (funcMap[result.moduleCode] ?? null)
     : null;
-  const CRITERIA    = getScoredCriteriaFrom(
+  const scoredCriteria = getScoredCriteriaFrom(
     applyOverrides(getCriteria(formData.evalType), overrideMap),
     result.scores, result.moduleCode, result.customItems as CriteriaEntry[] | null | undefined, funcOverride
   );
+  // Prefer the title frozen at submit time (evaluation_scores.name_th_snapshot)
+  // over today's live criteria title — otherwise renaming/repurposing an item's
+  // code later would silently relabel old evaluations' history.
+  const titleSnapshots = result.titleSnapshots;
+  const withTitles = titleSnapshots
+    ? scoredCriteria.map(sec => ({
+        ...sec,
+        items: sec.items.map(item =>
+          item.no && titleSnapshots[item.no] ? { ...item, title: titleSnapshots[item.no] } : item
+        ),
+      }))
+    : scoredCriteria;
+  // History view only: `getCriteria()` always returns whatever criteria
+  // exist *today* — an item added to the Admin Parameter page after this
+  // evaluation was submitted would otherwise show up as an extra (blank)
+  // row in an old evaluation's history, since the item list itself was
+  // never scoped to what actually existed at submit time. Dividers (ESG
+  // sub-group headers etc.) have no score and must stay regardless.
+  const CRITERIA = readOnly
+    ? withTitles.map(sec => ({
+        ...sec,
+        items: sec.items.filter(item => item.divider || (item.no && scores[item.no] != null)),
+      }))
+    : withTitles;
 
   // ถ้าเป็นการดูผลย้อนหลัง (มี submittedAt จริงจาก DB) ให้โชว์วันที่ประเมินจริง
   // ไม่ใช่วันนี้ — เดิมใช้ new Date() ตายตัว เลยขึ้นวันที่ปัจจุบันเสมอแม้ดูผลเก่า

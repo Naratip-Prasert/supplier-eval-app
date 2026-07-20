@@ -241,12 +241,13 @@ async function createEvaluation(req: Request, res: Response) {
       : [criteriaSet];
     const codes = Object.keys(scores);
     const criteriaResult = await client.query(
-      `SELECT id, code, default_weight
-         FROM evaluation_sub_criteria
-        WHERE code = ANY($1) AND is_active = TRUE AND criteria_set = ANY($2)`,
+      `SELECT sc.id, sc.code, sc.default_weight, sc.name_th, mc.name_th AS category_name_th
+         FROM evaluation_sub_criteria sc
+         JOIN evaluation_main_criteria mc ON mc.id = sc.category_id
+        WHERE sc.code = ANY($1) AND sc.is_active = TRUE AND sc.criteria_set = ANY($2)`,
       [codes, criteriaSets]
     );
-    const criteriaMap: Record<string, { id: string; code: string; default_weight: number }> = {};
+    const criteriaMap: Record<string, { id: string; code: string; default_weight: number; name_th: string; category_name_th: string }> = {};
     criteriaResult.rows.forEach((c: any) => { criteriaMap[c.code] = c; });
 
     // Log unknown codes but do not reject (criteria table may be incomplete).
@@ -309,9 +310,9 @@ async function createEvaluation(req: Request, res: Response) {
       const note   = entry.note ?? '';
 
       await client.query(
-        `INSERT INTO evaluation_scores (evaluation_id, criterion_id, weight, score, note)
-          VALUES ($1, $2, $3, $4, $5)`,
-        [evaluationId, criterion.id, weight, score, note]
+        `INSERT INTO evaluation_scores (evaluation_id, criterion_id, weight, score, note, name_th_snapshot, category_name_th_snapshot)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [evaluationId, criterion.id, weight, score, note, criterion.name_th, criterion.category_name_th]
       );
     }
 
@@ -656,8 +657,8 @@ async function getById(req: Request, res: Response) {
     const scoresResult = await pool.query(
       `SELECT
          ec.code,
-         ec.name_th       AS "nameTh",
-         cat.name_th      AS "categoryNameTh",
+         COALESCE(evs.name_th_snapshot, ec.name_th)          AS "nameTh",
+         COALESCE(evs.category_name_th_snapshot, cat.name_th) AS "categoryNameTh",
          evs.weight,
          evs.score,
          evs.note,

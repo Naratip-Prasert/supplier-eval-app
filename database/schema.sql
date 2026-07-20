@@ -311,6 +311,13 @@ CREATE TABLE evaluation_scores (
   weight          DECIMAL(5,2) NOT NULL,
   score           INTEGER     CHECK (score BETWEEN 1 AND 5),  -- NULL = not yet filled
   note            TEXT,
+  -- Criterion/category name_th frozen at submit time — the live tables
+  -- (evaluation_sub_criteria/evaluation_main_criteria) can be renamed or
+  -- have their code recycled for unrelated content later, which would
+  -- otherwise retroactively relabel this score's history. NULL on rows
+  -- written before this existed; readers fall back to a live join for those.
+  name_th_snapshot           TEXT,
+  category_name_th_snapshot  TEXT,
   weighted_score  DECIMAL(8,4)
                     GENERATED ALWAYS AS
                       (CASE WHEN score IS NOT NULL

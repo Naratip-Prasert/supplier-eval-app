@@ -41,6 +41,10 @@ export interface EvalResult {
   scores: Record<string, number>;
   weights: Record<string, number>;
   notes: Record<string, string>;
+  // Criterion titles as they were when this evaluation was submitted (see
+  // evaluation_scores.name_th_snapshot) — undefined/missing entries just
+  // fall back to today's live criteria title, same as before this existed.
+  titleSnapshots?: Record<string, string>;
   radarOverride?: number[] | null;
   moduleCode?: string | null;
   customItems?: unknown[];
