@@ -68,6 +68,7 @@ function EvalDetailPageInner() {
         const weightsObj: Record<string, number> = {};
         const notesObj: Record<string, string> = {};
         const titleSnapshots: Record<string, string> = {};
+        const categorySnapshots: Record<string, string> = {};
 
         // 1. Seed from raw_scores (complete snapshot saved at submit time)
         const raw = d.rawScores ?? {};
@@ -83,13 +84,14 @@ function EvalDetailPageInner() {
         });
 
         // 2. Overlay with DB evaluation_scores (also stored as 0-5 normalized)
-        (d.scores ?? []).forEach((s: { code: string; score?: number; weight?: number; note?: string; nameTh?: string }) => {
+        (d.scores ?? []).forEach((s: { code: string; score?: number; weight?: number; note?: string; nameTh?: string; categoryNameTh?: string }) => {
           if (s.score != null) {
             const maxLv = maxLvMap[s.code] ?? 5;
             scoresObj[s.code] = (Number(s.score) / 5) * maxLv;
           }
           if (s.weight != null) weightsObj[s.code] = Number(s.weight);
           notesObj[s.code] = s.note || "";
+          if (s.categoryNameTh) categorySnapshots[s.code] = s.categoryNameTh;
           // Present on every row (backend falls back to the live name when no
           // snapshot was taken) — harmless to apply to old evaluations too,
           // since that fallback is exactly today's existing behavior.
@@ -127,6 +129,7 @@ function EvalDetailPageInner() {
             moduleCode:   d.moduleCode ?? null,
             customItems:  d.customModuleItems ?? [],
             titleSnapshots,
+            categorySnapshots,
           },
         });
       })

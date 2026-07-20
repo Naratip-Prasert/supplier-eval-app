@@ -45,6 +45,10 @@ export interface EvalResult {
   // evaluation_scores.name_th_snapshot) — undefined/missing entries just
   // fall back to today's live criteria title, same as before this existed.
   titleSnapshots?: Record<string, string>;
+  // Category/section label as it was at submit time (evaluation_scores.
+  // category_name_th_snapshot) — used to place a since-deleted item's score
+  // back into the right-looking section on the history view.
+  categorySnapshots?: Record<string, string>;
   radarOverride?: number[] | null;
   moduleCode?: string | null;
   customItems?: unknown[];

@@ -87,18 +87,42 @@ export default function ResultView({ formData, result, user, profilePic, onBack,
         ),
       }))
     : scoredCriteria;
-  // History view only: `getCriteria()` always returns whatever criteria
-  // exist *today* — an item added to the Admin Parameter page after this
-  // evaluation was submitted would otherwise show up as an extra (blank)
-  // row in an old evaluation's history, since the item list itself was
-  // never scoped to what actually existed at submit time. Dividers (ESG
-  // sub-group headers etc.) have no score and must stay regardless.
-  const CRITERIA = readOnly
-    ? withTitles.map(sec => ({
-        ...sec,
-        items: sec.items.filter(item => item.divider || (item.no && scores[item.no] != null)),
-      }))
-    : withTitles;
+  // History view only: `getCriteria()` + applyOverrides always reflects
+  // whatever criteria exist *today* — is_active=false items are filtered
+  // out of it entirely (see criteriaOverlay.ts). Two failure modes without
+  // the logic below:
+  //  1. An item added to the Parameter page after this evaluation was
+  //     submitted shows up as an extra blank row that was never scored.
+  //  2. An item deleted from the Parameter page vanishes from the live
+  //     structure entirely — even though this evaluation genuinely scored
+  //     it — silently dropping real history instead of just relabeling it.
+  // Fix: reconstruct case 2's rows from the score/title/category snapshots
+  // (placed into the section whose live label matches the snapshotted
+  // category name, or a new trailing section if that category is gone
+  // too), then drop case 1's rows as before.
+  const categorySnapshots = result.categorySnapshots;
+  let CRITERIA = withTitles;
+  if (readOnly) {
+    const knownCodes = new Set(withTitles.flatMap(sec => sec.items.filter(i => i.no).map(i => i.no as string)));
+    const orphanBySection = new Map<string, CriteriaEntry[]>();
+    Object.keys(scores).forEach(code => {
+      if (knownCodes.has(code)) return;
+      const label = categorySnapshots?.[code] ?? "หัวข้ออื่นๆ (ถูกลบแล้ว)";
+      const item: CriteriaEntry = { no: code, title: titleSnapshots?.[code] ?? code };
+      (orphanBySection.get(label) ?? orphanBySection.set(label, []).get(label)!).push(item);
+    });
+    const withOrphans = withTitles.map(sec => {
+      const extra = orphanBySection.get(sec.section);
+      if (!extra) return sec;
+      orphanBySection.delete(sec.section);
+      return { ...sec, items: [...sec.items, ...extra] };
+    });
+    orphanBySection.forEach((items, label) => withOrphans.push({ section: label, weight: 0, items }));
+    CRITERIA = withOrphans.map(sec => ({
+      ...sec,
+      items: sec.items.filter(item => item.divider || (item.no && scores[item.no] != null)),
+    }));
+  }
 
   // ถ้าเป็นการดูผลย้อนหลัง (มี submittedAt จริงจาก DB) ให้โชว์วันที่ประเมินจริง
   // ไม่ใช่วันนี้ — เดิมใช้ new Date() ตายตัว เลยขึ้นวันที่ปัจจุบันเสมอแม้ดูผลเก่า
