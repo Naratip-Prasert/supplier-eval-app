@@ -511,9 +511,16 @@ async function deleteItem(req: Request, res: Response) {
 // ── PATCH /api/criteria/items/:id ────────────────────────────
 async function updateItem(req: Request, res: Response) {
   const { id } = req.params;
-  const { nameTh, detailTh, defaultWeight, code, levelValues } = req.body;
-  if (nameTh === undefined && detailTh === undefined && defaultWeight === undefined && code === undefined && levelValues === undefined) {
+  const { nameTh, detailTh, defaultWeight, code, levelValues, isActive } = req.body;
+  if (nameTh === undefined && detailTh === undefined && defaultWeight === undefined && code === undefined && levelValues === undefined && isActive === undefined) {
     return res.status(400).json({ message: 'ไม่มีข้อมูลที่ต้องอัปเดต' });
+  }
+  // Lets the Admin UI reactivate a soft-deleted item (createItem's 409
+  // collision response includes existingId for exactly this) instead of it
+  // being permanently stuck — recycling the row is deliberate here since the
+  // admin is explicitly confirming it, unlike createItem silently doing so.
+  if (isActive !== undefined && typeof isActive !== 'boolean') {
+    return res.status(400).json({ message: 'isActive ต้องเป็น boolean' });
   }
   if (nameTh !== undefined && !nameTh?.trim()) {
     return res.status(400).json({ message: 'nameTh ต้องไม่เป็นค่าว่าง' });
@@ -539,8 +546,9 @@ async function updateItem(req: Request, res: Response) {
               detail_th      = COALESCE($2, detail_th),
               default_weight = COALESCE($3, default_weight),
               code           = COALESCE($4, code),
-              level_values   = CASE WHEN $5 THEN $6::jsonb ELSE level_values END
-        WHERE id = $7
+              level_values   = CASE WHEN $5 THEN $6::jsonb ELSE level_values END,
+              is_active      = COALESCE($7, is_active)
+        WHERE id = $8
         RETURNING id`,
       [
         nameTh        !== undefined ? nameTh : null,
@@ -549,6 +557,7 @@ async function updateItem(req: Request, res: Response) {
         code          !== undefined ? String(code).trim() : null,
         levelValues !== undefined,
         levelValues !== undefined ? (levelValues === null ? null : JSON.stringify(levelValues)) : null,
+        isActive !== undefined ? isActive : null,
         id,
       ]
     );

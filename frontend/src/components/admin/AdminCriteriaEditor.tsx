@@ -1387,7 +1387,26 @@ export default function AdminCriteriaEditor() {
           method: 'POST',
           body: JSON.stringify(payload),
         });
-        if (!r.ok) throw new Error((await r.json()).message ?? '');
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          // createItem refuses to silently recycle a code that already
+          // belongs to a soft-deleted item (see criteria.controller.ts) —
+          // that used to be a dead end (no code path ever reactivated it).
+          // Reuse the same code with the name/weight just entered instead
+          // of leaving the admin stuck.
+          if (r.status === 409 && body.existingId) {
+            const pr = await authFetch(`/api/criteria/items/${body.existingId}`, {
+              method: 'PATCH',
+              body: JSON.stringify({ isActive: true, nameTh: payload.nameTh, defaultWeight: payload.defaultWeight }),
+            });
+            if (!pr.ok) throw new Error((await pr.json().catch(() => ({}))).message ?? 'กู้คืนไม่สำเร็จ');
+            showToast(`กู้คืนหัวข้อเดิม "${payload.code}" สำเร็จ (เคยถูกลบไว้)`);
+            await loadAll(evalType);
+            reloadContext();
+            return;
+          }
+          throw new Error(body.message ?? '');
+        }
         showToast('เพิ่มรายการสำเร็จ');
         await loadAll(evalType);
         reloadContext();
