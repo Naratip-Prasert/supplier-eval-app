@@ -9,7 +9,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Header, GreenButton, useModal, useClickOutside } from "@/components";
-import { isPostEvalType, GRADE_MAP, GRADE_GUIDE, getCriteria, getScoredCriteriaFrom, type CriteriaEntry } from "@/constants";
+import { isPostEvalType, GRADE_MAP, GRADE_GUIDE, getCriteria, getScoredCriteriaFrom, findEsgSectionIndex, type CriteriaEntry } from "@/constants";
 import { useCriteriaOverrides, useFunctionOverrides } from "@/context/CriteriaContext";
 import { applyOverrides } from "@/utils/shared/criteriaOverlay";
 import { authFetch } from "@/utils/api";
@@ -180,8 +180,27 @@ export default function ResultView({ formData, result, user, profilePic, onBack,
     return { label: getShortLabel(sec.section), got, max };
   });
 
-  const radarValues  = result.radarOverride ?? sectionSummary.map(s => s.max > 0 ? s.got / s.max : 0);
-  const RADAR_LABELS = sectionSummary.map(s => s.label);
+  // Dashboard split: Function and ESG are always exactly one section each —
+  // ESG is located by its HO/Factory divider marker (same as everywhere
+  // else in the app), and Function always sits immediately before it (see
+  // EvalForm's functionSectionIndex/esgSectionIndexInCriteria — same
+  // convention, reused here rather than invented fresh). Everything else
+  // (the CORE categories, plus any reconstructed orphan sections from
+  // deleted criteria) goes in one "Core" bucket — that's the one with many
+  // categories to compare, which is what actually needs a bar chart; a
+  // single Function or ESG value is a Meter, not a bar.
+  const esgIdxFinal = findEsgSectionIndex(CRITERIA);
+  const functionIdxFinal = esgIdxFinal > 0 ? esgIdxFinal - 1 : -1;
+  const functionSummary = functionIdxFinal >= 0 ? sectionSummary[functionIdxFinal] : null;
+  const esgSummary = esgIdxFinal >= 0 ? sectionSummary[esgIdxFinal] : null;
+  const coreSummaries = sectionSummary.filter((_, si) => si !== functionIdxFinal && si !== esgIdxFinal);
+
+  const weightParts = [
+    { label: `Core (${coreSummaries.length} หมวด)`, weight: coreSummaries.reduce((s, x) => s + x.max, 0), color: "#2e7d32" },
+    ...(functionSummary ? [{ label: "Function", weight: functionSummary.max, color: "#1558a0" }] : []),
+    ...(esgSummary ? [{ label: "ESG", weight: esgSummary.max, color: "#b56a00" }] : []),
+  ].filter(p => p.weight > 0.005);
+  const totalWeight = weightParts.reduce((s, p) => s + p.weight, 0);
 
   const [doneStatus,  setDoneStatus]  = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [doneErrMsg,  setDoneErrMsg]  = useState("");
@@ -352,7 +371,7 @@ export default function ResultView({ formData, result, user, profilePic, onBack,
            side column (radar chart / signature block) has no room left
            and gets clipped at the viewport edge. Stack to one column. */
         @media screen and (max-width: 760px) {
-          .result-main-grid, .result-bottom-grid { grid-template-columns: 1fr !important; }
+          .result-main-grid, .result-bottom-grid, .result-meter-grid { grid-template-columns: 1fr !important; }
         }
 
         /* ── PRINT ── */
@@ -496,17 +515,17 @@ export default function ResultView({ formData, result, user, profilePic, onBack,
             </div>
           </div>
 
-          {/* ── Supplier header card ── */}
+          {/* ── Supplier header card — identity only, score lives in its own card below ── */}
           <div style={{
-            ...card({ padding: "16px 20px", marginBottom: 16 }),
-            display: "flex", alignItems: "center", gap: 18,
+            ...card({ padding: "14px 20px", marginBottom: 12 }),
+            display: "flex", alignItems: "center", gap: 16,
             borderLeft: "4px solid #1b5e20",
           }}>
             <div style={{
-              width: 52, height: 52, borderRadius: 10,
+              width: 46, height: 46, borderRadius: 10,
               background: "#1b5e20", color: "#fff",
               display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 18, fontWeight: 700, flexShrink: 0, letterSpacing: 1,
+              fontSize: 16, fontWeight: 700, flexShrink: 0, letterSpacing: 1,
             }}>
               {initials}
             </div>
@@ -527,88 +546,106 @@ export default function ResultView({ formData, result, user, profilePic, onBack,
                 <span>Tax ID: <strong style={{ color: "#4a5568" }}>{formData.vendorCode || "—"}</strong></span>
                 <span>Period: <strong style={{ color: "#4a5568" }}>{formData.period || "—"}</strong></span>
                 <span>Date: <strong style={{ color: "#4a5568" }}>{dateStr}</strong></span>
+                <span><strong style={{ color: "#4a5568" }}>{evalLabel}</strong> Evaluation</span>
               </div>
             </div>
-            <div style={{
-              flexShrink: 0, textAlign: "center",
-              background: "#f8fdf8", borderRadius: 8,
-              padding: "10px 20px", border: "1px solid #c8e6c9",
-            }}>
-              <div style={{ fontSize: 11, color: "#718096", marginBottom: 4, fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase" }}>
-                {evalLabel} Evaluation
+            <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ textAlign: "right", fontSize: 11, color: "#718096" }}>
+                เกรดรวม
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: "#2d3748" }}>{GRADE_GUIDE.find(g => g.g === grade)?.label.split(" (")[0] ?? "—"}</div>
               </div>
-              <div style={{ fontSize: 28, fontWeight: 800, color: "#1b5e20", lineHeight: 1 }}>
-                {totalScore.toFixed(1)}
-              </div>
-              <div style={{ fontSize: 11, color: "#a0aec0", marginBottom: 6 }}>/100</div>
               <div style={{
                 background: gradeColor, color: "#fff",
-                width: 36, height: 36, borderRadius: 6, margin: "0 auto",
+                width: 38, height: 38, borderRadius: 8,
                 display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 20, fontWeight: 800,
+                fontSize: 20, fontWeight: 800, flexShrink: 0,
               }}>
                 {grade}
               </div>
             </div>
           </div>
 
-          {/* ── Main grid: Score Summary | Radar ── */}
-          <div className="result-main-grid" style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 14, marginBottom: 14 }}>
-
-            {/* Score Summary */}
-            <div style={{ ...card({ padding: "18px 22px" }) }}>
-              <div style={{ fontWeight: 700, fontSize: 13, color: "#718096", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 16 }}>
-                Score Summary
+          {/* ── Row 1: Overall Score + weight-split donut ── */}
+          <div className="result-main-grid" style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 12, marginBottom: 12 }}>
+            <div style={{
+              ...card({ padding: "18px 22px" }),
+              background: "linear-gradient(150deg, #1b5e20, #2e7d32)", border: "none", color: "#fff",
+              display: "flex", flexDirection: "column", justifyContent: "center",
+            }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase", color: "rgba(255,255,255,.75)", marginBottom: 6 }}>
+                Overall Score
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                {sectionSummary.map((item, i) => {
-                  const pct = item.max > 0 ? Math.min(100, (item.got / item.max) * 100) : 0;
-                  const color = SECTION_COLORS[i % SECTION_COLORS.length];
-                  return (
-                    <div key={i}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                        <span style={{
-                          width: 24, height: 24, borderRadius: 5,
-                          background: color, color: "#fff",
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          fontSize: 11, fontWeight: 700, flexShrink: 0,
-                        }}>
-                          {i + 1}
-                        </span>
-                        <span style={{ fontSize: 13, color: "#2d3748", flex: 1, fontWeight: 500 }}>
-                          {item.label}
-                        </span>
-                        <span style={{ fontSize: 14, fontWeight: 700, color: color, flexShrink: 0 }}>
-                          {item.got.toFixed(2)}
-                        </span>
-                        <span style={{ fontSize: 12, color: "#a0aec0", flexShrink: 0 }}>
-                          {/* item.max comes out of repeated proportional-split division
-                              (e.g. 15.000000000000004) — toFixed rounds the float noise
-                              away instead of printing it straight to the screen. */}
-                          / {item.max.toFixed(2)}
-                        </span>
-                      </div>
-                      <div style={{ height: 6, background: "#edf2ed", borderRadius: 999, overflow: "hidden" }}>
-                        <div style={{
-                          height: "100%", borderRadius: 999,
-                          background: color, width: `${pct}%`,
-                          transition: "width 0.5s ease",
-                        }} />
-                      </div>
-                    </div>
-                  );
-                })}
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                <div style={{ fontSize: 42, fontWeight: 900, lineHeight: 1 }}>{totalScore.toFixed(1)}</div>
+                <div style={{ fontSize: 13, color: "rgba(255,255,255,.7)" }}>/ 100</div>
+              </div>
+              <div style={{ marginTop: 8, fontSize: 11.5, color: "rgba(255,255,255,.72)" }}>
+                {GRADE_GUIDE.find(g => g.g === grade)?.label ?? ""}
               </div>
             </div>
 
-            {/* Score Comparison — bigger radar */}
-            <div style={{ ...card({ padding: "18px 14px", display: "flex", flexDirection: "column", alignItems: "center" }) }}>
-              <div style={{ fontWeight: 700, fontSize: 13, color: "#718096", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
-                Score Comparison
+            <div style={{ ...card({ padding: "14px 20px" }), display: "flex", alignItems: "center", gap: 20 }}>
+              {weightParts.length > 0 && (
+                <DonutChart parts={weightParts} total={totalWeight} size={122} />
+              )}
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: "#718096", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 2 }}>
+                  สัดส่วนน้ำหนัก
+                </div>
+                {weightParts.map(p => (
+                  <div key={p.label} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 12.5 }}>
+                    <span style={{ width: 11, height: 11, borderRadius: 3, background: p.color, flexShrink: 0 }} />
+                    <span style={{ flex: 1, color: "#2d3748" }}>{p.label}</span>
+                    <span style={{ fontWeight: 700, color: "#1a202c" }}>{totalWeight > 0 ? Math.round((p.weight / totalWeight) * 100) : 0}%</span>
+                  </div>
+                ))}
               </div>
-              <RadarChart values={radarValues} labels={RADAR_LABELS} size={260} />
             </div>
           </div>
+
+          {/* ── Row 2: Function / ESG meters (single-value ratios — a bar chart would be the wrong form for one number) ── */}
+          {(functionSummary || esgSummary) && (
+            <div className="result-meter-grid" style={{
+              display: "grid",
+              gridTemplateColumns: functionSummary && esgSummary ? "1fr 1fr" : "1fr",
+              gap: 12, marginBottom: 12,
+            }}>
+              {functionSummary && (
+                <div style={{ ...card({ padding: "14px 18px" }), display: "flex", alignItems: "center", gap: 16 }}>
+                  <MeterRing pct={functionSummary.max > 0 ? Math.round((functionSummary.got / functionSummary.max) * 100) : 0} color="#1558a0" size={72} />
+                  <div>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: "#2d3748", marginBottom: 3 }}>Function — {functionSummary.label}</div>
+                    <div style={{ fontSize: 11.5, color: "#718096" }}>
+                      ได้ <strong style={{ color: "#2d3748" }}>{functionSummary.got.toFixed(1)}</strong> จาก <strong style={{ color: "#2d3748" }}>{functionSummary.max.toFixed(1)}</strong>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {esgSummary && (
+                <div style={{ ...card({ padding: "14px 18px" }), display: "flex", alignItems: "center", gap: 16 }}>
+                  <MeterRing pct={esgSummary.max > 0 ? Math.round((esgSummary.got / esgSummary.max) * 100) : 0} color="#b56a00" size={72} />
+                  <div>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: "#2d3748", marginBottom: 3 }}>ESG — {esgSummary.label}</div>
+                    <div style={{ fontSize: 11.5, color: "#718096" }}>
+                      ได้ <strong style={{ color: "#2d3748" }}>{esgSummary.got.toFixed(1)}</strong> จาก <strong style={{ color: "#2d3748" }}>{esgSummary.max.toFixed(1)}</strong>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Row 3: vertical bar chart — every non-Function/ESG section (the "many categories to compare" job) ── */}
+          {coreSummaries.length > 0 && (
+            <div style={{ ...card({ marginBottom: 12, overflow: "hidden" }) }}>
+              <div style={{ padding: "12px 18px", borderBottom: "1px solid #e0e6e0" }}>
+                <span style={{ fontWeight: 700, fontSize: 13, color: "#718096", letterSpacing: 0.8, textTransform: "uppercase" }}>
+                  Core — {coreSummaries.length} หมวด
+                </span>
+              </div>
+              <VerticalBars items={coreSummaries} />
+            </div>
+          )}
 
           {/* ── Score Detail — full width, scrollable ── */}
           <div className="print-break-before" style={{ ...card({ marginBottom: 14, overflow: "hidden", padding: 0 }) }}>
@@ -877,66 +914,115 @@ const dropdownItemStyle: React.CSSProperties = {
   color: "#2d3748",
 };
 
-// ── Radar Chart ───────────────────────────────────────────────
-function RadarChart({ values, labels, size = 260 }: { values: number[]; labels: string[]; size?: number }) {
-  const cx  = size / 2;
-  const cy  = size / 2;
-  const rMax = size * 0.34;
-  const N   = values.length || 5;
-  const angleFor = (i: number) => ((i * (360 / N)) - 90) * (Math.PI / 180);
-  const pt  = (i: number, r: number) => `${cx + r * Math.cos(angleFor(i))},${cy + r * Math.sin(angleFor(i))}`;
-  const gridLevels = [0.25, 0.5, 0.75, 1.0];
+// ── Sequential green ramp — magnitude (score %), not identity ──
+function seqGreen(pct: number): string {
+  if (pct >= 90) return "#1b5e20";
+  if (pct >= 75) return "#3e9645";
+  if (pct >= 60) return "#74ba79";
+  if (pct >= 40) return "#a9d6ac";
+  return "#d7ecd8";
+}
 
+// ── Donut chart — part-to-whole, 2-3 slices only (Core/Function/ESG) ──
+function DonutChart({ parts, total, size = 122 }: { parts: { label: string; weight: number; color: string }[]; total: number; size?: number }) {
+  const r = 42, stroke = 16, cx = 50, cy = 50;
+  const circumference = 2 * Math.PI * r;
+  let acc = 0;
   return (
-    <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size}>
-      {/* Grid polygons */}
-      {gridLevels.map(lv => (
-        <polygon key={lv}
-          points={Array.from({ length: N }, (_, i) => pt(i, lv * rMax)).join(" ")}
-          fill={lv === 1.0 ? "rgba(46,125,50,0.03)" : "none"}
-          stroke={lv === 1.0 ? "#c8d4c8" : "#e0e8e0"}
-          strokeWidth={lv === 1.0 ? 1.2 : 0.8}
-        />
-      ))}
-      {/* Axis lines */}
-      {Array.from({ length: N }, (_, i) => (
-        <line key={i}
-          x1={cx} y1={cy}
-          x2={cx + rMax * Math.cos(angleFor(i))}
-          y2={cy + rMax * Math.sin(angleFor(i))}
-          stroke="#dce8dc" strokeWidth={0.8}
-        />
-      ))}
-      {/* Data area */}
-      <polygon
-        points={values.map((v, i) => pt(i, Math.max(0.05, v) * rMax)).join(" ")}
-        fill="rgba(30,107,58,0.15)" stroke="#1e6b3a" strokeWidth={2}
-      />
-      {/* Data points */}
-      {values.map((v, i) => {
-        const r = Math.max(0.05, v) * rMax;
-        return (
-          <circle key={i}
-            cx={cx + r * Math.cos(angleFor(i))}
-            cy={cy + r * Math.sin(angleFor(i))}
-            r={3.5} fill="#1e6b3a"
-          />
-        );
-      })}
-      {/* Labels */}
-      {labels.map((lbl, i) => {
-        const lx = cx + (rMax + 18) * Math.cos(angleFor(i));
-        const ly = cy + (rMax + 18) * Math.sin(angleFor(i));
-        return (
-          <text key={i} x={lx} y={ly}
-            textAnchor="middle" dominantBaseline="middle"
-            fontSize={9.5} fill="#4a5568" fontFamily="Sarabun, sans-serif" fontWeight="600">
-            {lbl}
-          </text>
-        );
-      })}
-      {/* Center dot */}
-      <circle cx={cx} cy={cy} r={2} fill="#c8d4c8" />
-    </svg>
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <svg viewBox="0 0 100 100" width={size} height={size}>
+        {parts.map(p => {
+          const frac = total > 0 ? p.weight / total : 0;
+          const dash = frac * circumference;
+          const el = (
+            <circle key={p.label}
+              cx={cx} cy={cy} r={r} fill="none"
+              stroke={p.color} strokeWidth={stroke}
+              strokeDasharray={`${dash} ${circumference - dash}`}
+              strokeDashoffset={-acc}
+              transform="rotate(-90 50 50)"
+            />
+          );
+          acc += dash;
+          return el;
+        })}
+      </svg>
+      <div style={{
+        position: "absolute", inset: 0, display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center",
+      }}>
+        <div style={{ fontSize: 17, fontWeight: 800, color: "#1a202c", lineHeight: 1 }}>{Math.round(total)}%</div>
+        <div style={{ fontSize: 9, color: "#a0aec0", marginTop: 2 }}>รวม</div>
+      </div>
+    </div>
+  );
+}
+
+// ── Meter ring — a single ratio against a limit (Function/ESG score) ──
+function MeterRing({ pct, color, size = 72 }: { pct: number; color: string; size?: number }) {
+  const clamped = Math.max(0, Math.min(100, pct));
+  return (
+    <div style={{
+      position: "relative", width: size, height: size, borderRadius: "50%", flexShrink: 0,
+      background: `conic-gradient(${color} ${clamped * 3.6}deg, #e0e6e0 0deg)`,
+    }}>
+      <div style={{
+        position: "absolute", inset: 7, borderRadius: "50%", background: "#fff",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}>
+        <span style={{ fontSize: 14, fontWeight: 800, color: "#1a202c" }}>{clamped}%</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Vertical bar chart — magnitude comparison across many categories ──
+// X-axis is the item's position number, not its (often long, Thai) full
+// name — a tooltip on hover carries the name instead, so 16+ categories
+// stay legible instead of forcing rotated or truncated axis labels.
+function VerticalBars({ items }: { items: { label: string; got: number; max: number }[] }) {
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  return (
+    <div style={{ padding: "18px 20px 6px" }}>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 190, padding: "0 2px" }}>
+        {items.map((item, i) => {
+          const pct = item.max > 0 ? Math.min(100, (item.got / item.max) * 100) : 0;
+          return (
+            <div key={i}
+              onMouseEnter={() => setHoverIdx(i)}
+              onMouseLeave={() => setHoverIdx(null)}
+              style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%", position: "relative" }}
+            >
+              {hoverIdx === i && (
+                <div style={{
+                  position: "absolute", bottom: "calc(100% + 10px)", left: "50%", transform: "translateX(-50%)",
+                  background: "#1a202c", color: "#fff", fontSize: 11, padding: "6px 10px", borderRadius: 6,
+                  whiteSpace: "nowrap", zIndex: 5, boxShadow: "0 4px 14px rgba(0,0,0,.2)", pointerEvents: "none",
+                }}>
+                  {item.label}<br />{item.got.toFixed(2)} / {item.max.toFixed(2)} ({pct.toFixed(0)}%)
+                </div>
+              )}
+              <div style={{ width: "100%", maxWidth: 28, height: "100%", display: "flex", alignItems: "flex-end" }}>
+                <div style={{
+                  width: "100%", height: `${Math.max(pct, 1.5)}%`, borderRadius: "4px 4px 2px 2px",
+                  background: seqGreen(pct), transition: "height .4s ease",
+                }} />
+              </div>
+              <div style={{ marginTop: 8, fontSize: 11, fontWeight: 700, color: hoverIdx === i ? "#2e7d32" : "#a0aec0" }}>
+                {i + 1}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ borderTop: "1.5px solid #d8e4d8", margin: "0 2px" }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "12px 2px 16px", fontSize: 10.5, color: "#a0aec0" }}>
+        <span>ต่ำ</span>
+        {["#d7ecd8", "#a9d6ac", "#74ba79", "#3e9645", "#1b5e20"].map(c => (
+          <span key={c} style={{ width: 20, height: 8, borderRadius: 3, background: c }} />
+        ))}
+        <span>สูง — สีเข้ม = % คะแนนสูง</span>
+      </div>
+    </div>
   );
 }
