@@ -71,9 +71,9 @@ export default function ResultView({ formData, result, user, profilePic, onBack,
   const funcOverride = (funcMap && result.moduleCode && result.moduleCode !== "custom")
     ? (funcMap[result.moduleCode] ?? null)
     : null;
+  const baseCriteria = applyOverrides(getCriteria(formData.evalType), overrideMap);
   const scoredCriteria = getScoredCriteriaFrom(
-    applyOverrides(getCriteria(formData.evalType), overrideMap),
-    result.scores, result.moduleCode, result.customItems as CriteriaEntry[] | null | undefined, funcOverride
+    baseCriteria, result.scores, result.moduleCode, result.customItems as CriteriaEntry[] | null | undefined, funcOverride
   );
   // Prefer the title frozen at submit time (evaluation_scores.name_th_snapshot)
   // over today's live criteria title — otherwise renaming/repurposing an item's
@@ -181,16 +181,25 @@ export default function ResultView({ formData, result, user, profilePic, onBack,
   });
 
   // Dashboard split: Function and ESG are always exactly one section each —
-  // ESG is located by its HO/Factory divider marker (same as everywhere
-  // else in the app), and Function always sits immediately before it (see
-  // EvalForm's functionSectionIndex/esgSectionIndexInCriteria — same
-  // convention, reused here rather than invented fresh). Everything else
-  // (the CORE categories, plus any reconstructed orphan sections from
+  // ESG is located by its HO/Factory divider marker, same as everywhere else
+  // in the app (see EvalForm's functionSectionIndex/esgSectionIndexInCriteria
+  // — same convention, reused here rather than invented fresh). Everything
+  // else (the CORE categories, plus any reconstructed orphan sections from
   // deleted criteria) goes in one "Core" bucket — that's the one with many
   // categories to compare, which is what actually needs a bar chart; a
   // single Function or ESG value is a Meter, not a bar.
-  const esgIdxFinal = findEsgSectionIndex(CRITERIA);
-  const functionIdxFinal = esgIdxFinal > 0 ? esgIdxFinal - 1 : -1;
+  //
+  // The marker must be located on `baseCriteria` (pre-getScoredCriteriaFrom),
+  // NOT on CRITERIA/scoredCriteria — splitEsgGroups (called inside
+  // getScoredCriteriaFrom to pick the HO-or-Factory half) deliberately drops
+  // the divider row itself once it's done its job, so by the time CRITERIA
+  // exists there's nothing left to search for. Function is inserted right
+  // before wherever ESG was found (functionSectionIndex = esgSectionIndex,
+  // esgSectionIndexInCriteria = esgSectionIndex + 1), so the same +1 offset
+  // locates both in the final array.
+  const rawEsgIdx = findEsgSectionIndex(baseCriteria);
+  const esgIdxFinal = rawEsgIdx === -1 ? -1 : rawEsgIdx + 1;
+  const functionIdxFinal = rawEsgIdx;
   const functionSummary = functionIdxFinal >= 0 ? sectionSummary[functionIdxFinal] : null;
   const esgSummary = esgIdxFinal >= 0 ? sectionSummary[esgIdxFinal] : null;
   const coreSummaries = sectionSummary.filter((_, si) => si !== functionIdxFinal && si !== esgIdxFinal);
