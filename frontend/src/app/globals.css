@@ -2,17 +2,21 @@ html {
   height: 100%;
 }
 
-/* overflow-x alone makes the browser compute overflow-y: auto too (CSS
-   spec — a non-"visible" value on one axis forces the other off
-   "visible"), so without the explicit overflow-y below, both html AND
-   body become independent scroll containers. That breaks position:sticky
-   site-wide — it sticks relative to whichever of the two never actually
-   scrolls, so it just sits static instead of pinning. */
-html,
-body {
+/* My first attempt at this fix (an explicit overflow-y: visible sitting
+   next to overflow-x: hidden) didn't actually work — per the CSS spec, a
+   "visible" value on one axis is force-corrected to "auto" whenever the
+   OTHER axis isn't "visible" too, no matter how it was set. There is no
+   way to have one hidden axis and one truly-visible axis on the same
+   element. Checked in a live browser: both html and body still computed
+   overflow-y: auto after that change, still two independent scroll
+   containers, position:sticky still broken.
+   The real fix: only ONE of html/body gets the overflow-x rule at all —
+   modern browsers already scroll the page via <html> (the
+   "documentElement"), not <body>, so putting it there alone matches that
+   and never creates a second container. */
+html {
   max-width: 100vw;
   overflow-x: hidden;
-  overflow-y: visible;
 }
 
 body {
