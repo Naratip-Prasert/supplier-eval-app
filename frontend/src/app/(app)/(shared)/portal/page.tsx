@@ -5,7 +5,7 @@
 
 import { useState, useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Header, useModal } from "@/components";
+import { useModal, Clock as ClockWidget, Logo } from "@/components";
 import { useAuth } from "@/context/AuthContext";
 import { authFetch } from "@/utils/api";
 import {
@@ -123,55 +123,14 @@ const ROLE_BADGE: Record<string, { label: string; bg: string; color: string }> =
   SUPERVISOR: { label: "Supervisor — ผู้อนุมัติ",       bg: "#f3e5f5", color: "#6a1b9a" },
 };
 
-// Welcome-card gradient per role — same hue family as that role's badge
-// above, so the card itself hints at "which hat you're wearing" at a
-// glance instead of always being the same green for everyone. `pattern` is
-// a CSS-only decorative texture (no image asset) layered on top, themed to
-// suit the role: network nodes for USER, circuit/hex grid for GCP, a
-// radar-style dot-grid + corner sweep for ADMIN, and an ascending
-// trend-line + sparkles for SUPERVISOR.
-const ROLE_HERO: Record<string, { gradient: string; shadow: string; pattern: string; patternSize: string }> = {
-  // network nodes — dots joined by faint crossing lines
-  USER: {
-    gradient: "linear-gradient(135deg, #1b5e20 0%, #2e7d32 60%, #388e3c 100%)",
-    shadow: "rgba(26,107,26,0.28)",
-    pattern: `
-      radial-gradient(rgba(255,255,255,0.22) 1.6px, transparent 1.8px),
-      repeating-linear-gradient(60deg,  rgba(255,255,255,0.07) 0 1px, transparent 1px 24px),
-      repeating-linear-gradient(-60deg, rgba(255,255,255,0.07) 0 1px, transparent 1px 24px)
-    `,
-    patternSize: "22px 22px, auto, auto",
-  },
-  // circuit / hex grid — diagonal crossing lines
-  GCP: {
-    gradient: "linear-gradient(135deg, #0d47a1 0%, #1565c0 60%, #1976d2 100%)",
-    shadow: "rgba(13,71,161,0.28)",
-    pattern: `
-      repeating-linear-gradient(45deg,  rgba(255,255,255,0.11) 0 1px, transparent 1px 18px),
-      repeating-linear-gradient(-45deg, rgba(255,255,255,0.11) 0 1px, transparent 1px 18px)
-    `,
-    patternSize: "auto",
-  },
-  // radar/target — fine dot-grid plus a soft sweep glow in one corner
-  ADMIN: {
-    gradient: "linear-gradient(135deg, #880e4f 0%, #ad1457 60%, #c2185b 100%)",
-    shadow: "rgba(136,14,79,0.28)",
-    pattern: `
-      radial-gradient(circle at 88% 12%, rgba(255,255,255,0.22) 0%, transparent 42%),
-      radial-gradient(rgba(255,255,255,0.16) 1.3px, transparent 1.5px)
-    `,
-    patternSize: "auto, 16px 16px",
-  },
-  // ascending trend line + sparkle dots
-  SUPERVISOR: {
-    gradient: "linear-gradient(135deg, #4a148c 0%, #6a1b9a 60%, #7b1fa2 100%)",
-    shadow: "rgba(74,20,140,0.28)",
-    pattern: `
-      radial-gradient(rgba(255,255,255,0.55) 1px, transparent 1.3px),
-      repeating-linear-gradient(155deg, transparent 0 17px, rgba(255,255,255,0.13) 17px 19px, transparent 19px 36px)
-    `,
-    patternSize: "42px 42px, auto",
-  },
+// Sidebar background per role — same hue family as that role's badge above,
+// so the sidebar itself hints at "which hat you're wearing" instead of a
+// neutral dark panel for everyone.
+const ROLE_SIDEBAR: Record<string, string> = {
+  USER:       "linear-gradient(180deg, #1b5e20 0%, #133d16 100%)",
+  GCP:        "linear-gradient(180deg, #0d47a1 0%, #0a2f6b 100%)",
+  ADMIN:      "linear-gradient(180deg, #ad1457 0%, #6d0e37 100%)",
+  SUPERVISOR: "linear-gradient(180deg, #6a1b9a 0%, #421263 100%)",
 };
 
 interface ReturnedTask {
@@ -185,7 +144,7 @@ export default function PortalPage() {
   const router = useRouter();
   const role    = authUser?.role ?? "USER";
   const badge   = ROLE_BADGE[role] ?? ROLE_BADGE.USER;
-  const hero    = ROLE_HERO[role] ?? ROLE_HERO.USER;
+  const sidebarBg = ROLE_SIDEBAR[role] ?? ROLE_SIDEBAR.USER;
 
   const { showConfirm, ModalEl } = useModal();
   const handleLogoutClick = async () => {
@@ -240,139 +199,115 @@ export default function PortalPage() {
     .split(" ").map((w) => w[0] ?? "").join("").slice(0, 2).toUpperCase();
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f0f4f0", fontFamily: "Sarabun, sans-serif" }}>
+    <div className="portal-shell" style={{ minHeight: "100vh", background: "#f0f4f0", fontFamily: "Sarabun, sans-serif", display: "flex" }}>
       {ModalEl}
 
-      {/* ── Header ── */}
-      <Header />
+      {/* Below ~768px there's no room for a full-height side column next to
+          content — stack it as a compact top bar instead, with the profile
+          block laid out as a row (avatar left, name/badge right) rather
+          than centered, so Thai names (no spaces to wrap on) stay on one
+          line as long as possible. */}
+      <style>{`
+        @media (max-width: 768px) {
+          .portal-shell { flex-direction: column; }
+          .portal-sidebar { width: 100% !important; flex-direction: row !important; flex-wrap: wrap; align-items: center; padding: 16px 20px !important; }
+          .portal-sidebar-brand { margin-bottom: 0 !important; margin-right: 14px; }
+          .portal-sidebar-profile { flex-direction: row !important; text-align: left !important; flex: 1; min-width: 200px; margin-bottom: 0 !important; }
+          .portal-sidebar-avatar { margin: 0 12px 0 0 !important; }
+          .portal-sidebar-nav { flex-direction: row !important; width: 100%; margin-top: 14px; }
+          .portal-sidebar-spacer { display: none; }
+          .portal-sidebar-clock { display: none; }
+        }
+      `}</style>
 
-      <div style={{ maxWidth: 940, margin: "0 auto", padding: "20px 20px 48px" }}>
+      {/* ── Sidebar ── */}
+      <aside className="portal-sidebar" style={{
+        width: 260, flexShrink: 0,
+        background: sidebarBg,
+        color: "#fff", display: "flex", flexDirection: "column",
+        padding: "24px 22px",
+      }}>
+        {/* Brand */}
+        <div className="portal-sidebar-brand" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 32 }}>
+          <Logo size={30} />
+          <span style={{ fontFamily: "monospace", fontWeight: 800, fontSize: 18, letterSpacing: 1.2 }}>SPES</span>
+        </div>
 
-        {/* ── Welcome card ── */}
-        {/* Below ~600px, the avatar+name+buttons 3-column row has no room
-            left for the name (Thai script has no spaces, so a squeezed
-            column wraps name text syllable-by-syllable into a tall,
-            unreadable stack) — switch to a stacked, centered layout. */}
-        <style>{`
-          @media (max-width: 600px) {
-            .portal-hero { flex-direction: column !important; text-align: center; padding: 24px 20px !important; }
-            .portal-hero-text { text-align: center !important; }
-            .portal-hero-badges { justify-content: center !important; }
-            .portal-hero-actions { flex-direction: row !important; width: 100%; justify-content: center; }
-          }
-        `}</style>
-        <div className="portal-hero" style={{
-          background: hero.gradient,
-          borderRadius: 18, padding: "28px 32px", marginBottom: 32,
-          boxShadow: `0 6px 28px ${hero.shadow}`,
-          display: "flex", alignItems: "center", gap: 22,
-          position: "relative", overflow: "hidden",
-        }}>
-          {/* Role-themed pattern texture */}
-          <div style={{
-            position: "absolute", inset: 0,
-            backgroundImage: hero.pattern,
-            backgroundSize: hero.patternSize,
-            opacity: 0.7,
-          }} />
-
-          {/* Decorative circles */}
-          <div style={{
-            position: "absolute", right: -40, top: -40,
-            width: 200, height: 200, borderRadius: "50%",
-            background: "rgba(255,255,255,0.05)",
-          }} />
-          <div style={{
-            position: "absolute", right: 60, bottom: -60,
-            width: 150, height: 150, borderRadius: "50%",
-            background: "rgba(255,255,255,0.04)",
-          }} />
-
-          {/* Avatar */}
-          <div style={{
-            width: 70, height: 70, borderRadius: "50%",
-            background: "rgba(255,255,255,0.18)",
-            border: "2.5px solid rgba(255,255,255,0.5)",
+        {/* Profile */}
+        <div className="portal-sidebar-profile" style={{ textAlign: "center", marginBottom: 28 }}>
+          <div className="portal-sidebar-avatar" style={{
+            width: 72, height: 72, borderRadius: "50%", margin: "0 auto 14px",
+            background: "rgba(255,255,255,0.08)", border: "2px solid rgba(255,255,255,0.15)",
             display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 24, fontWeight: 800, color: "#fff",
-            flexShrink: 0, overflow: "hidden", position: "relative", zIndex: 1,
+            fontSize: 22, fontWeight: 800, overflow: "hidden", flexShrink: 0,
           }}>
             {profilePic
               ? <img src={profilePic} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               : initials}
           </div>
-
-          <div className="portal-hero-text" style={{ flex: 1, position: "relative", zIndex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", marginBottom: 4 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 12, color: "#8a8f98", marginBottom: 6 }}>
               ยินดีต้อนรับเข้าสู่ระบบ
             </div>
-            <div style={{ fontSize: 24, fontWeight: 800, color: "#fff", letterSpacing: 0.3 }}>
+            <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 10, lineHeight: 1.3 }}>
               {authUser?.fullName}
             </div>
-            <div className="portal-hero-badges" style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <span style={{
-                background: badge.bg, color: badge.color,
-                borderRadius: 20, padding: "3px 12px",
-                fontSize: 11, fontWeight: 700,
-              }}>
-                {badge.label}
-              </span>
-              <span style={{
-                background: "rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.9)",
-                borderRadius: 20, padding: "3px 12px", fontSize: 11, fontWeight: 600,
-              }}>
-                {authUser?.department}
-              </span>
-              {authUser?.empId && (
-                <span style={{
-                  background: "rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.9)",
-                  borderRadius: 20, padding: "3px 12px", fontSize: 11, fontWeight: 600,
-                  fontFamily: "monospace",
-                }}>
-                  {authUser.empId}
-                </span>
-              )}
-            </div>
-          </div>
-
-          <div className="portal-hero-actions" style={{
-            display: "flex", flexDirection: "column", gap: 8,
-            flexShrink: 0, position: "relative", zIndex: 1,
-          }}>
-            <button
-              onClick={() => router.push("/profile")}
-              title="โปรไฟล์"
-              style={{
-                display: "flex", alignItems: "center", gap: 7,
-                background: "rgba(255,255,255,0.15)",
-                border: "1px solid rgba(255,255,255,0.3)",
-                borderRadius: 20, padding: "6px 14px",
-                cursor: "pointer", color: "#fff", fontSize: 12,
-                fontFamily: "Sarabun, sans-serif", fontWeight: 600,
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255,255,255,0.25)"}
-              onMouseLeave={(e) => e.currentTarget.style.background = "rgba(255,255,255,0.15)"}
-            >
-              <User size={13} /> โปรไฟล์
-            </button>
-            <button
-              onClick={handleLogoutClick}
-              title="ออกจากระบบ"
-              style={{
-                display: "flex", alignItems: "center", gap: 7,
-                background: "rgba(255,255,255,0.08)",
-                border: "1px solid rgba(255,255,255,0.2)",
-                borderRadius: 20, padding: "6px 14px",
-                cursor: "pointer", color: "rgba(255,255,255,0.75)", fontSize: 12,
-                fontFamily: "Sarabun, sans-serif", fontWeight: 600,
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255,100,100,0.25)"}
-              onMouseLeave={(e) => e.currentTarget.style.background = "rgba(255,255,255,0.08)"}
-            >
-              <LogOut size={13} /> ออกจากระบบ
-            </button>
+            <span style={{
+              display: "inline-block", background: badge.bg, color: badge.color,
+              borderRadius: 20, padding: "4px 12px", fontSize: 11, fontWeight: 700,
+            }}>
+              {badge.label}
+            </span>
+            {authUser?.empId && (
+              <div style={{ fontSize: 11, color: "#6b7078", fontFamily: "monospace", marginTop: 8 }}>
+                {authUser.empId}
+              </div>
+            )}
           </div>
         </div>
+
+        {/* Nav */}
+        <div className="portal-sidebar-nav" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <button
+            onClick={() => router.push("/profile")}
+            style={{
+              display: "flex", alignItems: "center", gap: 8,
+              background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: 10, padding: "10px 14px", cursor: "pointer",
+              color: "#fff", fontSize: 13, fontFamily: "Sarabun, sans-serif", fontWeight: 600,
+              width: "100%", textAlign: "left",
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255,255,255,0.11)"}
+            onMouseLeave={(e) => e.currentTarget.style.background = "rgba(255,255,255,0.06)"}
+          >
+            <User size={14} /> โปรไฟล์
+          </button>
+          <button
+            onClick={handleLogoutClick}
+            style={{
+              display: "flex", alignItems: "center", gap: 8,
+              background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: 10, padding: "10px 14px", cursor: "pointer",
+              color: "#ff8a80", fontSize: 13, fontFamily: "Sarabun, sans-serif", fontWeight: 600,
+              width: "100%", textAlign: "left",
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(229,57,53,0.16)"}
+            onMouseLeave={(e) => e.currentTarget.style.background = "rgba(255,255,255,0.06)"}
+          >
+            <LogOut size={14} /> ออกจากระบบ
+          </button>
+        </div>
+
+        <div className="portal-sidebar-spacer" style={{ flex: 1 }} />
+
+        <div className="portal-sidebar-clock" style={{ paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+          <ClockWidget />
+        </div>
+      </aside>
+
+      {/* ── Main content ── */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ maxWidth: 940, margin: "0 auto", padding: "32px 24px 48px" }}>
 
         {/* ── Returned-by-supervisor alert ── */}
         {returnedTasks.length > 0 && (
@@ -438,6 +373,7 @@ export default function PortalPage() {
         }}>
           SPES · {new Date().getFullYear()}
         </div>
+      </div>
       </div>
     </div>
   );
