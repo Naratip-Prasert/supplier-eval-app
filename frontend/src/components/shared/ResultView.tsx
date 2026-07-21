@@ -579,10 +579,13 @@ export default function ResultView({ formData, result, user, profilePic, onBack,
                           {item.label}
                         </span>
                         <span style={{ fontSize: 14, fontWeight: 700, color: color, flexShrink: 0 }}>
-                          {item.got.toFixed(1)}
+                          {item.got.toFixed(2)}
                         </span>
                         <span style={{ fontSize: 12, color: "#a0aec0", flexShrink: 0 }}>
-                          / {item.max}
+                          {/* item.max comes out of repeated proportional-split division
+                              (e.g. 15.000000000000004) — toFixed rounds the float noise
+                              away instead of printing it straight to the screen. */}
+                          / {item.max.toFixed(2)}
                         </span>
                       </div>
                       <div style={{ height: 6, background: "#edf2ed", borderRadius: 999, overflow: "hidden" }}>
@@ -647,7 +650,7 @@ export default function ResultView({ formData, result, user, profilePic, onBack,
                           padding: "7px 10px", textAlign: "center",
                           fontWeight: 700, fontSize: 12, color: color,
                         }}>
-                          {secGot.toFixed(1)} / {secMax}
+                          {secGot.toFixed(2)} / {secMax.toFixed(2)}
                         </td>
                       </tr>
                       {realItems.map((item, ii) => {
