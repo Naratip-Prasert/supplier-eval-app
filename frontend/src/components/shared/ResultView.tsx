@@ -645,16 +645,26 @@ export default function ResultView({ formData, result, user, profilePic, onBack,
           )}
 
           {/* ── Row 3: vertical bar chart — every non-Function/ESG section (the "many categories to compare" job) ── */}
-          {coreSummaries.length > 0 && (
-            <div style={{ ...card({ marginBottom: 12, overflow: "hidden" }) }}>
-              <div style={{ padding: "12px 18px", borderBottom: "1px solid #e0e6e0" }}>
-                <span style={{ fontWeight: 700, fontSize: 13, color: "#718096", letterSpacing: 0.8, textTransform: "uppercase" }}>
-                  Core — {coreSummaries.length} หมวด
-                </span>
+          {coreSummaries.length > 0 && (() => {
+            const coreGot = coreSummaries.reduce((s, x) => s + x.got, 0);
+            const coreMax = coreSummaries.reduce((s, x) => s + x.max, 0);
+            return (
+              <div style={{ ...card({ marginBottom: 12, overflow: "hidden" }) }}>
+                <div style={{
+                  padding: "12px 18px", borderBottom: "1px solid #e0e6e0",
+                  display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10,
+                }}>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: "#718096", letterSpacing: 0.8, textTransform: "uppercase" }}>
+                    Core — {coreSummaries.length} หมวด
+                  </span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: "#2e7d32" }}>
+                    {coreGot.toFixed(2)}<span style={{ fontSize: 12, fontWeight: 500, color: "#a0aec0" }}> / {coreMax.toFixed(2)}</span>
+                  </span>
+                </div>
+                <VerticalBars items={coreSummaries} />
               </div>
-              <VerticalBars items={coreSummaries} />
-            </div>
-          )}
+            );
+          })()}
 
           {/* ── Score Detail — full width, scrollable ── */}
           <div className="print-break-before" style={{ ...card({ marginBottom: 14, overflow: "hidden", padding: 0 }) }}>
