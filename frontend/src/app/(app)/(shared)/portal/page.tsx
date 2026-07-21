@@ -218,6 +218,13 @@ export default function PortalPage() {
           .portal-sidebar-spacer { display: none; }
           .portal-sidebar-clock { display: none; }
         }
+        .portal-module-grid { grid-template-columns: repeat(3, 1fr); }
+        @media (max-width: 700px) {
+          .portal-module-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 460px) {
+          .portal-module-grid { grid-template-columns: 1fr; }
+        }
       `}</style>
 
       {/* ── Sidebar ── */}
@@ -344,9 +351,8 @@ export default function PortalPage() {
         </div>
 
         {/* ── Module cards grid ── */}
-        <div style={{
+        <div className="portal-module-grid" style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(195px, 1fr))",
           gap: 18,
         }}>
           {modules.map((mod) => {
