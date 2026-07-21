@@ -522,7 +522,12 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
           }
         `}</style>
 
-        <div className="score-table-desktop" style={{ borderRadius: 10, overflow: "hidden", border: "1.5px solid #c8d8c8", marginBottom: 16, background: "#fff" }}>
+        {/* overflow: hidden here (previously used to clip square-cornered
+            children into the rounded card) breaks position:sticky on
+            TableHeader below — a clipping ancestor stops the browser from
+            ever computing a "stuck" state. Border-radius stays for the
+            card's own edges; the header rounds its own top corners instead. */}
+        <div className="score-table-desktop" style={{ borderRadius: 10, border: "1.5px solid #c8d8c8", marginBottom: 16, background: "#fff" }}>
           <TableHeader />
           {CRITERIA.map((section, si) => (
             <div key={si}>
@@ -908,6 +913,9 @@ function TableHeader() {
       // across ~19 sections now, column meaning (which level number means
       // what) would otherwise be out of sight for nearly the whole form.
       position: "sticky", top: 0, zIndex: 5,
+      // Card's own overflow:hidden had to go (it broke sticky), so this
+      // rounds its own top corners to match instead.
+      borderTopLeftRadius: 10, borderTopRightRadius: 10,
     }}>
       <div style={{ fontSize: 12 }}>ลำดับ</div>
       <div style={{ textAlign: "left", paddingLeft: 10, fontSize: 13 }}>หัวข้อการประเมิน / รายละเอียด</div>
