@@ -246,7 +246,7 @@ export default function PortalPage() {
               : initials}
           </div>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 12, color: "#8a8f98", marginBottom: 6 }}>
+            <div style={{ fontSize: 12, color: "#ffffff", marginBottom: 6 }}>
               ยินดีต้อนรับเข้าสู่ระบบ
             </div>
             <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 10, lineHeight: 1.3 }}>
@@ -259,7 +259,7 @@ export default function PortalPage() {
               {badge.label}
             </span>
             {authUser?.empId && (
-              <div style={{ fontSize: 11, color: "#6b7078", fontFamily: "monospace", marginTop: 8 }}>
+              <div style={{ fontSize: 11, color: "#ffffff", fontFamily: "monospace", marginTop: 8 }}>
                 {authUser.empId}
               </div>
             )}
