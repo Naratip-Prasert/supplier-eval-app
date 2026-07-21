@@ -903,6 +903,11 @@ function TableHeader() {
       fontSize: 13, fontWeight: 700, letterSpacing: 0.2,
       padding: "12px 6px", gap: 4, textAlign: "center",
       alignItems: "center",
+      // The site Header above isn't sticky itself, so once it scrolls out
+      // of view this row pins to the very top instead — with 100+ rows
+      // across ~19 sections now, column meaning (which level number means
+      // what) would otherwise be out of sight for nearly the whole form.
+      position: "sticky", top: 0, zIndex: 5,
     }}>
       <div style={{ fontSize: 12 }}>ลำดับ</div>
       <div style={{ textAlign: "left", paddingLeft: 10, fontSize: 13 }}>หัวข้อการประเมิน / รายละเอียด</div>
