@@ -461,23 +461,28 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
           border: "2px solid #2e7d32", boxShadow: "0 2px 10px rgba(46,125,50,0.12)",
           overflow: "hidden",
         }}>
-          {/* hint bar */}
+          {/* progress bar — the weight-editing tip it replaced only matters
+              the first couple of times; with 100+ items across ~19 sections
+              now, knowing how much is left is the thing worth a permanent
+              slot. answered/total are already computed below for the
+              missing-scores modal — reused here, not a new calculation. */}
           <div style={{
             background: "#e8f5e9", borderBottom: "2px solid #a5d6a7",
             borderLeft: "5px solid #2e7d32",
-            padding: "11px 16px", display: "flex", alignItems: "center", gap: 10,
+            padding: "10px 16px", display: "flex", alignItems: "center", gap: 12,
           }}>
-            <span style={{
-              background: "#1b5e20", color: "#fff", borderRadius: 5,
-              padding: "4px 12px", fontSize: 12, fontWeight: 800, letterSpacing: 0.5,
-              flexShrink: 0,
-            }}>TIP</span>
-            <span style={{ fontSize: 14, color: "#1a3c1a", fontWeight: 500 }}>
-              คลิกช่อง <span style={{
-                background: "#fff", border: "1.5px solid #2e7d32",
-                borderRadius: 4, padding: "2px 8px", fontWeight: 800, color: "#1b5e20",
-              }}>น้ำหนัก%</span>{" "}
-              ที่หัว Section เพื่อตั้งน้ำหนัก — หัวข้อใน Section จะปรับสัดส่วนตามอัตโนมัติ
+            <span style={{ fontSize: 13, color: "#1a3c1a", fontWeight: 700, flexShrink: 0 }}>
+              ตอบแล้ว {answered}/{total} ข้อ
+            </span>
+            <div style={{ flex: 1, height: 8, background: "#c8e6c9", borderRadius: 999, overflow: "hidden" }}>
+              <div style={{
+                height: "100%", borderRadius: 999, background: "#1b5e20",
+                width: `${total > 0 ? Math.min(100, (answered / total) * 100) : 0}%`,
+                transition: "width 0.3s ease",
+              }} />
+            </div>
+            <span style={{ fontSize: 12.5, color: "#2e7d32", fontWeight: 700, flexShrink: 0 }}>
+              {total > 0 ? Math.round((answered / total) * 100) : 0}%
             </span>
           </div>
           {/* level legend */}
