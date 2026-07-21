@@ -145,10 +145,16 @@ export default function ResultView({ formData, result, user, profilePic, onBack,
     });
     orphanBySection.forEach((items, label) => merged.push({ section: label, weight: 0, items }));
     // Case 1: drop items with no recorded score (added after submission).
-    CRITERIA = merged.map(sec => ({
+    const filtered = merged.map(sec => ({
       ...sec,
       items: sec.items.filter(item => item.divider || (item.no && scores[item.no] != null)),
     }));
+    // A section can end up holding nothing but dividers (or nothing at all)
+    // once its only scored item(s) got rerouted elsewhere above — showing
+    // that as a real section (0 achieved / its live weight as the max) reads
+    // as a missing/failed score instead of "there was never anything here
+    // for this evaluation."
+    CRITERIA = filtered.filter(sec => sec.items.some(item => !item.divider));
   }
 
   // ถ้าเป็นการดูผลย้อนหลัง (มี submittedAt จริงจาก DB) ให้โชว์วันที่ประเมินจริง
