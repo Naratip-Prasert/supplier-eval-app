@@ -2,10 +2,17 @@ html {
   height: 100%;
 }
 
+/* overflow-x alone makes the browser compute overflow-y: auto too (CSS
+   spec — a non-"visible" value on one axis forces the other off
+   "visible"), so without the explicit overflow-y below, both html AND
+   body become independent scroll containers. That breaks position:sticky
+   site-wide — it sticks relative to whichever of the two never actually
+   scrolls, so it just sits static instead of pinning. */
 html,
 body {
   max-width: 100vw;
   overflow-x: hidden;
+  overflow-y: visible;
 }
 
 body {
