@@ -16,16 +16,16 @@ import { Header, useModal, useClickOutside } from "@/components";
 import { PaginationBar } from "@/components/shared/PaginationBar";
 import { authFetch } from "@/utils/api";
 import { isOverdue } from "@/utils/date";
-import { DUE_DATE_SORT_LABEL as SORT_LABEL } from "@/constants";
 import {
   ArrowLeft, RefreshCw, AlertCircle, Search, Upload, Send, Pencil, Trash2, X, Check,
-  ArrowDownUp, MailCheck, Square, CheckSquare, Lock, History, CalendarRange,
-  SlidersHorizontal,
+  MailCheck, Square, CheckSquare, Lock, History, CalendarRange,
+  SlidersHorizontal, ChevronsUpDown,
 } from "lucide-react";
 import AdminUploadModal from "@/components/admin/AdminUploadModal";
 import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter, type DateFilter } from "@/utils/shared/dateFilter";
-import { SESSION_STATUS_LABELS, SESSION_STATUS_COLORS, getDisplayStatus } from "@/utils/shared/statusLabels";
+import { SESSION_STATUS_LABELS, SESSION_STATUS_COLORS, getDisplayStatus, type SessionStatus } from "@/utils/shared/statusLabels";
 import { FilterChips, toggleInSet } from "@/components/shared/FilterChips";
+import { SortableTh, nextSort, type SortState } from "@/components/shared/SortableTh";
 
 const TASK_STATUS_COLORS: Record<string, { bg: string; color: string; label: string }> = {
   pending:   { bg: "#fff8e1", color: "#f57f17", label: "รอประเมิน" },
@@ -65,6 +65,85 @@ interface Employee {
   isActive?: boolean;
 }
 
+type TaskSortKey = "evalType" | "createdAt" | "dueDate" | "status" | "sessionStatus" | "lastEmail";
+
+// "Email ล่าสุด" shows whichever of these is present, in this priority
+// order (thankyou implies a reminder and invitation already happened) —
+// sort by that same value so the column order matches what's displayed.
+function lastEmailAt(t: Task): string | null {
+  return t.thankyouSentAt || t.reminderSentAt || t.invitationSentAt || null;
+}
+
+// Plain alphabetical order on the raw enum ("completed"/"overdue"/"pending")
+// put completed first for an ascending sort, which isn't what anyone reading
+// the table wants — urgency order (overdue first) is what "ascending" should
+// mean here instead.
+const TASK_STATUS_RANK: Record<string, number> = { overdue: 0, pending: 1, completed: 2 };
+
+// Base urgency order for the "สถานะรวม" (session) column — "overdue" isn't
+// a raw DB value there either (see getDisplayStatus in statusLabels.ts), so
+// this ranks the *displayed* status, matching what the badge actually
+// shows. Clicking the header doesn't just flip asc/desc on this fixed
+// order though — it rotates which status sits on top (see statusFocus
+// below), since "put overdue on top" and "put returned on top" are both
+// things worth jumping straight to, not just two ends of one sort.
+const SESSION_STATUS_ORDER: SessionStatus[] = ["overdue", "returned", "in_progress", "pending_review", "pending", "completed"];
+
+function rotatedFrom(focus: number): SessionStatus[] {
+  const rotated = [...SESSION_STATUS_ORDER];
+  const [picked] = rotated.splice(focus, 1);
+  rotated.unshift(picked);
+  return rotated;
+}
+
+function compareTasks(a: Task, b: Task, key: TaskSortKey, sessionStatusRank: Record<string, number>): number {
+  switch (key) {
+    case "evalType":      return (a.evalType || "").localeCompare(b.evalType || "");
+    case "createdAt":     return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+    case "dueDate":       return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+    case "status":        return (TASK_STATUS_RANK[a.status] ?? 99) - (TASK_STATUS_RANK[b.status] ?? 99);
+    case "sessionStatus": {
+      const da = getDisplayStatus(a.sessionStatus, a.dueDate);
+      const db = getDisplayStatus(b.sessionStatus, b.dueDate);
+      return (sessionStatusRank[da] ?? 99) - (sessionStatusRank[db] ?? 99);
+    }
+    case "lastEmail": {
+      const av = lastEmailAt(a), bv = lastEmailAt(b);
+      const at = av ? new Date(av).getTime() : -Infinity;
+      const bt = bv ? new Date(bv).getTime() : -Infinity;
+      return at - bt;
+    }
+  }
+}
+
+// Same hover/active treatment as SortableTh, but "สถานะรวม" cycles a
+// pinned status instead of toggling asc/desc, so it can't just reuse that
+// component's onSort contract — this is its own tiny header cell instead.
+// (A hook can't live inline inside the .map() below, hence its own
+// component rather than JSX built directly in the loop body.)
+function SessionStatusTh({ active, onClick }: { active: boolean; onClick: () => void }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <th
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      title="คลิกเพื่อเลื่อนสถานะที่ต้องการดูก่อนขึ้นบนสุด"
+      style={{
+        whiteSpace: "nowrap", cursor: "pointer", userSelect: "none",
+        background: active ? "rgba(0,0,0,0.06)" : hovered ? "rgba(0,0,0,0.04)" : "transparent",
+        fontWeight: active ? 800 : undefined,
+        transition: "background 0.12s",
+      }}
+    >
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+        สถานะรวม
+        <ChevronsUpDown size={12} style={{ opacity: active ? 0.8 : hovered ? 0.7 : 0.35, flexShrink: 0 }} />
+      </span>
+    </th>
+  );
+}
+
 export default function TasksPanel({ embedded = false }: { embedded?: boolean }) {
   const router = useRouter();
   const onBack = () => router.push("/portal");
@@ -85,7 +164,26 @@ export default function TasksPanel({ embedded = false }: { embedded?: boolean })
   const [search,          setSearch]          = useState("");
   const [dateFrom,        setDateFrom]        = useState("");
   const [dateTo,          setDateTo]          = useState("");
-  const [sortDir,         setSortDir]         = useState<"asc" | "desc">("asc");
+  const [taskSort,        setTaskSort]        = useState<SortState<TaskSortKey>>({ key: "dueDate", dir: "asc" });
+  const [statusFocus,     setStatusFocus]     = useState(0); // index into SESSION_STATUS_ORDER pinned to top of "สถานะรวม"
+  const onTaskSort = (key: TaskSortKey) => setTaskSort(s => nextSort(s, key));
+  // "สถานะรวม" doesn't toggle asc/desc like the other columns — each click
+  // rotates which status jumps to the top (overdue, then returned, then...),
+  // which is more useful than just flipping one fixed priority order.
+  const onSessionStatusHeaderClick = () => {
+    if (taskSort.key !== "sessionStatus") {
+      setTaskSort({ key: "sessionStatus", dir: "asc" });
+      setStatusFocus(0);
+    } else {
+      setStatusFocus(f => (f + 1) % SESSION_STATUS_ORDER.length);
+    }
+  };
+  const sessionStatusOrder = useMemo(() => rotatedFrom(statusFocus), [statusFocus]);
+  const sessionStatusRank = useMemo(() => {
+    const m: Record<string, number> = {};
+    sessionStatusOrder.forEach((s, i) => { m[s] = i; });
+    return m;
+  }, [sessionStatusOrder]);
   const [page,            setPage]            = useState(1);
   const [editingId,       setEditingId]       = useState<string | null>(null);
   const [editDraft,       setEditDraft]       = useState({ assignedEmail: "", dueDate: "" });
@@ -130,7 +228,7 @@ export default function TasksPanel({ embedded = false }: { embedded?: boolean })
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   // Filters changes invalidate the current page + selection
-  useEffect(() => { setPage(1); setSelected(new Set()); }, [statusFilter, typeFilter, search, dateFrom, dateTo, dateFilter, sortDir]);
+  useEffect(() => { setPage(1); setSelected(new Set()); }, [statusFilter, typeFilter, search, dateFrom, dateTo, dateFilter, taskSort]);
 
   // Close the filter popover when clicking outside of it
   useClickOutside(filterPanelRef, filterOpen, () => setFilterOpen(false));
@@ -327,9 +425,9 @@ export default function TasksPanel({ embedded = false }: { embedded?: boolean })
     return matchStatus && matchType && matchDate && matchUploadDate && matchSearch;
   });
   const filtered = [...filteredUnsorted].sort((a, b) => {
-    const da = new Date(a.dueDate).getTime();
-    const db = new Date(b.dueDate).getTime();
-    if (da !== db) return sortDir === "asc" ? da - db : db - da;
+    const cmp = compareTasks(a, b, taskSort.key ?? "dueDate", sessionStatusRank);
+    const primary = taskSort.dir === "asc" ? cmp : -cmp;
+    if (primary !== 0) return primary;
     return (a.supplierName || "").localeCompare(b.supplierName || "", "th");
   });
 
@@ -562,16 +660,6 @@ export default function TasksPanel({ embedded = false }: { embedded?: boolean })
                 <DateFilterBar filter={dateFilter} onChange={setDateFilter} label="วันที่อัพโหลด" />
               </div>
 
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>เรียงลำดับ</div>
-                <button
-                  onClick={() => setSortDir(d => d === "asc" ? "desc" : "asc")}
-                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 20, border: "1px solid #ddd", background: "#fff", color: "#555", fontFamily: "Sarabun, sans-serif", fontSize: 12, cursor: "pointer" }}
-                >
-                  <ArrowDownUp size={13} /> {SORT_LABEL[sortDir]}
-                </button>
-              </div>
-
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #eee", paddingTop: 12 }}>
                 <button
                   onClick={resetAllFilters}
@@ -680,9 +768,21 @@ export default function TasksPanel({ embedded = false }: { embedded?: boolean })
                         : <Square size={15} color="#aaa" />}
                     </button>
                   </th>
-                  {["Supplier","ประเภท","อัพโหลดเมื่อ","Role","ผู้รับผิดชอบ","ครบกำหนด","สถานะ","สถานะรวม","Email ล่าสุด","จัดการ"].map(h => (
-                    <th key={h} style={{ whiteSpace: "nowrap" }}>{h}</th>
-                  ))}
+                  {([
+                    { h: "Supplier", key: null }, { h: "ประเภท", key: "evalType" }, { h: "อัพโหลดเมื่อ", key: "createdAt" },
+                    { h: "Role", key: null }, { h: "ผู้รับผิดชอบ", key: null }, { h: "ครบกำหนด", key: "dueDate" },
+                    { h: "สถานะ", key: "status" }, { h: "สถานะรวม", key: "sessionStatus" }, { h: "Email ล่าสุด", key: "lastEmail" },
+                    { h: "จัดการ", key: null },
+                  ] as { h: string; key: TaskSortKey | null }[]).map(({ h, key }) => {
+                    if (key === "sessionStatus") {
+                      return <SessionStatusTh key={h} active={taskSort.key === "sessionStatus"} onClick={onSessionStatusHeaderClick} />;
+                    }
+                    return key ? (
+                      <SortableTh key={h} label={h} sortKey={key} sort={taskSort} onSort={onTaskSort} style={{ whiteSpace: "nowrap" }} />
+                    ) : (
+                      <th key={h} style={{ whiteSpace: "nowrap" }}>{h}</th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>

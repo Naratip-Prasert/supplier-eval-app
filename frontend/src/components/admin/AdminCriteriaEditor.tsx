@@ -632,9 +632,9 @@ function deriveEsgGroups(
 }
 
 // ── SectionCard ───────────────────────────────────────────────
-function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, esgFilter, hideWeights, effectiveEditable, onDelete }: {
+function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, esgFilter, hideWeights, hideItemWeights, effectiveEditable, onDelete }: {
   section: CritSection; idx: number; onUpdate: OnUpdate; onOpenLevels: (item: CritItem) => void;
-  saving: SavingState; disabled?: boolean; esgFilter?: string; hideWeights?: boolean;
+  saving: SavingState; disabled?: boolean; esgFilter?: string; hideWeights?: boolean; hideItemWeights?: boolean;
   effectiveEditable?: boolean; onDelete?: (id: string) => void;
 }) {
   const [expanded,      setExpanded]      = useState(false);
@@ -741,10 +741,11 @@ function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, e
       ? computeEsgEffectiveWeights(section.items, section.totalWeight, groupWeights, esgFilter)
       : null;
 
-  // "น้ำหนัก" ถูกซ่อนใน AddItemRow อยู่แล้วเมื่อ hideWeights=true (ดู colSpan
-  // ด้านล่าง) — thead/ItemRow ต้องซ่อนคอลัมน์เดียวกันด้วย ไม่งั้นหัวตาราง
-  // กับแถวข้อมูลจะมีจำนวนคอลัมน์ไม่ตรงกัน (เช่นตอนแสดง Function module)
-  const colCount = hideWeights ? 5 : 6;
+  // hideWeights ซ่อนแค่ช่อง "แก้ไขน้ำหนัก" รวมของทั้งหัวข้อ (Function ยังคุม
+  // ผ่านช่อง "แก้ไขน้ำหนักรวม" ส่วนกลางแทน) — hideItemWeights แยกต่างหาก
+  // ควบคุมคอลัมน์น้ำหนักรายรายการ ต้องซ่อนคู่กับ AddItemRow ไม่งั้นหัวตาราง
+  // กับแถวข้อมูลจะมีจำนวนคอลัมน์ไม่ตรงกัน
+  const colCount = hideItemWeights ? 5 : 6;
 
   return (
     <div style={{
@@ -937,7 +938,7 @@ function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, e
               <tr style={{ background: "#f0f7f0" }}>
                 <th style={TH}>รหัส</th>
                 <th style={{ ...TH, textAlign: "left" }}>ชื่อหัวข้อ (คลิกเพื่อแก้ไข)</th>
-                {!hideWeights && (
+                {!hideItemWeights && (
                   <th style={TH}>
                     น้ำหนัก{effectiveWeights && !effectiveEditable && !isEsgSection ? " (คำนวณ)" : ""}
                   </th>
@@ -955,7 +956,7 @@ function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, e
                     onUpdate={onUpdate} onOpenLevels={onOpenLevels}
                     saving={saving} disabled={disabled}
                     effectiveWeight={effectiveWeights?.[item.id]}
-                    hideWeight={hideWeights}
+                    hideWeight={hideItemWeights}
                     editableEffective={effectiveEditable}
                     esgEditable={isEsgSection}
                   />
@@ -987,7 +988,13 @@ function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, e
               }}
             >+ เพิ่ม item</button>
           </div>
-          {!effectiveWeights && activeItems.length > 0 && (() => {
+          {/* computeEffectiveWeights (Function's branch) never returns null —
+              it falls back to an equal split instead — so the plain
+              `!effectiveWeights` check below never fires for Function and the
+              mismatch warning was unreachable there. effectiveEditable is
+              only ever true for Function, so this restores the same warning
+              Core already gets without touching ESG's own group-weight check. */}
+          {(!effectiveWeights || effectiveEditable) && activeItems.length > 0 && (() => {
             const sum = activeItems.reduce((s, it) => s + (it.defaultWeight ?? 0), 0);
             const diff = Math.abs(sum - (section.totalWeight ?? 0));
             if (diff < 0.01) return null;

@@ -215,7 +215,10 @@ export function getDisplayCriteriaFrom(
   let functionSection: CriteriaSection;
   if (funcOverride?.items && moduleCode && moduleCode !== "custom") {
     const mod = FUNCTION_MODULES[moduleCode];
-    functionSection = { section: mod?.label ?? funcOverride.nameTh ?? moduleCode.toUpperCase(), weight: funcOverride.totalWeight ?? funcW, items: funcOverride.items };
+    // Live DB name (Parameter page) must win over the hardcoded m1-m7 label —
+    // it used to be the other way around, so renaming a module on the
+    // Parameter page never updated this section's header text on the form.
+    functionSection = { section: funcOverride.nameTh ?? mod?.label ?? moduleCode.toUpperCase(), weight: funcOverride.totalWeight ?? funcW, items: funcOverride.items };
   } else {
     functionSection = buildFunctionSection(moduleCode, customItems, funcW)
       ?? { section: "Function", weight: funcW, items: [] };
@@ -247,7 +250,10 @@ export function getScoredCriteriaFrom(
   let functionSection: CriteriaSection;
   if (funcOverride?.items && moduleCode && moduleCode !== "custom") {
     const mod = FUNCTION_MODULES[moduleCode];
-    functionSection = { section: mod?.label ?? funcOverride.nameTh ?? moduleCode.toUpperCase(), weight: funcOverride.totalWeight ?? funcW, items: funcOverride.items };
+    // Live DB name (Parameter page) must win over the hardcoded m1-m7 label —
+    // it used to be the other way around, so renaming a module on the
+    // Parameter page never updated this section's header text on the form.
+    functionSection = { section: funcOverride.nameTh ?? mod?.label ?? moduleCode.toUpperCase(), weight: funcOverride.totalWeight ?? funcW, items: funcOverride.items };
   } else {
     // Prefer module-specific section (old saved results); fall back to combined
     functionSection = buildFunctionSection(moduleCode, customItems, funcW)

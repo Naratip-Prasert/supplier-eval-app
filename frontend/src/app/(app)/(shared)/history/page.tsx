@@ -13,6 +13,7 @@ import {
   ClipboardList, Loader2, AlertCircle, ChevronRight,
   Search, SlidersHorizontal, X,
 } from "lucide-react";
+import { SortableTh, nextSort, type SortState } from "@/components/shared/SortableTh";
 
 // bg/text/bar เดิมใช้สีที่ไม่ตรงกับเกรดจริงเลย (เขียว/ฟ้า/เหลือง/แดง/ชมพู
 // ตามธีม Tailwind ทั่วไป) ทำให้ "เกรด A" ในหน้านี้กับหน้า Result เป็นคนละสี
@@ -42,6 +43,22 @@ interface EvalRecord {
   evaluatorName?: string;
   evaluatorPicture?: string | null;
   role?: string;
+}
+
+type HistSortKey = "period" | "evaluator" | "submittedAt" | "grade" | "score";
+
+function compareHistRecords(a: EvalRecord, b: EvalRecord, key: HistSortKey): number {
+  switch (key) {
+    case "period":    return (a.period || "").localeCompare(b.period || "", "th");
+    case "evaluator": return (a.evaluatorName || "").localeCompare(b.evaluatorName || "", "th");
+    case "submittedAt": return new Date(a.submittedAt || 0).getTime() - new Date(b.submittedAt || 0).getTime();
+    case "grade":     return (a.grade || "￿").localeCompare(b.grade || "￿");
+    case "score": {
+      const av = a.totalScore != null ? Number(a.totalScore) : -Infinity;
+      const bv = b.totalScore != null ? Number(b.totalScore) : -Infinity;
+      return av - bv;
+    }
+  }
 }
 
 // Date-only, no time — used for the dedicated "วันที่" column/badge. Don't
@@ -108,6 +125,8 @@ export default function HistoryPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo,   setDateTo]   = useState("");
   const [showFilter,  setShowFilter]  = useState(false);
+  const [sort, setSort] = useState<SortState<HistSortKey>>({ key: null, dir: "asc" });
+  const onSort = (key: HistSortKey) => setSort(s => nextSort(s, key));
 
   const isAdmin  = authUser?.role === "ADMIN";
   const endpoint = isAdmin ? "/api/evaluations/all" : "/api/evaluations/my";
@@ -143,6 +162,13 @@ export default function HistoryPage() {
       return true;
     });
   }, [records, search, filterEval, filterGrade, filterRole, filterPeriod, dateFrom, dateTo]);
+
+  const sorted = sort.key
+    ? [...filtered].sort((a, b) => {
+        const cmp = compareHistRecords(a, b, sort.key as HistSortKey);
+        return sort.dir === "asc" ? cmp : -cmp;
+      })
+    : filtered;
 
   // ── Stats ─────────────────────────────────────────────────
   const gradeCounts = useMemo(() => {
@@ -427,16 +453,16 @@ export default function HistoryPage() {
             }}>
               <div />
               <div>Supplier</div>
-              <div>รอบ / ประเภท</div>
-              {isAdmin && <div>ผู้ประเมิน</div>}
-              <div>วันที่</div>
-              <div style={{ textAlign: "center" }}>เกรด</div>
-              <div style={{ textAlign: "right" }}>คะแนน</div>
+              <SortableTh as="div" label="รอบ / ประเภท" sortKey="period" sort={sort} onSort={onSort} />
+              {isAdmin && <SortableTh as="div" label="ผู้ประเมิน" sortKey="evaluator" sort={sort} onSort={onSort} />}
+              <SortableTh as="div" label="วันที่" sortKey="submittedAt" sort={sort} onSort={onSort} />
+              <SortableTh as="div" label="เกรด" sortKey="grade" sort={sort} onSort={onSort} align="center" />
+              <SortableTh as="div" label="คะแนน" sortKey="score" sort={sort} onSort={onSort} align="right" />
               <div />
             </div>
 
             {/* Rows */}
-            {filtered.map((r, idx) => {
+            {sorted.map((r, idx) => {
               const gc = GRADE_COLOR[r.grade ?? ""] ?? GRADE_COLOR.F;
               const score = r.totalScore != null ? Number(r.totalScore).toFixed(1) : "—";
               const clickable = true;
@@ -561,7 +587,7 @@ export default function HistoryPage() {
             background: "#fff", borderRadius: 12, border: "1px solid #e5e7eb",
             boxShadow: "0 1px 6px rgba(0,0,0,0.05)", overflow: "hidden",
           }}>
-            {filtered.map((r, idx) => {
+            {sorted.map((r, idx) => {
               const gc = GRADE_COLOR[r.grade ?? ""] ?? GRADE_COLOR.F;
               const score = r.totalScore != null ? Number(r.totalScore).toFixed(1) : "—";
               const clickable = true;

@@ -18,6 +18,7 @@ import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter, type DateFilter 
 import { SESSION_STATUS_LABELS, SESSION_STATUS_COLORS, getDisplayStatus } from "@/utils/shared/statusLabels";
 import { TimelineStepper } from "@/components/shared/TimelineStepper";
 import { FilterChips, toggleInSet } from "@/components/shared/FilterChips";
+import { SortableTh, nextSort, type SortState } from "@/components/shared/SortableTh";
 import {
   Users, ClipboardList, Upload,
   ArrowLeft, Search, RefreshCw, X,
@@ -93,6 +94,23 @@ interface SessionRow {
   createdAt?: string;
   completedAt?: string | null;
   evaluations?: { employeeId: string; role: string; fullName: string; profilePicture?: string | null; totalScore?: number | string | null }[];
+}
+
+type SessionSortKey = "evalType" | "period" | "completedAt" | "score" | "grade" | "round";
+
+function compareSessions(a: SessionRow, b: SessionRow, key: SessionSortKey, roundIndexBySession: Record<string, number>): number {
+  switch (key) {
+    case "evalType":    return (a.evalType || "").localeCompare(b.evalType || "");
+    case "period":      return (a.period || "").localeCompare(b.period || "");
+    case "completedAt": return new Date(a.completedAt ?? a.createdAt ?? 0).getTime() - new Date(b.completedAt ?? b.createdAt ?? 0).getTime();
+    case "score": {
+      const av = a.finalScore != null ? parseFloat(String(a.finalScore)) : -Infinity;
+      const bv = b.finalScore != null ? parseFloat(String(b.finalScore)) : -Infinity;
+      return av - bv;
+    }
+    case "grade": return (a.finalGrade || "￿").localeCompare(b.finalGrade || "￿");
+    case "round": return (roundIndexBySession[a.sessionId] ?? 0) - (roundIndexBySession[b.sessionId] ?? 0);
+  }
 }
 
 // ── AdminPage ─────────────────────────────────────────────────
@@ -629,7 +647,9 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }: {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(initialSessionId ?? null);
   const [filterOpen,        setFilterOpen]        = useState(false);
   const [page,              setPage]              = useState(1);
+  const [sort,              setSort]              = useState<SortState<SessionSortKey>>({ key: "completedAt", dir: "desc" });
   const filterPanelRef = useRef<HTMLDivElement>(null);
+  const onSort = (key: SessionSortKey) => setSort(s => nextSort(s, key));
 
   const approvedSessions = sessions.filter(s => s.status === "completed");
 
@@ -688,9 +708,16 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }: {
     setDateFilter(DEFAULT_DATE_FILTER);
   }
 
-  const totalPages  = Math.max(1, Math.ceil(filtered.length / SESSIONS_PAGE_SIZE));
+  const sorted = sort.key
+    ? [...filtered].sort((a, b) => {
+        const cmp = compareSessions(a, b, sort.key as SessionSortKey, roundIndexBySession);
+        return sort.dir === "asc" ? cmp : -cmp;
+      })
+    : filtered;
+
+  const totalPages  = Math.max(1, Math.ceil(sorted.length / SESSIONS_PAGE_SIZE));
   const pageClamped = Math.min(page, totalPages);
-  const pageRows    = filtered.slice((pageClamped - 1) * SESSIONS_PAGE_SIZE, pageClamped * SESSIONS_PAGE_SIZE);
+  const pageRows    = sorted.slice((pageClamped - 1) * SESSIONS_PAGE_SIZE, pageClamped * SESSIONS_PAGE_SIZE);
 
   return (
     <div>
@@ -801,9 +828,15 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }: {
         <table className="admin-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
             <tr>
-              {["Supplier", "ประเภทการประเมิน", "Period", "สถานะ", "เสร็จสิ้นเมื่อ", "คะแนนรวม", "เกรด", "ผู้ประเมิน", "ครั้งที่ประเมิน"].map(h => (
-                <th key={h}>{h}</th>
-              ))}
+              <th>Supplier</th>
+              <SortableTh label="ประเภทการประเมิน" sortKey="evalType" sort={sort} onSort={onSort} />
+              <SortableTh label="Period" sortKey="period" sort={sort} onSort={onSort} />
+              <th>สถานะ</th>
+              <SortableTh label="เสร็จสิ้นเมื่อ" sortKey="completedAt" sort={sort} onSort={onSort} />
+              <SortableTh label="คะแนนรวม" sortKey="score" sort={sort} onSort={onSort} />
+              <SortableTh label="เกรด" sortKey="grade" sort={sort} onSort={onSort} />
+              <th>ผู้ประเมิน</th>
+              <SortableTh label="ครั้งที่ประเมิน" sortKey="round" sort={sort} onSort={onSort} />
             </tr>
           </thead>
           <tbody>

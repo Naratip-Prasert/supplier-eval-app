@@ -7,6 +7,7 @@ import { Header, useModal } from "@/components";
 import { useAuth } from "@/context/AuthContext";
 import { authFetch } from "@/utils/api";
 import { GRADE_COLOR } from "@/styles/theme";
+import { SortableTh, nextSort, type SortState } from "@/components/shared/SortableTh";
 
 const EVAL_TYPE_LABEL: Record<string, string> = {
   pre_eval:     "Pre-Evaluation",
@@ -73,6 +74,23 @@ interface HistoryGroup {
   all: HistoryRow[];
 }
 
+type HistorySortKey = "evalType" | "score" | "grade" | "status" | "reviewedAt";
+
+function compareHistoryGroups(a: HistoryGroup, b: HistoryGroup, key: HistorySortKey): number {
+  const ra = a.latest, rb = b.latest;
+  switch (key) {
+    case "evalType":   return (ra.evalType || "").localeCompare(rb.evalType || "");
+    case "score": {
+      const av = ra.finalScore != null ? parseFloat(String(ra.finalScore)) : -Infinity;
+      const bv = rb.finalScore != null ? parseFloat(String(rb.finalScore)) : -Infinity;
+      return av - bv;
+    }
+    case "grade":      return (ra.finalGrade || "￿").localeCompare(rb.finalGrade || "￿");
+    case "status":     return (ra.reviewStatus || "").localeCompare(rb.reviewStatus || "");
+    case "reviewedAt": return new Date(ra.reviewedAt || 0).getTime() - new Date(rb.reviewedAt || 0).getTime();
+  }
+}
+
 interface NoteModalState {
   reviewId: string;
   supplierName: string;
@@ -107,6 +125,8 @@ export default function SupervisorPage() {
   const [histDateTo,      setHistDateTo]      = useState("");
   const [showHistFilter,  setShowHistFilter]  = useState(false);
   const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
+  const [histSort, setHistSort] = useState<SortState<HistorySortKey>>({ key: "reviewedAt", dir: "desc" });
+  const onHistSort = (key: HistorySortKey) => setHistSort(s => nextSort(s, key));
 
   // ── Full read-only history detail view ("เปิดหน้าอนุมัติเต็ม") ──────
   const [viewGroup,   setViewGroup]   = useState<HistoryGroup | null>(null);
@@ -183,6 +203,13 @@ export default function SupervisorPage() {
       return true;
     });
   }, [allGroupedHistory, histStatus, histEvalType, histDateFrom, histDateTo, histSearch]);
+
+  const sortedHistory = histSort.key
+    ? [...groupedHistory].sort((a, b) => {
+        const cmp = compareHistoryGroups(a, b, histSort.key as HistorySortKey);
+        return histSort.dir === "asc" ? cmp : -cmp;
+      })
+    : groupedHistory;
 
   const hasHistFilter = histStatus !== "all" || histEvalType !== "all" || !!histDateFrom || !!histDateTo || !!histSearch.trim();
   const clearHistFilters = () => {
@@ -862,7 +889,7 @@ export default function SupervisorPage() {
             }}>
               ยังไม่มีประวัติการอนุมัติ
             </div>
-          ) : groupedHistory.length === 0 ? (
+          ) : sortedHistory.length === 0 ? (
             <div style={{
               textAlign: "center", padding: "40px 20px", color: "#94a3b8",
               background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, fontSize: 13.5,
@@ -874,7 +901,23 @@ export default function SupervisorPage() {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: "#f8fafc" }}>
-                    {["Supplier","ประเภท","คะแนน","เกรด","ผล","ผู้อนุมัติ","วันที่","หมายเหตุ",""].map(h => (
+                    {(() => {
+                      const thStyle = {
+                        padding: "11px 16px", borderBottom: "1px solid #e2e8f0",
+                        fontWeight: 700, fontSize: 11.5, textTransform: "uppercase" as const, letterSpacing: 0.3,
+                        color: "#64748b", whiteSpace: "nowrap" as const,
+                      };
+                      const cols: { h: string; key: HistorySortKey | null }[] = [
+                        { h: "Supplier", key: null }, { h: "ประเภท", key: "evalType" }, { h: "คะแนน", key: "score" },
+                        { h: "เกรด", key: "grade" }, { h: "ผล", key: "status" }, { h: "ผู้อนุมัติ", key: null }, { h: "วันที่", key: "reviewedAt" },
+                      ];
+                      return cols.map(({ h, key }) => key ? (
+                        <SortableTh key={h} label={h} sortKey={key} sort={histSort} onSort={onHistSort} style={thStyle} />
+                      ) : (
+                        <th key={h} style={{ ...thStyle, textAlign: "left" }}>{h}</th>
+                      ));
+                    })()}
+                    {["หมายเหตุ",""].map(h => (
                       <th key={h} style={{
                         padding: "11px 16px", textAlign: "left", borderBottom: "1px solid #e2e8f0",
                         fontWeight: 700, fontSize: 11.5, textTransform: "uppercase", letterSpacing: 0.3,
@@ -884,7 +927,7 @@ export default function SupervisorPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {groupedHistory.map((group) => {
+                  {sortedHistory.map((group) => {
                     const row = group.latest;
                     const sessionId = row.sessionId;
                     const hasPrior = group.prior.length > 0;

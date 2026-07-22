@@ -6,7 +6,7 @@
 "use client";
 
 import { useState, useEffect, useRef, type ReactNode } from "react";
-import { Header, GreenButton, useModal } from "../index";
+import { Header, GreenButton, useModal, useClickOutside } from "../index";
 import {
   getCriteria, isPostEvalType, LEVEL_COLORS, GRADE_MAP, GRADE_GUIDE, getGrade,
   findEsgSectionIndex, splitEsgGroups, getDisplayCriteriaFrom, FUNCTION_MODULES, functionSectionWeightFrom,
@@ -16,7 +16,7 @@ import { useCriteriaOverrides, useFunctionOverrides } from "../../context/Criter
 import { applyOverrides } from "../../utils/shared/criteriaOverlay";
 import type { FunctionOverrideMap } from "../../utils/shared/criteriaOverlay";
 import { r2, getAhpMain, getAhpLocal, assignEsgSubGroupWeights, initWeights } from "../../utils/shared/evalWeightMath";
-import { AlertTriangle, FileText, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, FileText, Plus, Trash2, ChevronDown } from "lucide-react";
 import type { AuthUser } from "../../context/AuthContext";
 import type { EvalFormData, EvalResult } from "../../context/EvalFlowContext";
 
@@ -965,8 +965,11 @@ const MODULE_LABELS: Record<string, string> = {
 // — building this list from the hardcoded MODULE_LABELS alone meant a new
 // module never appeared as a selectable pill here even though it existed
 // in the DB and Parameter page. funcMap keys are the source of truth for
-// which modules currently exist; MODULE_LABELS only supplies friendlier
-// names for the known ones. "custom" is always appended last.
+// which modules currently exist AND for their current name — MODULE_LABELS
+// is only a fallback for the brief window before funcMap has loaded (it
+// used to take priority over the live DB name, so a module renamed on the
+// Parameter page still showed its old hardcoded label here). "custom" is
+// always appended last.
 function buildModuleOptions(funcMap: FunctionOverrideMap | null): [string, string][] {
   const keys = new Set(Object.keys(MODULE_LABELS));
   if (funcMap) Object.keys(funcMap).forEach((k) => keys.add(k));
@@ -975,36 +978,81 @@ function buildModuleOptions(funcMap: FunctionOverrideMap | null): [string, strin
     const nb = parseInt(b.replace(/\D/g, ""), 10) || 0;
     return na - nb;
   });
-  const options: [string, string][] = sorted.map((k) => [k, MODULE_LABELS[k] ?? (funcMap?.[k]?.nameTh || k.toUpperCase())]);
+  const options: [string, string][] = sorted.map((k) => [k, funcMap?.[k]?.nameTh || MODULE_LABELS[k] || k.toUpperCase()]);
   options.push(["custom", "อื่นๆ (กำหนดเอง)"]);
   return options;
 }
 
+// Was a wrapping wall of pills — fine for 8 choices, unreadable once the
+// Parameter page grew Function to 16-17 modules (long Thai names wrapping
+// across several rows with no clear scan order). A closed-by-default
+// dropdown keeps the form compact, and each option is a full-width row
+// (bigger, easier click target than a pill) once open.
 function ModuleSelector({ value, onChange, funcMap }: {
   value: string | null; onChange: (v: string) => void; funcMap: FunctionOverrideMap | null;
 }) {
-  const pill = (active: boolean): React.CSSProperties => ({
-    padding: "7px 14px", borderRadius: 20, fontSize: 12, fontWeight: 700,
-    cursor: "pointer", border: active ? "1.5px solid #6b3fa0" : "1.5px solid #d8cce8",
-    background: active ? "#6b3fa0" : "#fff", color: active ? "#fff" : "#4a3a60",
-    whiteSpace: "nowrap",
-  });
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  useClickOutside(wrapRef, open, () => setOpen(false));
+  const options = buildModuleOptions(funcMap);
+  const current = options.find(([code]) => code === value);
+
   return (
-    <div style={{
+    <div ref={wrapRef} style={{
       gridColumn: "1 / -1", background: "#f8f4ff", borderTop: "1.5px solid #d8cce8",
-      borderBottom: "1.5px solid #d8cce8", padding: "12px 18px",
-      display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+      borderBottom: "1.5px solid #d8cce8", padding: "12px 18px", position: "relative",
     }}>
-      <span style={{ fontSize: 13, fontWeight: 700, color: "#5b2d90", width: "100%" }}>
+      <span style={{ fontSize: 13, fontWeight: 700, color: "#5b2d90", display: "block", marginBottom: 8 }}>
         เลือกโมดูลที่จะประเมิน (Part 2 — Function Module):
       </span>
-      {buildModuleOptions(funcMap).map(([code, label]) => (
-        <button key={code} type="button" style={pill(value === code)} onClick={() => onChange(code)}>
-          {label}
-        </button>
-      ))}
+
+      <button type="button" onClick={() => setOpen(o => !o)}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+          width: "100%", maxWidth: 480, padding: "10px 14px", borderRadius: 10,
+          border: `1.5px solid ${open ? "#6b3fa0" : "#d8cce8"}`, background: "#fff",
+          cursor: "pointer", textAlign: "left", fontFamily: "inherit",
+        }}
+      >
+        <span style={{ fontSize: 13, fontWeight: 700, color: current ? "#3d2463" : "#9333ea" }}>
+          {current ? current[1] : "— ยังไม่ได้เลือก —"}
+        </span>
+        <ChevronDown size={16} style={{ color: "#6b3fa0", transform: open ? "rotate(180deg)" : "none", transition: "transform .15s", flexShrink: 0 }} />
+      </button>
+
+      {open && (
+        <div style={{
+          position: "absolute", top: "100%", left: 18, right: 18, marginTop: 4, zIndex: 20,
+          background: "#fff", border: "1.5px solid #d8cce8", borderRadius: 10,
+          boxShadow: "0 10px 32px rgba(0,0,0,0.14)", maxHeight: 320, overflowY: "auto",
+        }}>
+          {options.map(([code, label]) => {
+            const selected = value === code;
+            return (
+              <button key={code} type="button" onClick={() => { onChange(code); setOpen(false); }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 10, width: "100%",
+                  padding: "10px 14px", border: "none", borderBottom: "1px solid #f1ebfa",
+                  background: selected ? "#f3e8ff" : "#fff", cursor: "pointer",
+                  textAlign: "left", fontFamily: "inherit",
+                }}
+                onMouseEnter={e => { if (!selected) e.currentTarget.style.background = "#faf7ff"; }}
+                onMouseLeave={e => { if (!selected) e.currentTarget.style.background = "#fff"; }}
+              >
+                <span style={{
+                  fontSize: 11, fontWeight: 700, color: selected ? "#fff" : "#6b3fa0",
+                  background: selected ? "#6b3fa0" : "#f1ebfa",
+                  borderRadius: 6, padding: "2px 7px", flexShrink: 0, whiteSpace: "nowrap",
+                }}>{code === "custom" ? "…" : code.toUpperCase()}</span>
+                <span style={{ fontSize: 13, fontWeight: selected ? 700 : 500, color: "#3d2463" }}>{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {!value && (
-        <span style={{ fontSize: 12, color: "#9333ea", width: "100%" }}>
+        <span style={{ fontSize: 12, color: "#9333ea", display: "block", marginTop: 8 }}>
           ⚠ กรุณาเลือกโมดูลก่อนกรอกแบบประเมินส่วนนี้
         </span>
       )}

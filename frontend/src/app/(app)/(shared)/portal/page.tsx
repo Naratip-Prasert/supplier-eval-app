@@ -215,7 +215,6 @@ export default function PortalPage() {
           .portal-sidebar-profile { flex-direction: row !important; text-align: left !important; flex: 1; min-width: 200px; margin-bottom: 0 !important; }
           .portal-sidebar-avatar { margin: 0 12px 0 0 !important; }
           .portal-sidebar-nav { flex-direction: row !important; width: 100%; margin-top: 14px; }
-          .portal-sidebar-spacer { display: none; }
           .portal-sidebar-clock { display: none; }
         }
         .portal-module-grid { grid-template-columns: repeat(3, 1fr); }
@@ -235,9 +234,13 @@ export default function PortalPage() {
         padding: "24px 22px",
       }}>
         {/* Brand */}
-        <div className="portal-sidebar-brand" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 32 }}>
+        <div className="portal-sidebar-brand" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
           <Logo size={30} />
           <span style={{ fontFamily: "monospace", fontWeight: 800, fontSize: 18, letterSpacing: 1.2 }}>SPES</span>
+        </div>
+
+        <div className="portal-sidebar-clock" style={{ marginBottom: 24, paddingBottom: 20, borderBottom: "1px solid rgba(255,255,255,0.15)" }}>
+          <ClockWidget />
         </div>
 
         {/* Profile */}
@@ -303,12 +306,6 @@ export default function PortalPage() {
           >
             <LogOut size={14} /> ออกจากระบบ
           </button>
-        </div>
-
-        <div className="portal-sidebar-spacer" style={{ flex: 1 }} />
-
-        <div className="portal-sidebar-clock" style={{ paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-          <ClockWidget />
         </div>
       </aside>
 
