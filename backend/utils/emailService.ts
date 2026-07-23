@@ -131,6 +131,30 @@ async function sendOverdueEmail(task: TaskEmailInfo, supplier: SupplierEmailInfo
   return send(task.assigned_email, `[SPE] เกินกำหนด: ยังไม่ประเมิน ${supplier.supplier_name}`, html, { taskId: task.id, emailType: 'overdue' });
 }
 
+// ── 3b. Overdue escalation → Supervisor (same 3-day-overdue trigger) ──
+async function sendOverdueEscalationEmail(
+  supervisorEmail: string,
+  supervisorName: string | null | undefined,
+  task: TaskEmailInfo & { role?: string },
+  supplier: SupplierEmailInfo
+) {
+  const dueStr = new Date(task.due_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+  const html = wrap('Escalation: งานประเมินเกินกำหนด', `
+    <p>เรียน <strong>${esc(supervisorName || supervisorEmail)}</strong></p>
+    <p>งานประเมิน Supplier ต่อไปนี้เกินกำหนดมาแล้ว 3 วัน และผู้รับผิดชอบยังไม่ส่งผล:</p>
+    <table style="width:100%;border-collapse:collapse;margin:12px 0">
+      <tr><td style="padding:6px 0;color:#555;width:140px">Supplier</td><td><strong>${esc(supplier.supplier_name)}</strong></td></tr>
+      <tr><td style="padding:6px 0;color:#555">รหัส</td><td>${esc(supplier.vendor_code)}</td></tr>
+      <tr><td style="padding:6px 0;color:#555">ประเภทการประเมิน</td><td>${esc(task.eval_type_label || '')}</td></tr>
+      <tr><td style="padding:6px 0;color:#555">ผู้รับผิดชอบ (${esc(task.role || '')})</td><td>${esc(task.assigned_name || task.assigned_email)}</td></tr>
+      <tr><td style="padding:6px 0;color:#555">ครบกำหนด</td><td><strong style="color:#c62828">${dueStr}</strong></td></tr>
+    </table>
+    <p>กรุณาติดตามหรือดำเนินการตามความเหมาะสม</p>
+    <a href="${FE_URL}" style="display:inline-block;background:#1a6b1a;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">เข้าสู่ระบบ</a>
+  `);
+  return send(supervisorEmail, `[SPE] Escalation: เกินกำหนดประเมิน ${supplier.supplier_name}`, html, { taskId: task.id, emailType: 'overdue_escalation' });
+}
+
 // ── 4. Thank-you (หลัง submit) ────────────────────────────────
 async function sendThankyouEmail(task: TaskEmailInfo, supplier: SupplierEmailInfo) {
   const html = wrap('ขอบคุณสำหรับการประเมิน', `
@@ -201,6 +225,7 @@ module.exports = {
   sendInvitationEmail,
   sendReminderEmail,
   sendOverdueEmail,
+  sendOverdueEscalationEmail,
   sendThankyouEmail,
   sendSupervisorNotifyEmail,
   sendSupervisorResultEmail,

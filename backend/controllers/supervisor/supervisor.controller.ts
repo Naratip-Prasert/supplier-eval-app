@@ -129,6 +129,34 @@ async function history(req: Request, res: Response) {
   }
 }
 
+// ── GET /api/supervisor/overdue-tasks ──────────────────────────
+// Tasks (not-yet-submitted evaluations) 3+ days past due — the same
+// condition cronJobs.ts uses to fire overdue/escalation emails, so this
+// list always matches exactly what supervisors have been (or are about
+// to be) emailed about. Previously this data was only reachable through
+// /api/admin/tasks, which is ADMIN-only — a Supervisor who got an
+// escalation email had nowhere in the app to actually see it.
+async function overdueTasks(req: Request, res: Response) {
+  try {
+    const result = await pool.query(`
+      SELECT et.id, et.role, et.assigned_email AS "assignedEmail", et.assigned_name AS "assignedName",
+             et.due_date AS "dueDate", et.status,
+             s.vendor_code AS "vendorCode", s.supplier_name AS "supplierName",
+             es.id AS "sessionId", es.eval_type AS "evalType", es.period
+        FROM evaluation_tasks et
+        JOIN suppliers s ON s.id = et.supplier_id
+        JOIN evaluation_sessions es ON es.id = et.session_id
+       WHERE et.due_date <= CURRENT_DATE - INTERVAL '3 days'
+         AND et.status IN ('pending', 'overdue')
+       ORDER BY et.due_date ASC
+    `);
+    res.json(result.rows);
+  } catch (err: any) {
+    console.error('GET /api/supervisor/overdue-tasks error:', err);
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
+  }
+}
+
 // ── POST /api/supervisor/sessions/:id/approve ─────────────────
 async function approve(req: Request, res: Response) {
   const { notes } = req.body;
@@ -367,4 +395,4 @@ async function updateReviewNotes(req: Request, res: Response) {
   }
 }
 
-module.exports = { queue, history, approve, returnSession, updateReviewNotes };
+module.exports = { queue, history, overdueTasks, approve, returnSession, updateReviewNotes };

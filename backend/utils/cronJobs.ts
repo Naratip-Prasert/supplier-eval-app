@@ -4,6 +4,7 @@ const pool = require('../db');
 const {
   sendReminderEmail,
   sendOverdueEmail,
+  sendOverdueEscalationEmail,
   sendThankyouEmail,
   sendSupervisorNotifyEmail,
 } = require('./emailService');
@@ -52,17 +53,33 @@ async function sendReminderEmails() {
 }
 
 // ── 2. Overdue: 3 วันหลัง due ────────────────────────────────
+// Also escalates to every active Supervisor at the same 3-day-overdue
+// point (Escalation_Days_After_Overdue in the original spec) — previously
+// this job only re-notified the same evaluator who was already late,
+// with no visibility for anyone who could actually intervene.
 async function sendOverdueEmails() {
   try {
     const result = await pool.query(`
       SELECT et.id, et.assigned_email, et.assigned_name, et.due_date,
              et.role, et.session_id,
-             s.supplier_name, s.vendor_code
+             s.supplier_name, s.vendor_code,
+             es.eval_type
         FROM evaluation_tasks et
         JOIN suppliers s ON s.id = et.supplier_id
+        JOIN evaluation_sessions es ON es.id = et.session_id
        WHERE et.status = 'pending'
          AND et.overdue_sent_at IS NULL
          AND et.due_date <= CURRENT_DATE - INTERVAL '3 days'
+    `);
+
+    if (result.rows.length === 0) return;
+
+    // Broadcast model, same as notifySupervisors() below — supervisors
+    // aren't assigned per-supplier in this schema, so every active
+    // Supervisor gets escalation emails.
+    const supervisors = await pool.query(`
+      SELECT id, full_name, email FROM employees
+       WHERE role = 'SUPERVISOR' AND is_active = TRUE AND email IS NOT NULL
     `);
 
     for (const task of result.rows) {
@@ -74,6 +91,21 @@ async function sendOverdueEmails() {
         console.log(`[cron] overdue sent → ${task.assigned_email} for ${task.supplier_name}`);
       } catch (e: any) {
         console.warn(`[cron] overdue failed for task ${task.id}:`, e.message);
+        continue; // don't escalate a notice that never actually reached the evaluator
+      }
+
+      // Best-effort — a failed escalation send shouldn't undo the
+      // evaluator notification above, so it's a separate try/catch.
+      for (const sup of supervisors.rows) {
+        try {
+          await sendOverdueEscalationEmail(
+            sup.email, sup.full_name,
+            { ...task, eval_type_label: task.eval_type },
+            { supplier_name: task.supplier_name, vendor_code: task.vendor_code }
+          );
+        } catch (e: any) {
+          console.warn(`[cron] overdue escalation failed for supervisor ${sup.email}:`, e.message);
+        }
       }
     }
   } catch (e: any) {

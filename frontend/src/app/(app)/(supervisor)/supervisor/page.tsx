@@ -44,6 +44,20 @@ interface QueueSession {
   evaluations: EvalEntry[];
 }
 
+interface OverdueTask {
+  id: string;
+  role: string;
+  assignedEmail: string;
+  assignedName?: string | null;
+  dueDate: string;
+  status: string;
+  vendorCode: string;
+  supplierName: string;
+  sessionId: string;
+  evalType: string;
+  period?: string | null;
+}
+
 interface HistoryRow {
   sessionId: string;
   reviewId: string;
@@ -102,8 +116,9 @@ export default function SupervisorPage() {
   const router = useRouter();
   const { user: authUser } = useAuth();
   const { showAlert, showConfirm, ModalEl } = useModal();
-  const [tab,     setTab]     = useState<"queue" | "history">("queue");
+  const [tab,     setTab]     = useState<"queue" | "overdue" | "history">("queue");
   const [queue,   setQueue]   = useState<QueueSession[]>([]);
+  const [overdue, setOverdue] = useState<OverdueTask[]>([]);
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
@@ -141,13 +156,15 @@ export default function SupervisorPage() {
   const fetchData = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const [qR, hR] = await Promise.all([
+      const [qR, oR, hR] = await Promise.all([
         authFetch("/api/supervisor/queue"),
+        authFetch("/api/supervisor/overdue-tasks"),
         authFetch("/api/supervisor/history"),
       ]);
-      if (!qR.ok || !hR.ok) throw new Error(`โหลดข้อมูลไม่สำเร็จ (${qR.status}/${hR.status})`);
-      const [qRes, hRes] = await Promise.all([qR.json(), hR.json()]);
+      if (!qR.ok || !oR.ok || !hR.ok) throw new Error(`โหลดข้อมูลไม่สำเร็จ (${qR.status}/${oR.status}/${hR.status})`);
+      const [qRes, oRes, hRes] = await Promise.all([qR.json(), oR.json(), hR.json()]);
       setQueue(Array.isArray(qRes) ? qRes : []);
+      setOverdue(Array.isArray(oRes) ? oRes : []);
       setHistory(Array.isArray(hRes) ? hRes : []);
     } catch (e) {
       console.error("[SupervisorPage] fetchData error:", e);
@@ -633,6 +650,17 @@ export default function SupervisorPage() {
               </span>
             )}
           </button>
+          <button style={tabStyle("overdue")} onClick={() => setTab("overdue")}>
+            งานเกินกำหนด
+            {overdue.length > 0 && (
+              <span style={{
+                background: tab === "overdue" ? "#b91c1c" : "#fca5a5",
+                color: "#fff", borderRadius: 5, padding: "1px 7px", fontSize: 11.5, fontWeight: 700,
+              }}>
+                {overdue.length}
+              </span>
+            )}
+          </button>
           <button style={tabStyle("history")} onClick={() => setTab("history")}>ประวัติการอนุมัติ</button>
         </div>
 
@@ -879,6 +907,67 @@ export default function SupervisorPage() {
                 </div>
               </div>
             ))
+          )
+        ) : tab === "overdue" ? (
+          /* Overdue tasks tab */
+          overdue.length === 0 ? (
+            <div style={{
+              textAlign: "center", padding: "56px 20px", color: "#94a3b8",
+              background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12,
+            }}>
+              <CheckCircle2 size={40} color="#cbd5e1" style={{ marginBottom: 10 }} />
+              <div style={{ fontSize: 13.5 }}>ไม่มีงานที่เกินกำหนด</div>
+            </div>
+          ) : (
+            <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0", overflow: "hidden", boxShadow: "0 1px 2px rgba(15,23,42,0.04)" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: "#f8fafc" }}>
+                    {["Supplier", "ประเภท", "บทบาท", "ผู้รับผิดชอบ", "ครบกำหนด", "เกินมาแล้ว"].map(h => (
+                      <th key={h} style={{
+                        padding: "11px 16px", textAlign: "left", borderBottom: "1px solid #e2e8f0",
+                        fontWeight: 700, fontSize: 11.5, textTransform: "uppercase", letterSpacing: 0.3,
+                        color: "#64748b", whiteSpace: "nowrap",
+                      }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {overdue.map(task => {
+                    const overdueDays = (() => {
+                      const d = daysDiff(task.dueDate);
+                      return d != null ? Math.abs(d) : null;
+                    })();
+                    return (
+                      <tr key={task.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                        <td style={{ padding: "11px 16px", fontWeight: 600, color: "#0f172a" }}>
+                          {task.supplierName}
+                          <div style={{ fontSize: 11, color: "#94a3b8" }}>{task.vendorCode}</div>
+                        </td>
+                        <td style={{ padding: "11px 16px", color: "#475569" }}>{EVAL_TYPE_LABEL[task.evalType] || task.evalType}</td>
+                        <td style={{ padding: "11px 16px", color: "#475569" }}>{task.role === "GCP" ? "Buyer (GCP)" : "Evaluator (USER)"}</td>
+                        <td style={{ padding: "11px 16px", color: "#475569" }}>
+                          {task.assignedName || task.assignedEmail}
+                          <div style={{ fontSize: 11, color: "#94a3b8" }}>{task.assignedEmail}</div>
+                        </td>
+                        <td style={{ padding: "11px 16px", color: "#64748b" }}>
+                          {new Date(task.dueDate).toLocaleDateString("th-TH")}
+                        </td>
+                        <td style={{ padding: "11px 16px" }}>
+                          <span style={{
+                            display: "flex", alignItems: "center", gap: 5, width: "fit-content",
+                            background: "#fef2f2", color: "#b91c1c", border: "1px solid #fecaca",
+                            padding: "3px 10px", borderRadius: 6, fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap",
+                          }}>
+                            <Clock size={12} /> {overdueDays != null ? `${overdueDays} วัน` : "-"}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )
         ) : (
           /* History tab */
