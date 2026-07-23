@@ -968,8 +968,9 @@ const MODULE_LABELS: Record<string, string> = {
 // which modules currently exist AND for their current name — MODULE_LABELS
 // is only a fallback for the brief window before funcMap has loaded (it
 // used to take priority over the live DB name, so a module renamed on the
-// Parameter page still showed its old hardcoded label here). "custom" is
-// always appended last.
+// Parameter page still showed its old hardcoded label here).
+// "custom" (free-form, admin-typed module) is no longer offered — every
+// evaluator now picks from the fixed DB-defined module list instead.
 function buildModuleOptions(funcMap: FunctionOverrideMap | null): [string, string][] {
   const keys = new Set(Object.keys(MODULE_LABELS));
   if (funcMap) Object.keys(funcMap).forEach((k) => keys.add(k));
@@ -978,9 +979,7 @@ function buildModuleOptions(funcMap: FunctionOverrideMap | null): [string, strin
     const nb = parseInt(b.replace(/\D/g, ""), 10) || 0;
     return na - nb;
   });
-  const options: [string, string][] = sorted.map((k) => [k, funcMap?.[k]?.nameTh || MODULE_LABELS[k] || k.toUpperCase()]);
-  options.push(["custom", "อื่นๆ (กำหนดเอง)"]);
-  return options;
+  return sorted.map((k) => [k, funcMap?.[k]?.nameTh || MODULE_LABELS[k] || k.toUpperCase()]);
 }
 
 // Was a wrapping wall of pills — fine for 8 choices, unreadable once the
@@ -1043,7 +1042,7 @@ function ModuleSelector({ value, onChange, funcMap }: {
                   fontSize: 11, fontWeight: 700, color: selected ? "#fff" : "#6b3fa0",
                   background: selected ? "#6b3fa0" : "#f1ebfa",
                   borderRadius: 6, padding: "2px 7px", flexShrink: 0, whiteSpace: "nowrap",
-                }}>{code === "custom" ? "…" : code.toUpperCase()}</span>
+                }}>F{code.replace(/\D/g, "")}</span>
                 <span style={{ fontSize: 13, fontWeight: selected ? 700 : 500, color: "#3d2463" }}>{label}</span>
               </button>
             );
