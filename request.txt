@@ -1,12 +1,14 @@
-อยากปรับโครงสร้างแบบโหดๆเลย คือทางบริษัทอยากให้มันดูง่ายขึ้น แยกไฟล์ โฟลเดอร์ ให้เป็นหมู่ๆ
-เช่น src จะมีทั้งback front
-scr ---->   แยกrole เช่น มี โฟลเดอร์ admin User Gcp ...
-    |
-    |--->   ตาม role ก็จะแยกหน้าที่roleคนนั้นๆจะเห็น
+เหลืองานอะไรให้ทำอีก:
 
-middleware ----> ทำให้ดูง่ายขึ้น
+จากที่เราคุยกันและเจอในเซสชันนี้ ยังไม่ได้ทำ:
 
-routes  ---> ก็แยก Role
+1. Ad-hoc evaluation (ประเมินกรณี complaint/incident) — DB eval_type รับแค่ pre/post/half-year/yearly ยังไม่มีช่องสำหรับกรณีพิเศษ
+2. Critical_Fail_Flag + Corrective_Action_Required — ไม่มีกลไก "ข้อไหน fail แล้วบังคับ escalate/ต้องทำ action plan" เลย
+3. Email CC support — ส่งได้แค่ผู้รับคนเดียว ไม่มี CC (เช่น CC ผู้จัดการ)
+4. Retry_Count บนอีเมล — ส่งไม่สำเร็จก็จบ ไม่มี retry
+5. Dashboard / Analytics / Power BI export — ยังเป็นการ์ด "SOON" เฉยๆ ไม่มี backend/frontend รองรับเลย
+6. Product Type บน Excel upload — hardcode 'both' เสมอ (แต่พบว่า spec ต้นฉบับก็ไม่มีคอลัมน์นี้เหมือนกัน เลยไม่ชัวร์ว่าควรมีจริงไหม — รอตัดสินใจ)
+7. Supplier→Buyer mock page — ตั้งใจไว้แค่ UI ยังไม่ต่อ backend จริง (ของเดิม ไม่ใช่ของใหม่ที่ลืม)
 
-แล้วก็ถ้ามีอะไรประมาณนี้ที่เปลี่ยนหรือเพิ่มเติม ได้อีกบอกมาหน่อยนะ
-ปล.ลอง tree . ดูว่ามันดูง่ายหรือยัง
+จากงานที่เพิ่งทำวันนี้ (overdue escalation) ก็มีจุดที่ยังไม่สมบูรณ์:
+8. Escalation email ตอนนี้ปุ่ม "เข้าสู่ระบบ" ลิงก์ไปแค่ portal เฉยๆ ยังไม่ลิงก์ตรงไปหน้า "งานเกินกำหนด" ที่เพิ่งสร้าง (ปรับ query string หรือ deep-link ได้ถ้าต้องการ)
