@@ -122,6 +122,17 @@ app.use('/api/supervisor',  requireAuth, require('./routes/supervisor/supervisor
 // emailed token, see database/CROSS_EVALUATION_SPEC.md.
 app.use('/api/public/supplier-eval', require('./routes/public/publicSupplierEval'));
 app.use('/api/service-evaluations', requireAuth, require('./routes/shared/serviceEvaluations'));
+// Proxies to the Gemini API (free tier has its own daily/per-minute quota
+// once GEMINI_API_KEY is configured) — capped tighter than the blanket
+// apiLimiter above so a chatty widget session can't burn through that quota.
+const assistantLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'ถามผู้ช่วย AI บ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่' },
+});
+app.use('/api/assistant', requireAuth, assistantLimiter, require('./routes/shared/assistant'));
 
 const { startCronJobs } = require('./utils/cronJobs');
 

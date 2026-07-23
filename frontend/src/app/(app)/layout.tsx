@@ -16,6 +16,7 @@ import { useRouter } from "next/navigation";
 import { CriteriaProvider } from "@/context/CriteriaContext";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { EvalFlowProvider } from "@/context/EvalFlowContext";
+import ChatWidget from "@/components/shared/ChatWidget";
 
 function AuthGate({ children }: { children: ReactNode }) {
   const { user, authChecked } = useAuth();
@@ -29,7 +30,12 @@ function AuthGate({ children }: { children: ReactNode }) {
   // nothing, same as App.jsx's `if (!authChecked) return null`.
   if (!authChecked || !user) return null;
 
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      <ChatWidget />
+    </>
+  );
 }
 
 export default function AppLayout({ children }: { children: ReactNode }) {
