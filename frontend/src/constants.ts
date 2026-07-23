@@ -96,7 +96,7 @@ export const FUNCTION_MODULES: Record<string, FunctionModule> = criteriaData.FUN
 // the backend uses (backend/routes/evaluations.js criteriaSet resolution) so
 // the two stay in sync.
 export function isPostEvalType(evalType: string): boolean {
-  return ["post_eval", "half_year", "yearly"].includes(evalType);
+  return ["post_eval", "half_year", "yearly", "ad_hoc"].includes(evalType);
 }
 
 export function getCriteria(evalType: string): CriteriaSection[] {

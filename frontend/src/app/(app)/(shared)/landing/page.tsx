@@ -30,9 +30,10 @@ const PRODUCT_LABEL: Record<string, string> = { goods: "สินค้า", ser
 const TASK_EVAL_TYPE_LABEL: Record<string, string> = {
   pre_eval: "Pre-Evaluation (Supplier ใหม่)",
   post_eval: "Post-Evaluation (90 วัน)", half_year: "Half-Year Evaluation", yearly: "Yearly Evaluation",
+  ad_hoc: "Ad-hoc Evaluation (กรณีพิเศษ)",
 };
 const TASK_TYPE_FILTER_LABEL: Record<string, string> = {
-  pre_eval: "Pre-Eval", post_eval: "Post-Eval", half_year: "Half-Year", yearly: "Yearly",
+  pre_eval: "Pre-Eval", post_eval: "Post-Eval", half_year: "Half-Year", yearly: "Yearly", ad_hoc: "Ad-hoc",
 };
 const TASK_PAGE_SIZE = 8;
 

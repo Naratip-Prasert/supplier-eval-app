@@ -27,7 +27,7 @@ const GRADE_COLOR: Record<string, { bg: string; text: string; bar: string }> = {
   F: { bg: "#f0dede", text: GRADE_MAP.F, bar: GRADE_MAP.F },
 };
 
-const EVAL_LABEL: Record<string, string> = { pre_eval: "Pre", post_eval: "Post", half_year: "Half-Year", yearly: "Yearly" };
+const EVAL_LABEL: Record<string, string> = { pre_eval: "Pre", post_eval: "Post", half_year: "Half-Year", yearly: "Yearly", ad_hoc: "Ad-hoc" };
 const PRODUCT_LABEL: Record<string, string> = { goods: "สินค้า", services: "บริการ", both: "สินค้า+บริการ" };
 
 interface EvalRecord {

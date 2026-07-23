@@ -12,7 +12,7 @@ const router = require('express').Router();
 const multer = require('multer');
 const requireRole = require('../../middleware/requireRole');
 const {
-  uploadPrePost, uploadPeriodic, listTasks, remindTask, updateTask,
+  uploadPrePost, uploadPeriodic, createAdHocEvaluation, listTasks, remindTask, updateTask,
   deleteSession, remindAllTasks, bulkDeleteSessions, listBatches, listServiceEvaluations,
 } = require('../../controllers/admin/admin.controller');
 
@@ -30,6 +30,7 @@ const upload = multer({
 
 router.post('/upload/pre-post', upload.single('file'), uploadPrePost);
 router.post('/upload/periodic', upload.single('file'), uploadPeriodic);
+router.post('/ad-hoc-evaluation', createAdHocEvaluation);
 router.get('/tasks', listTasks);
 router.post('/tasks/:id/remind', remindTask);
 router.patch('/tasks/:id', updateTask);

@@ -432,6 +432,113 @@ async function uploadPeriodic(req: RequestWithFile, res: Response) {
   }
 }
 
+// ── POST /api/admin/ad-hoc-evaluation ────────────────────────
+// Manual, single-supplier evaluation round for a complaint/incident case —
+// unlike the batch upload endpoints above, this isn't driven by an Excel
+// row: an ADMIN picks one existing supplier and types a reason, and tasks
+// go out to whichever of buyer_email/evaluator_email the supplier already
+// has on file (same contacts the periodic-upload flow uses). No batch_id
+// (evaluation_tasks.batch_id is nullable) since there's no upload batch
+// behind it. Scored against POST_CRITERIA (see isPostTrack in
+// evaluations.controller.ts / isPostEvalType in frontend/constants.ts) —
+// an ad-hoc case only ever fires for a supplier already in active service.
+async function createAdHocEvaluation(req: Request, res: Response) {
+  const { vendorCode, reason, dueInDays } = req.body;
+  if (!vendorCode || !String(vendorCode).trim()) {
+    return res.status(400).json({ message: 'กรุณาระบุรหัส Supplier', field: 'vendorCode' });
+  }
+  if (!reason || !String(reason).trim()) {
+    return res.status(400).json({ message: 'กรุณาระบุเหตุผล (complaint/incident)', field: 'reason' });
+  }
+  const days = Number.isFinite(Number(dueInDays)) && Number(dueInDays) > 0 ? Number(dueInDays) : 7;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const uploaderResult = await client.query(`SELECT id FROM employees WHERE employee_id = $1`, [req.user!.empId]);
+    const uploaderId = uploaderResult.rows[0]?.id || null;
+
+    const supResult = await client.query(`
+      SELECT id, vendor_code, supplier_name, buyer_name, buyer_email, evaluator_name, evaluator_email
+        FROM suppliers WHERE vendor_code = $1 AND is_active = TRUE
+    `, [String(vendorCode).trim()]);
+    if (supResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ message: 'ไม่พบรหัสซัพพลายเออร์', field: 'vendorCode' });
+    }
+    const supplier = supResult.rows[0];
+
+    if (!supplier.buyer_email && !supplier.evaluator_email) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ message: 'Supplier รายนี้ไม่มีอีเมล Buyer/Evaluator บันทึกไว้ ไม่สามารถส่งงานประเมินได้' });
+    }
+
+    // Timestamp-based period keeps this trivially unique per incident —
+    // unlike pre/post/half_year/yearly there's no natural recurring period
+    // name for an ad-hoc case, and idx_unique_open_session (schema.sql)
+    // would otherwise block a second complaint on the same supplier.
+    const dueDate = addDays(new Date(), days);
+    const period  = `Ad-hoc ${new Date().toISOString()}`;
+
+    const sessionResult = await client.query(`
+      INSERT INTO evaluation_sessions (supplier_id, eval_type, period, status, initiated_by, ad_hoc_reason)
+      VALUES ($1, 'ad_hoc', $2, 'pending', $3, $4) RETURNING id
+    `, [supplier.id, period, uploaderId, String(reason).trim()]);
+    const sessionId = sessionResult.rows[0].id;
+
+    const gcpMatch = supplier.buyer_email
+      ? await client.query(`SELECT id, full_name FROM employees WHERE email = $1 AND is_active = TRUE LIMIT 1`, [supplier.buyer_email])
+      : { rows: [] };
+    const buMatch = supplier.evaluator_email
+      ? await client.query(`SELECT id, full_name FROM employees WHERE email = $1 AND is_active = TRUE LIMIT 1`, [supplier.evaluator_email])
+      : { rows: [] };
+
+    const taskRows = [
+      { role: 'GCP', email: supplier.buyer_email, name: supplier.buyer_name, empId: gcpMatch.rows[0]?.id || null, empName: gcpMatch.rows[0]?.full_name || supplier.buyer_name },
+      { role: 'USER', email: supplier.evaluator_email, name: supplier.evaluator_name, empId: buMatch.rows[0]?.id || null, empName: buMatch.rows[0]?.full_name || supplier.evaluator_name },
+    ];
+
+    const invitationTasks: any[] = [];
+    for (const t of taskRows) {
+      if (!t.email) continue;
+      const taskResult = await client.query(`
+        INSERT INTO evaluation_tasks
+          (session_id, supplier_id, assigned_employee_id, assigned_email, assigned_name, role, due_date, status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending') RETURNING id
+      `, [sessionId, supplier.id, t.empId, t.email, t.empName, t.role, dueDate]);
+
+      invitationTasks.push({
+        id: taskResult.rows[0].id,
+        assigned_email: t.email,
+        assigned_name: t.empName,
+        due_date: dueDate,
+        eval_type_label: 'Ad-hoc Evaluation (กรณีพิเศษ)',
+        supplier,
+      });
+    }
+
+    await client.query('COMMIT');
+
+    // Ad-hoc is urgent by nature (complaint/incident) — send right away
+    // instead of waiting on the daily cron.
+    for (const task of invitationTasks) {
+      sendInvitationEmail(task, task.supplier)
+        .then(() => pool.query(`UPDATE evaluation_tasks SET invitation_sent_at = NOW() WHERE id = $1`, [task.id]))
+        .catch((e: any) => console.warn('[admin ad-hoc] invitation email error:', e.message));
+    }
+
+    console.log(`[admin] ad-hoc evaluation created for ${supplier.vendor_code} by ${req.user!.empId}`);
+    res.status(201).json({ message: 'สร้างงานประเมิน Ad-hoc สำเร็จ', sessionId, tasksCreated: invitationTasks.length });
+  } catch (err: any) {
+    await client.query('ROLLBACK');
+    console.error('POST /api/admin/ad-hoc-evaluation error:', err);
+    res.status(500).json({ message: 'สร้างงานประเมินไม่สำเร็จ' });
+  } finally {
+    client.release();
+  }
+}
+
 // ── GET /api/admin/tasks ──────────────────────────────────────
 async function listTasks(req: Request, res: Response) {
   const { status, role, vendorCode } = req.query;
@@ -764,6 +871,6 @@ async function listServiceEvaluations(req: Request, res: Response) {
 }
 
 module.exports = {
-  uploadPrePost, uploadPeriodic, listTasks, remindTask, updateTask,
+  uploadPrePost, uploadPeriodic, createAdHocEvaluation, listTasks, remindTask, updateTask,
   deleteSession, remindAllTasks, bulkDeleteSessions, listBatches, listServiceEvaluations,
 };

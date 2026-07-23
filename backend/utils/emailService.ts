@@ -64,29 +64,68 @@ async function logEmail(
   toEmail: string,
   subject: string,
   status: 'sent' | 'failed',
-  errorMsg?: string | null
+  errorMsg?: string | null,
+  retryCount: number = 0
 ): Promise<void> {
   await pool.query(
-    `INSERT INTO email_logs (task_id, email_type, to_email, subject, status, error_msg)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-    [taskId, emailType, toEmail, subject, status, errorMsg || null]
+    `INSERT INTO email_logs (task_id, email_type, to_email, subject, status, error_msg, retry_count)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [taskId, emailType, toEmail, subject, status, errorMsg || null, retryCount]
   ).catch((e: Error) => console.warn('[emailService] email_logs insert failed:', e.message));
 }
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Transient failures (rate limits, network blips, provider hiccups) are
+// common enough with a single outbound provider that "fails once, never
+// retried" was losing real notifications — retries in-process with a short
+// backoff instead of giving up on the first error. MAX_RETRIES=2 means up
+// to 3 attempts total; email_logs.retry_count records how many retries it
+// took (0 = succeeded on the first try).
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 1500;
 
 async function send(
   to: string,
   subject: string,
   html: string,
-  { taskId = null, emailType = null }: { taskId?: number | string | null; emailType?: string | null } = {}
+  { taskId = null, emailType = null, cc = undefined }: {
+    taskId?: number | string | null;
+    emailType?: string | null;
+    cc?: string[] | undefined;
+  } = {}
 ) {
-  try {
-    const result = await resend.emails.send({ from: FROM, to: [to], subject, html });
-    await logEmail(taskId, emailType, to, subject, 'sent', null);
-    return result;
-  } catch (err: any) {
-    await logEmail(taskId, emailType, to, subject, 'failed', err.message);
-    throw err;
+  let lastErr: any;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const result = await resend.emails.send({
+        from: FROM, to: [to], subject, html,
+        ...(cc && cc.length > 0 ? { cc } : {}),
+      });
+      await logEmail(taskId, emailType, to, subject, 'sent', null, attempt);
+      return result;
+    } catch (err: any) {
+      lastErr = err;
+      if (attempt < MAX_RETRIES) {
+        console.warn(`[emailService] send to ${to} failed (attempt ${attempt + 1}/${MAX_RETRIES + 1}), retrying:`, err.message);
+        await sleep(RETRY_DELAY_MS * (attempt + 1));
+      }
+    }
   }
+  await logEmail(taskId, emailType, to, subject, 'failed', lastErr?.message, MAX_RETRIES);
+  throw lastErr;
+}
+
+// Supervisors have no per-supplier assignment in this schema (see the
+// broadcast pattern already used by the overdue-escalation cron job below)
+// — CC'ing them here is the same "every active Supervisor" set, just
+// applied earlier (at invitation/reminder time) instead of only once a task
+// is already late.
+async function getActiveSupervisorEmails(): Promise<string[]> {
+  const result = await pool.query(
+    `SELECT email FROM employees WHERE role = 'SUPERVISOR' AND is_active = TRUE AND email IS NOT NULL`
+  );
+  return result.rows.map((r: any) => r.email);
 }
 
 // ── 1. Invitation ──────────────────────────────────────────────
@@ -104,7 +143,8 @@ async function sendInvitationEmail(task: TaskEmailInfo, supplier: SupplierEmailI
     </table>
     <a href="${evalUrl}" style="display:inline-block;background:#1a6b1a;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">เข้าสู่ระบบประเมิน</a>
   `);
-  return send(task.assigned_email, `[SPE] กรุณาประเมิน Supplier: ${supplier.supplier_name}`, html, { taskId: task.id, emailType: 'invitation' });
+  const cc = await getActiveSupervisorEmails().catch(() => []);
+  return send(task.assigned_email, `[SPE] กรุณาประเมิน Supplier: ${supplier.supplier_name}`, html, { taskId: task.id, emailType: 'invitation', cc });
 }
 
 // ── 2. Reminder (7 วันก่อน due) ───────────────────────────────
@@ -116,7 +156,8 @@ async function sendReminderEmail(task: TaskEmailInfo, supplier: SupplierEmailInf
     <p style="color:#c62828"><strong>ครบกำหนดใน 7 วัน: ${dueStr}</strong></p>
     <a href="${FE_URL}" style="display:inline-block;background:#1a6b1a;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">ประเมินเดี๋ยวนี้</a>
   `);
-  return send(task.assigned_email, `[SPE] เตือน: ครบกำหนดประเมิน ${supplier.supplier_name} ใน 7 วัน`, html, { taskId: task.id, emailType: 'reminder' });
+  const cc = await getActiveSupervisorEmails().catch(() => []);
+  return send(task.assigned_email, `[SPE] เตือน: ครบกำหนดประเมิน ${supplier.supplier_name} ใน 7 วัน`, html, { taskId: task.id, emailType: 'reminder', cc });
 }
 
 // ── 3. Overdue (3 วันหลัง due) ────────────────────────────────
@@ -150,9 +191,42 @@ async function sendOverdueEscalationEmail(
       <tr><td style="padding:6px 0;color:#555">ครบกำหนด</td><td><strong style="color:#c62828">${dueStr}</strong></td></tr>
     </table>
     <p>กรุณาติดตามหรือดำเนินการตามความเหมาะสม</p>
-    <a href="${FE_URL}" style="display:inline-block;background:#1a6b1a;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">เข้าสู่ระบบ</a>
+    <a href="${FE_URL}/supervisor?tab=overdue" style="display:inline-block;background:#1a6b1a;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">เข้าสู่ระบบ</a>
   `);
   return send(supervisorEmail, `[SPE] Escalation: เกินกำหนดประเมิน ${supplier.supplier_name}`, html, { taskId: task.id, emailType: 'overdue_escalation' });
+}
+
+// ── 3c. Critical fail escalation → Supervisor (fired immediately at
+// submit time, not on a cron schedule — a critical-criterion score of 1
+// shouldn't wait until the next day's job to reach anyone) ────────────
+interface CriticalFailInfo {
+  supplier_name: string;
+  vendor_code: string;
+  eval_type_label?: string;
+  submitted_by_name?: string | null;
+  submitted_by_role?: string;
+  failed_items: string[]; // name_th of each critical criterion that scored 1
+}
+async function sendCriticalFailEmail(
+  supervisorEmail: string,
+  supervisorName: string | null | undefined,
+  info: CriticalFailInfo
+) {
+  const html = wrap('Critical Fail: พบข้อวิกฤตที่ได้คะแนนต่ำสุด', `
+    <p>เรียน <strong>${esc(supervisorName || supervisorEmail)}</strong></p>
+    <p>การประเมิน Supplier ต่อไปนี้มีข้อวิกฤต (Critical) ที่ได้คะแนน 1 — กรุณาพิจารณา corrective action:</p>
+    <table style="width:100%;border-collapse:collapse;margin:12px 0">
+      <tr><td style="padding:6px 0;color:#555;width:140px">Supplier</td><td><strong>${esc(info.supplier_name)}</strong></td></tr>
+      <tr><td style="padding:6px 0;color:#555">รหัส</td><td>${esc(info.vendor_code)}</td></tr>
+      <tr><td style="padding:6px 0;color:#555">ประเภทการประเมิน</td><td>${esc(info.eval_type_label || '')}</td></tr>
+      <tr><td style="padding:6px 0;color:#555">ผู้ประเมิน</td><td>${esc(info.submitted_by_name || '')} (${esc(info.submitted_by_role || '')})</td></tr>
+    </table>
+    <p style="background:#fef2f2;padding:12px;border-radius:6px;border-left:4px solid #c62828">
+      <strong>ข้อที่ fail:</strong><br/>${info.failed_items.map(esc).join('<br/>')}
+    </p>
+    <a href="${FE_URL}/supervisor" style="display:inline-block;background:#c62828;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">เข้าสู่ระบบ</a>
+  `);
+  return send(supervisorEmail, `[SPE] Critical Fail: ${info.supplier_name}`, html, { emailType: 'critical_fail' });
 }
 
 // ── 4. Thank-you (หลัง submit) ────────────────────────────────
@@ -226,6 +300,7 @@ module.exports = {
   sendReminderEmail,
   sendOverdueEmail,
   sendOverdueEscalationEmail,
+  sendCriticalFailEmail,
   sendThankyouEmail,
   sendSupervisorNotifyEmail,
   sendSupervisorResultEmail,

@@ -858,7 +858,7 @@ function SessionsTab({ sessions, onViewEvaluation, initialSessionId }: {
                   <div style={{ fontSize: 11, color: "#aaa", fontFamily: "monospace" }}>{s.vendorCode}</div>
                 </td>
                 <td style={{ padding: "11px 14px", fontSize: 12, color: "#555" }}>
-                  {({ pre_eval: "Pre-Evaluation", post_eval: "Post-Evaluation", half_year: "Half-Year", yearly: "Yearly" } as Record<string, string>)[s.evalType] ?? s.evalType}
+                  {({ pre_eval: "Pre-Evaluation", post_eval: "Post-Evaluation", half_year: "Half-Year", yearly: "Yearly", ad_hoc: "Ad-hoc" } as Record<string, string>)[s.evalType] ?? s.evalType}
                 </td>
                 <td style={{ padding: "11px 14px", fontSize: 12, color: "#666" }}>{s.period}</td>
                 <td style={{ padding: "11px 14px" }}><StatusBadge status={s.status} dueDate={s.dueDate} /></td>
@@ -1013,7 +1013,7 @@ function SessionDetail({ sessionId, onBack, onViewEvaluation }: {
               <div style={{ fontSize: 12, color: "#aaa", fontFamily: "monospace", marginTop: 2 }}>{data.vendorCode}</div>
             </div>
             <div style={{ fontSize: 12, color: "#666" }}>
-              {({ pre_eval: "Pre-Evaluation", post_eval: "Post-Evaluation", half_year: "Half-Year", yearly: "Yearly" } as Record<string, string>)[data.evalType] ?? data.evalType}
+              {({ pre_eval: "Pre-Evaluation", post_eval: "Post-Evaluation", half_year: "Half-Year", yearly: "Yearly", ad_hoc: "Ad-hoc" } as Record<string, string>)[data.evalType] ?? data.evalType}
               {" · "}{data.period}
             </div>
             <StatusBadge status={data.status} dueDate={data.dueDate} />

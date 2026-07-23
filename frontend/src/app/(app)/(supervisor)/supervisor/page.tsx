@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, CheckCircle2, RotateCcw, Clock, RefreshCw, AlertCircle, Pencil, Check, X, Eye, ChevronDown, ChevronRight, History as HistoryIcon, Search, SlidersHorizontal } from "lucide-react";
 import { Header, useModal } from "@/components";
 import { useAuth } from "@/context/AuthContext";
@@ -14,6 +14,7 @@ const EVAL_TYPE_LABEL: Record<string, string> = {
   post_eval:    "Post 90 Days",
   half_year:    "Half-Year",
   yearly:       "Yearly",
+  ad_hoc:       "Ad-hoc",
 };
 
 const FONT = "Sarabun, sans-serif";
@@ -32,6 +33,7 @@ interface EvalEntry {
   profilePicture?: string | null;
   totalScore: number | string;
   grade: string;
+  hasCriticalFail?: boolean;
 }
 
 interface QueueSession {
@@ -114,9 +116,11 @@ interface NoteModalState {
 
 export default function SupervisorPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user: authUser } = useAuth();
   const { showAlert, showConfirm, ModalEl } = useModal();
-  const [tab,     setTab]     = useState<"queue" | "overdue" | "history">("queue");
+  const initialTab = searchParams.get("tab") === "overdue" ? "overdue" : "queue";
+  const [tab,     setTab]     = useState<"queue" | "overdue" | "history">(initialTab);
   const [queue,   setQueue]   = useState<QueueSession[]>([]);
   const [overdue, setOverdue] = useState<OverdueTask[]>([]);
   const [history, setHistory] = useState<HistoryRow[]>([]);
@@ -842,6 +846,15 @@ export default function SupervisorPage() {
                           <div style={{ marginTop: 7, fontWeight: 700, color: GRADE_COLOR[ev.grade] || "#0f172a" }}>
                             {ev.totalScore} <span style={{ fontWeight: 500, fontSize: 11, color: "#94a3b8" }}>({ev.grade})</span>
                           </div>
+                          {ev.hasCriticalFail && (
+                            <div style={{
+                              display: "flex", alignItems: "center", gap: 4, marginTop: 7, width: "fit-content",
+                              background: "#fef2f2", color: "#b91c1c", border: "1px solid #fecaca",
+                              padding: "2px 8px", borderRadius: 6, fontSize: 10.5, fontWeight: 700,
+                            }}>
+                              <AlertCircle size={11} /> Critical Fail
+                            </div>
+                          )}
                         </div>
                       );
                     })}

@@ -19,9 +19,10 @@ import { isOverdue } from "@/utils/date";
 import {
   ArrowLeft, RefreshCw, AlertCircle, Search, Upload, Send, Pencil, Trash2, X, Check,
   MailCheck, Square, CheckSquare, Lock, History, CalendarRange,
-  SlidersHorizontal, ChevronsUpDown,
+  SlidersHorizontal, ChevronsUpDown, AlertTriangle,
 } from "lucide-react";
 import AdminUploadModal from "@/components/admin/AdminUploadModal";
+import AdHocEvalModal from "@/components/admin/AdHocEvalModal";
 import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter, type DateFilter } from "@/utils/shared/dateFilter";
 import { SESSION_STATUS_LABELS, SESSION_STATUS_COLORS, getDisplayStatus, type SessionStatus } from "@/utils/shared/statusLabels";
 import { FilterChips, toggleInSet } from "@/components/shared/FilterChips";
@@ -34,7 +35,7 @@ const TASK_STATUS_COLORS: Record<string, { bg: string; color: string; label: str
 };
 const EVAL_TYPE_LABEL: Record<string, string> = {
   pre_eval: "Pre-Eval",
-  post_eval: "Post 90d", half_year: "Half-Year", yearly: "Yearly",
+  post_eval: "Post 90d", half_year: "Half-Year", yearly: "Yearly", ad_hoc: "Ad-hoc",
 };
 const PAGE_SIZE = 10;
 
@@ -154,6 +155,7 @@ export default function TasksPanel({ embedded = false }: { embedded?: boolean })
   const [loading,         setLoading]         = useState(false);
   const [error,           setError]           = useState<string | null>(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showAdHocModal,  setShowAdHocModal]  = useState(false);
   const [remindingId,     setRemindingId]     = useState<string | null>(null);
   const [sendingAll,      setSendingAll]      = useState(false);
   const [sendingSelected, setSendingSelected] = useState(false);
@@ -552,11 +554,17 @@ export default function TasksPanel({ embedded = false }: { embedded?: boolean })
           </div>
         )}
 
-        {/* Upload button */}
-        <div style={{ display: "flex", marginBottom: 20 }}>
+        {/* Upload / Ad-hoc buttons */}
+        <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
+          <button
+            onClick={() => setShowAdHocModal(true)}
+            style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, background: "#fff", color: "#c62828", border: "1.5px solid #c62828", borderRadius: 8, padding: "10px 20px", cursor: "pointer", fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 14 }}
+          >
+            <AlertTriangle size={16} /> สร้างงาน Ad-hoc
+          </button>
           <button
             onClick={() => setShowUploadModal(true)}
-            style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, background: "#1b5e20", color: "#fff", border: "none", borderRadius: 8, padding: "10px 20px", cursor: "pointer", fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 14 }}
+            style={{ display: "flex", alignItems: "center", gap: 8, background: "#1b5e20", color: "#fff", border: "none", borderRadius: 8, padding: "10px 20px", cursor: "pointer", fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 14 }}
           >
             <Upload size={16} /> อัพโหลด CSV / Excel
           </button>
@@ -960,6 +968,9 @@ export default function TasksPanel({ embedded = false }: { embedded?: boolean })
       {ModalEl}
       {showUploadModal && (
         <AdminUploadModal onClose={() => { setShowUploadModal(false); fetchAll(); }} />
+      )}
+      {showAdHocModal && (
+        <AdHocEvalModal onClose={() => { setShowAdHocModal(false); fetchAll(); }} />
       )}
     </>
   );

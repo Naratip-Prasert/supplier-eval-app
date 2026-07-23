@@ -149,6 +149,11 @@ CREATE TABLE evaluation_sub_criteria (
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   criteria_set    VARCHAR(10) NOT NULL DEFAULT 'legacy',
   level_values    JSONB,                              -- custom level→score map (e.g. [1,3,5]); NULL = default 1-5
+  is_critical     BOOLEAN     NOT NULL DEFAULT FALSE,  -- a score of 1 on this criterion flags the
+                                                        -- whole evaluation as a critical fail (see
+                                                        -- evaluations.has_critical_fail) — e.g. safety/
+                                                        -- legal items where "poor" isn't just a low
+                                                        -- score, it's something Supervisors must see
   UNIQUE (criteria_set, code)
 );
 
@@ -207,7 +212,7 @@ CREATE TABLE evaluation_sessions (
   id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   supplier_id     UUID        NOT NULL REFERENCES suppliers(id),
   eval_type       VARCHAR(20) NOT NULL
-                    CHECK (eval_type IN ('pre_eval', 'post_eval', 'half_year', 'yearly')),
+                    CHECK (eval_type IN ('pre_eval', 'post_eval', 'half_year', 'yearly', 'ad_hoc')),
   period          VARCHAR(50),                       -- "Monthly", "Half-Year 2026", "Post 90 Days", etc.
                                                        -- half_year/yearly MUST include the calendar year
                                                        -- (set in admin.js) so next year's round doesn't
@@ -219,7 +224,10 @@ CREATE TABLE evaluation_sessions (
   initiated_by    UUID        REFERENCES employees(id) ON DELETE SET NULL,
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   updated_at      TIMESTAMPTZ DEFAULT NOW(),
-  completed_at    TIMESTAMPTZ
+  completed_at    TIMESTAMPTZ,
+  ad_hoc_reason   TEXT                                -- only set for eval_type='ad_hoc' — the
+                                                        -- complaint/incident description an ADMIN typed
+                                                        -- in when manually triggering the round
 );
 
 CREATE INDEX idx_sessions_supplier    ON evaluation_sessions(supplier_id);
@@ -294,6 +302,10 @@ CREATE TABLE evaluations (
   custom_module_items JSONB,                          -- only set when module_code='custom': evaluator-typed
                                                        -- [{no, title, levels:[lvl1,lvl3,lvl5]}], since these
                                                        -- items have no catalog row to look text up from later
+  has_critical_fail   BOOLEAN NOT NULL DEFAULT FALSE, -- TRUE if any is_critical criterion scored 1 here —
+                                                       -- set once at submit time, triggers an immediate
+                                                       -- escalation email to Supervisors (see
+                                                       -- emailService.sendCriticalFailEmail)
   UNIQUE (session_id, role)                          -- one USER eval + one GCP eval per session
 );
 
@@ -377,7 +389,11 @@ CREATE TABLE email_logs (
   subject     VARCHAR(300),
   status      VARCHAR(10) DEFAULT 'sent',
   error_msg   TEXT,
-  sent_at     TIMESTAMPTZ DEFAULT NOW()
+  sent_at     TIMESTAMPTZ DEFAULT NOW(),
+  retry_count INTEGER     NOT NULL DEFAULT 0  -- how many resend attempts happened in-process
+                                               -- before this row's final status (send() in
+                                               -- emailService.ts retries transient failures
+                                               -- itself; this is 0 for a first-try success)
 );
 
 -- ============================================================

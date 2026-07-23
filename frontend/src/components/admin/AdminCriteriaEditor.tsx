@@ -20,7 +20,7 @@ import {
 } from "../../utils/admin/weightMath";
 import {
   ChevronDown, ChevronRight,
-  Save, RefreshCw, AlertCircle, CheckCircle2, X, Download, Trash2,
+  Save, RefreshCw, AlertCircle, CheckCircle2, X, Download, Trash2, AlertTriangle,
 } from "lucide-react";
 
 const FONT = "Sarabun, sans-serif";
@@ -33,6 +33,7 @@ interface CritItem extends AdminItem {
   levels: string[];
   levelValues?: number[] | null;
   detailTh?: string;
+  isCritical?: boolean;
 }
 interface CritSection extends AdminSection {
   groupLabels?: Record<string, { th: string; en: string }> | null;
@@ -52,11 +53,12 @@ interface UpdatePayload {
   groupLabels?: Record<string, { th: string; en: string }>;
   itemWeights?: Record<string, number>;
   itemIds?: string[];
+  isCritical?: boolean;
 }
 type UpdateAction =
   | "cat-name" | "cat-weight" | "item-name" | "item-code" | "item-weight"
   | "add-item" | "delete-item" | "remove-esg-group" | "save-cat"
-  | "normalize-esg" | "normalize-sec" | "save-item";
+  | "normalize-esg" | "normalize-sec" | "save-item" | "toggle-critical";
 type OnUpdate = (action: UpdateAction, id: string, payload: UpdatePayload) => void | Promise<void>;
 
 type SavingState =
@@ -546,6 +548,19 @@ function ItemRow({ item, onUpdate, onOpenLevels, saving, disabled, effectiveWeig
           }}
         >แก้ระดับ</button>
       </td>
+      <td style={{ padding: "6px 10px", textAlign: "center", width: 70 }}>
+        <button
+          onClick={() => onUpdate("toggle-critical", item.id, { isCritical: !item.isCritical })}
+          disabled={disabled}
+          title={item.isCritical ? "ข้อวิกฤต — คะแนน 1 จะแจ้งเตือน Supervisor ทันที (คลิกเพื่อยกเลิก)" : "ทำเครื่องหมายเป็นข้อวิกฤต (critical)"}
+          style={{
+            padding: "3px 6px", background: item.isCritical ? "#fef2f2" : "none",
+            border: `1.5px solid ${item.isCritical ? "#c62828" : "#ddd"}`,
+            borderRadius: 6, cursor: disabled ? "not-allowed" : "pointer",
+            color: item.isCritical ? "#c62828" : "#bbb", opacity: disabled ? 0.3 : 1, lineHeight: 1,
+          }}
+        ><AlertTriangle size={13} /></button>
+      </td>
       <td style={{ padding: "6px 6px", textAlign: "center", width: 90 }}>
         {isSaving ? (
           <RefreshCw size={14} style={{ animation: "spin 1s linear infinite", color: "#aaa" }} />
@@ -945,6 +960,7 @@ function SectionCard({ section, idx, onUpdate, onOpenLevels, saving, disabled, e
                 )}
                 <th style={TH}>ระดับ</th>
                 <th style={TH}>แก้ระดับ</th>
+                <th style={TH} title="ข้อวิกฤต — คะแนน 1 จะแจ้งเตือน Supervisor ทันที">วิกฤต</th>
                 <th style={TH}></th>
               </tr>
             </thead>
@@ -1384,6 +1400,32 @@ export default function AdminCriteriaEditor() {
           return it;
         }),
       })));
+      return;
+    }
+
+    if (action === "toggle-critical") {
+      setSaving({ type: "item", id });
+      // Optimistic — doesn't touch weights/balancing, so no snapshot buffer
+      // recompute needed like item-weight above.
+      setSecs(prev => prev.map(s => ({
+        ...s, items: s.items.map(it => it.id === id ? { ...it, isCritical: payload.isCritical } : it),
+      })));
+      try {
+        const r = await authFetch(`/api/criteria/items/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ isCritical: payload.isCritical }),
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message ?? '');
+        showToast(payload.isCritical ? "ตั้งเป็นข้อวิกฤตแล้ว" : "ยกเลิกข้อวิกฤตแล้ว");
+      } catch (err) {
+        // Roll back the optimistic flip
+        setSecs(prev => prev.map(s => ({
+          ...s, items: s.items.map(it => it.id === id ? { ...it, isCritical: !payload.isCritical } : it),
+        })));
+        showToast((err as Error).message || "อัปเดตไม่สำเร็จ", "error");
+      } finally {
+        setSaving(null);
+      }
       return;
     }
 

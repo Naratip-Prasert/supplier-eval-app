@@ -29,7 +29,7 @@ function getShortLabel(section: string): string {
 // Professional muted palette — no rainbow
 const SECTION_COLORS = ["#1e6b3a", "#1558a0", "#6b3fa0", "#a02020", "#b56a00", "#00787a"];
 
-const EVAL_TYPE_LABEL: Record<string, string> = { pre_eval: "Pre", post_eval: "Post", half_year: "Half-Year", yearly: "Yearly" };
+const EVAL_TYPE_LABEL: Record<string, string> = { pre_eval: "Pre", post_eval: "Post", half_year: "Half-Year", yearly: "Yearly", ad_hoc: "Ad-hoc" };
 
 // Shared card style
 const card = (extra: React.CSSProperties = {}): React.CSSProperties => ({
