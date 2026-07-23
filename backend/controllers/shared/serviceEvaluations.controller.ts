@@ -66,18 +66,51 @@ async function myFeedback(req: Request, res: Response) {
 }
 
 // ── GET /criteria — the shared "เชิงบริการ" criteria set ──────
+// Returns sections (one per evaluation_main_criteria row under this
+// criteria_set) each carrying its items, and each item carrying its 1-5
+// level description text (score_level_descriptions) — the eval form needs
+// this to render the same colored-level-description grid as EvalForm,
+// which the old flat-list shape (no level text, no section grouping)
+// couldn't support.
 async function criteria(req: Request, res: Response) {
   try {
-    const result = await pool.query(
-      `SELECT m.id AS "categoryId", m.name_th AS "categoryNameTh", m.display_order AS "categoryOrder",
-              s.id, s.code, s.name_th AS "nameTh", s.default_weight AS "defaultWeight",
-              s.display_order AS "displayOrder", s.level_values AS "levelValues"
+    const catRes = await pool.query(
+      `SELECT id, name_th AS "nameTh", total_weight AS "totalWeight", display_order AS "displayOrder"
+         FROM evaluation_main_criteria
+        WHERE code LIKE 'SVC%' AND is_active = TRUE
+        ORDER BY display_order`
+    );
+    const itemRes = await pool.query(
+      `SELECT s.id, s.category_id AS "categoryId", s.code, s.name_th AS "nameTh",
+              s.default_weight AS "defaultWeight", s.display_order AS "displayOrder",
+              s.level_values AS "levelValues"
          FROM evaluation_sub_criteria s
          JOIN evaluation_main_criteria m ON m.id = s.category_id
         WHERE s.criteria_set = 'service' AND s.is_active = TRUE AND m.is_active = TRUE
-        ORDER BY m.display_order, s.display_order`
+        ORDER BY s.display_order`
     );
-    res.json(result.rows);
+    const itemIds = itemRes.rows.map((r: any) => r.id);
+    const levelRes = itemIds.length
+      ? await pool.query(
+          `SELECT criterion_id AS "criterionId", level, description FROM score_level_descriptions
+            WHERE criterion_id = ANY($1::uuid[]) ORDER BY criterion_id, level`,
+          [itemIds]
+        )
+      : { rows: [] };
+    const levelsByCrit: Record<string, string[]> = {};
+    levelRes.rows.forEach((r: any) => { (levelsByCrit[r.criterionId] ??= [])[r.level - 1] = r.description; });
+
+    const itemsByCat: Record<string, any[]> = {};
+    itemRes.rows.forEach((it: any) => {
+      // pg returns NUMERIC columns as strings, not JS numbers — every other
+      // criteria endpoint in this app (e.g. GET /api/criteria) parses this
+      // before sending; skipping it here left the frontend calling
+      // .toFixed()/arithmetic on a string.
+      (itemsByCat[it.categoryId] ??= []).push({ ...it, defaultWeight: parseFloat(it.defaultWeight), levels: levelsByCrit[it.id] ?? [] });
+    });
+
+    const sections = catRes.rows.map((c: any) => ({ ...c, totalWeight: parseFloat(c.totalWeight), items: itemsByCat[c.id] ?? [] }));
+    res.json(sections);
   } catch (err: any) {
     console.error('GET /api/service-evaluations/criteria error:', err);
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
@@ -86,7 +119,7 @@ async function criteria(req: Request, res: Response) {
 
 // ── POST / — submit a rating for one session's Buyer ──────────
 async function submit(req: Request, res: Response) {
-  const { sessionId, targetEmployeeId, scores } = req.body;
+  const { sessionId, targetEmployeeId, scores, strengths, improvements } = req.body;
   if (!sessionId || !targetEmployeeId || typeof scores !== 'object') {
     return res.status(400).json({ message: 'กรุณาระบุ sessionId, targetEmployeeId, scores' });
   }
@@ -126,13 +159,20 @@ async function submit(req: Request, res: Response) {
 
     const { totalScore, grade } = await computeScoreAndGrade(client, scores, criteriaMap);
 
+    // strengths/improvements are free-text feedback (Excel's "จุดเด่นที่ควร
+    // รักษาไว้" / "สิ่งที่ควรปรับปรุง" fields) — kept nested inside raw_scores
+    // rather than passed to computeScoreAndGrade, which treats every key of
+    // its scoresInput as a criterion code and would otherwise try to score
+    // this plain text.
     const insertRes = await client.query(
       `INSERT INTO service_evaluations
          (session_id, direction, evaluator_employee_id, target_employee_id, total_score, grade, raw_scores)
        VALUES ($1, 'user_to_gcp', $2, $3, $4, $5, $6)
        ON CONFLICT (session_id, direction, target_employee_id) DO NOTHING
        RETURNING id`,
-      [sessionId, myEmployeeId, targetEmployeeId, totalScore, grade, JSON.stringify(scores)]
+      [sessionId, myEmployeeId, targetEmployeeId, totalScore, grade, JSON.stringify({
+        scores, strengths: strengths ?? null, improvements: improvements ?? null,
+      })]
     );
     if (insertRes.rows.length === 0) {
       await client.query('ROLLBACK');
