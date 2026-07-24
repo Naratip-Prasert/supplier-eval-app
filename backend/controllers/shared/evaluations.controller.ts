@@ -8,7 +8,7 @@
 import type { Request, Response } from 'express';
 import type { PoolClient } from 'pg';
 const pool   = require('../../db');
-const { sendSupervisorNotifyEmail, sendThankyouEmail, sendCriticalFailEmail } = require('../../utils/emailService');
+const { sendSupervisorNotifyEmail, sendThankyouEmail } = require('../../utils/emailService');
 
 // ── helpers ──────────────────────────────────────────────────
 
@@ -241,13 +241,13 @@ async function createEvaluation(req: Request, res: Response) {
       : [criteriaSet];
     const codes = Object.keys(scores);
     const criteriaResult = await client.query(
-      `SELECT sc.id, sc.code, sc.default_weight, sc.name_th, mc.name_th AS category_name_th, sc.is_critical
+      `SELECT sc.id, sc.code, sc.default_weight, sc.name_th, mc.name_th AS category_name_th
          FROM evaluation_sub_criteria sc
          JOIN evaluation_main_criteria mc ON mc.id = sc.category_id
         WHERE sc.code = ANY($1) AND sc.is_active = TRUE AND sc.criteria_set = ANY($2)`,
       [codes, criteriaSets]
     );
-    const criteriaMap: Record<string, { id: string; code: string; default_weight: number; name_th: string; category_name_th: string; is_critical: boolean }> = {};
+    const criteriaMap: Record<string, { id: string; code: string; default_weight: number; name_th: string; category_name_th: string }> = {};
     criteriaResult.rows.forEach((c: any) => { criteriaMap[c.code] = c; });
 
     // Log unknown codes but do not reject (criteria table may be incomplete).
@@ -278,16 +278,6 @@ async function createEvaluation(req: Request, res: Response) {
     }
     const { totalScore, grade } = await computeScoreAndGrade(client, matchedScores, criteriaMap);
 
-    // A score of 1 on any criterion marked is_critical flags the whole
-    // evaluation — e.g. safety/legal items where "poor" isn't just a low
-    // score, it's something Supervisors need to see immediately rather than
-    // wait for the normal pending_review flow (which only fires once BOTH
-    // USER+GCP have submitted, days or weeks later).
-    const failedCriticalItems = codes
-      .filter(code => criteriaMap[code]?.is_critical && scores[code]?.score != null && parseInt(scores[code].score, 10) === 1)
-      .map(code => criteriaMap[code].name_th);
-    const hasCriticalFail = failedCriticalItems.length > 0;
-
     // 8. Mark evaluation_task as completed if task-based assignment exists
     const completedTask = await client.query(`
       UPDATE evaluation_tasks
@@ -302,11 +292,11 @@ async function createEvaluation(req: Request, res: Response) {
     // 9. Insert evaluation record (raw_scores stores every criterion submitted)
     const evalResult = await client.query(
       `INSERT INTO evaluations
-         (session_id, employee_id, role, product_type, status, total_score, grade, submitted_at, raw_scores, module_code, custom_module_items, has_critical_fail)
-       VALUES ($1, $2, $3, $4, 'saved', $5, $6, NOW(), $7, $8, $9, $10)
+         (session_id, employee_id, role, product_type, status, total_score, grade, submitted_at, raw_scores, module_code, custom_module_items)
+       VALUES ($1, $2, $3, $4, 'saved', $5, $6, NOW(), $7, $8, $9)
        RETURNING id`,
       [sessionId, employee.id, evalRole, productType, totalScore, grade, JSON.stringify(scores),
-       moduleCode || null, customModuleItems ? JSON.stringify(customModuleItems) : null, hasCriticalFail]
+       moduleCode || null, customModuleItems ? JSON.stringify(customModuleItems) : null]
     );
     const evaluationId = evalResult.rows[0].id;
 
@@ -318,11 +308,15 @@ async function createEvaluation(req: Request, res: Response) {
       const weight = parseFloat(entry.weight ?? criterion.default_weight);
       const score  = entry.score != null ? parseInt(entry.score, 10) : null;
       const note   = entry.note ?? '';
+      // Set together via POST /api/uploads/attachment before submit — see
+      // NoteCell in EvalForm.tsx. Either both present or both null/undefined.
+      const attachmentPath = entry.attachmentPath ?? null;
+      const attachmentName = entry.attachmentName ?? null;
 
       await client.query(
-        `INSERT INTO evaluation_scores (evaluation_id, criterion_id, weight, score, note, name_th_snapshot, category_name_th_snapshot)
-          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [evaluationId, criterion.id, weight, score, note, criterion.name_th, criterion.category_name_th]
+        `INSERT INTO evaluation_scores (evaluation_id, criterion_id, weight, score, note, name_th_snapshot, category_name_th_snapshot, attachment_path, attachment_name)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [evaluationId, criterion.id, weight, score, note, criterion.name_th, criterion.category_name_th, attachmentPath, attachmentName]
       );
     }
 
@@ -341,36 +335,6 @@ async function createEvaluation(req: Request, res: Response) {
         await sendThankyouEmail(task, supRes.rows[0]);
         await pool.query(`UPDATE evaluation_tasks SET thankyou_sent_at = NOW() WHERE id = $1`, [task.id]);
       }).catch((e: any) => console.warn('[evaluations] thankyou email error:', e.message));
-    }
-
-    // Critical fail → escalate to every active Supervisor immediately,
-    // don't wait for the normal pending_review flow (fire-and-forget, same
-    // pattern as the thank-you email above).
-    if (hasCriticalFail) {
-      pool.query(
-        `SELECT s.supplier_name, s.vendor_code, es.eval_type, emp.full_name AS submitted_by_name
-           FROM evaluation_sessions es
-           JOIN suppliers s ON s.id = es.supplier_id
-           LEFT JOIN employees emp ON emp.id = $2
-          WHERE es.id = $1`,
-        [sessionId, employee.id]
-      ).then(async (infoRes: any) => {
-        if (infoRes.rows.length === 0) return;
-        const info = infoRes.rows[0];
-        const supervisors = await pool.query(
-          `SELECT email, full_name FROM employees WHERE role = 'SUPERVISOR' AND is_active = TRUE AND email IS NOT NULL`
-        );
-        for (const sup of supervisors.rows) {
-          sendCriticalFailEmail(sup.email, sup.full_name, {
-            supplier_name: info.supplier_name,
-            vendor_code: info.vendor_code,
-            eval_type_label: info.eval_type,
-            submitted_by_name: info.submitted_by_name,
-            submitted_by_role: evalRole,
-            failed_items: failedCriticalItems,
-          }).catch((e: any) => console.warn('[evaluations] critical fail email error:', e.message));
-        }
-      }).catch((e: any) => console.warn('[evaluations] critical fail lookup error:', e.message));
     }
 
     // After commit: check if both USER+GCP have submitted for this session
@@ -702,6 +666,8 @@ async function getById(req: Request, res: Response) {
          evs.weight,
          evs.score,
          evs.note,
+         evs.attachment_path AS "attachmentPath",
+         evs.attachment_name AS "attachmentName",
          evs.weighted_score AS "weightedScore"
        FROM evaluation_scores evs
        JOIN evaluation_sub_criteria  ec  ON ec.id  = evs.criterion_id

@@ -65,7 +65,6 @@ async function queue(req: Request, res: Response) {
         ev.total_score  AS "totalScore",
         ev.grade,
         ev.submitted_at AS "submittedAt",
-        ev.has_critical_fail AS "hasCriticalFail",
         emp.employee_id AS "employeeId",
         emp.full_name   AS "fullName",
         emp.profile_picture AS "profilePicture",

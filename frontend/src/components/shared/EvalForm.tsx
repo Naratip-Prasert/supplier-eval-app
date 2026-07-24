@@ -16,13 +16,16 @@ import { useCriteriaOverrides, useFunctionOverrides } from "../../context/Criter
 import { applyOverrides } from "../../utils/shared/criteriaOverlay";
 import type { FunctionOverrideMap } from "../../utils/shared/criteriaOverlay";
 import { r2, getAhpMain, getAhpLocal, assignEsgSubGroupWeights, initWeights } from "../../utils/shared/evalWeightMath";
-import { AlertTriangle, FileText, Plus, Trash2, ChevronDown } from "lucide-react";
+import { AlertTriangle, FileText, Plus, Trash2, ChevronDown, Paperclip, X } from "lucide-react";
 import type { AuthUser } from "../../context/AuthContext";
 import type { EvalFormData, EvalResult } from "../../context/EvalFlowContext";
+import { authFetch, API_BASE } from "../../utils/api";
 
 const LEVEL_LABELS       = ["ต้องปรับปรุง (Unsatisfactory)", "ต่ำกว่าเกณฑ์ (Below Standard)", "ผ่านเกณฑ์ (Satisfactory)", "ดี (Good)", "ดีเยี่ยม (Excellent)"];
 const LEVEL_SHORT_LABELS = ["ต้องปรับปรุง", "ต่ำกว่าเกณฑ์", "ผ่านเกณฑ์", "ดี", "ดีเยี่ยม"];
 const COLS = "52px 2.8fr 76px 1.1fr 1.1fr 1.1fr 1.1fr 1.1fr 84px 116px";
+
+export interface EvalAttachment { path: string; name: string; }
 
 // ── Payload EvalForm hands back via onDone — structurally satisfies
 // EvalFlowContext's EvalResult (all its required fields present with
@@ -31,6 +34,7 @@ const COLS = "52px 2.8fr 76px 1.1fr 1.1fr 1.1fr 1.1fr 1.1fr 84px 116px";
 export interface EvalDonePayload {
   scores: Record<string, number>;
   notes: Record<string, string>;
+  attachments: Record<string, EvalAttachment>;
   totalScore: number;
   grade: string;
   sectionWeights: Record<number, number>;
@@ -66,6 +70,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
   const { showConfirm, showAlert, ModalEl } = useModal();
   const [scores,       setScores]       = useState<Record<string, number>>(() => savedState?.scores      ?? {});
   const [notes,        setNotes]        = useState<Record<string, string>>(() => savedState?.notes       ?? {});
+  const [attachments,  setAttachments]  = useState<Record<string, EvalAttachment>>(() => savedState?.attachments ?? {});
   const [missingItems, setMissingItems] = useState<CriteriaEntry[] | null>(null); // null = closed, array = open
   const [legalStatus, setLegalStatus]   = useState<string | null>(() => (savedState?.legalStatus as string | undefined) ?? null);
 
@@ -147,6 +152,12 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
         otherCodes.forEach((c) => delete next[c]);
         return next;
       });
+      setAttachments((a) => {
+        if (!otherCodes.some((c) => c in a)) return a;
+        const next = { ...a };
+        otherCodes.forEach((c) => delete next[c]);
+        return next;
+      });
     }
 
     setWs((prev) => {
@@ -216,6 +227,13 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
       const toDelete = [...otherFixedCodes, ...staleCustomCodes(n)];
       if (!toDelete.some((c) => c in n)) return n;
       const next = { ...n };
+      toDelete.forEach((c) => delete next[c]);
+      return next;
+    });
+    setAttachments((a) => {
+      const toDelete = [...otherFixedCodes, ...staleCustomCodes(a)];
+      if (!toDelete.some((c) => c in a)) return a;
+      const next = { ...a };
       toDelete.forEach((c) => delete next[c]);
       return next;
     });
@@ -349,7 +367,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
       "ผู้ประเมินจะถูก Disqualified ทันที\nยืนยันส่งผลการประเมิน 'ไม่ผ่าน' ใช่ไหม?",
       "ส่งผล — ไม่ผ่าน (Disqualified)"
     );
-    if (ok) onDone({ scores: {}, notes: {}, totalScore: 0, grade: "F", sectionWeights, weights: itemWeights, disqualified: true, legalStatus: "fail", ws, esgTarget, moduleCode, customItems });
+    if (ok) onDone({ scores: {}, notes: {}, attachments: {}, totalScore: 0, grade: "F", sectionWeights, weights: itemWeights, disqualified: true, legalStatus: "fail", ws, esgTarget, moduleCode, customItems });
   };
 
   const handleBack = async () => {
@@ -403,7 +421,7 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
       setMissingItems(unanswered);
       return;
     }
-    onDone({ scores, notes, totalScore, grade, sectionWeights, weights: itemWeights, legalStatus, ws, esgTarget, moduleCode, customItems });
+    onDone({ scores, notes, attachments, totalScore, grade, sectionWeights, weights: itemWeights, legalStatus, ws, esgTarget, moduleCode, customItems });
   };
 
 
@@ -558,8 +576,13 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
                       weight={itemWeights[item.no!] ?? 0}
                       selected={scores[item.no!]}
                       note={notes[item.no!] || ""}
+                      attachment={attachments[item.no!] ?? null}
                       onSelect={(lv) => setScores((s) => ({ ...s, [item.no!]: lv }))}
                       onNote={(v)   => setNotes((n)  => ({ ...n, [item.no!]: v }))}
+                      onAttachment={(a) => setAttachments((prev) => {
+                        if (a) return { ...prev, [item.no!]: a };
+                        const next = { ...prev }; delete next[item.no!]; return next;
+                      })}
                       shaded={ii % 2 !== 0}
                       ahpW={getAhpLocal(item.no)}
                     />
@@ -599,8 +622,13 @@ export default function EvalForm({ formData, savedState, user, profilePic, onBac
                       weight={itemWeights[item.no!] ?? 0}
                       selected={scores[item.no!]}
                       note={notes[item.no!] || ""}
+                      attachment={attachments[item.no!] ?? null}
                       onSelect={(lv) => setScores((s) => ({ ...s, [item.no!]: lv }))}
                       onNote={(v)   => setNotes((n)  => ({ ...n, [item.no!]: v }))}
+                      onAttachment={(a) => setAttachments((prev) => {
+                        if (a) return { ...prev, [item.no!]: a };
+                        const next = { ...prev }; delete next[item.no!]; return next;
+                      })}
                       shaded={ii % 2 !== 0}
                       ahpW={getAhpLocal(item.no)}
                     />
@@ -1231,9 +1259,9 @@ function SectionHeaderRow({ section, secWeight, ahpW }: { section: CriteriaSecti
   );
 }
 
-function ScoreRow({ item, weight, selected, note, onSelect, onNote, shaded, ahpW }: {
-  item: CriteriaEntry; weight: number; selected: number | undefined; note: string;
-  onSelect: (lv: number) => void; onNote: (v: string) => void; shaded: boolean; ahpW: number | null;
+function ScoreRow({ item, weight, selected, note, attachment, onSelect, onNote, onAttachment, shaded, ahpW }: {
+  item: CriteriaEntry; weight: number; selected: number | undefined; note: string; attachment: EvalAttachment | null;
+  onSelect: (lv: number) => void; onNote: (v: string) => void; onAttachment: (a: EvalAttachment | null) => void; shaded: boolean; ahpW: number | null;
 }) {
   const levelValues = item.levelValues || [1, 2, 3, 4, 5];
   const maxLv       = Math.max(...levelValues);
@@ -1365,7 +1393,7 @@ function ScoreRow({ item, weight, selected, note, onSelect, onNote, shaded, ahpW
       </div>
 
       <div style={{ padding: "6px 6px", display: "flex", alignItems: "center" }}>
-        <NoteCell itemNo={item.no ?? ""} value={note} onChange={onNote} />
+        <NoteCell itemNo={item.no ?? ""} value={note} onChange={onNote} attachment={attachment} onAttachmentChange={onAttachment} />
       </div>
     </div>
   );
@@ -1416,9 +1444,9 @@ function DividerMobile({ label, level, groupWeight }: { label: string; level?: n
   );
 }
 
-function ScoreCardMobile({ item, weight, selected, note, onSelect, onNote, shaded, ahpW }: {
-  item: CriteriaEntry; weight: number; selected: number | undefined; note: string;
-  onSelect: (lv: number) => void; onNote: (v: string) => void; shaded: boolean; ahpW: number | null;
+function ScoreCardMobile({ item, weight, selected, note, attachment, onSelect, onNote, onAttachment, shaded, ahpW }: {
+  item: CriteriaEntry; weight: number; selected: number | undefined; note: string; attachment: EvalAttachment | null;
+  onSelect: (lv: number) => void; onNote: (v: string) => void; onAttachment: (a: EvalAttachment | null) => void; shaded: boolean; ahpW: number | null;
 }) {
   const levelValues = item.levelValues || [1, 2, 3, 4, 5];
   const maxLv       = Math.max(...levelValues);
@@ -1495,7 +1523,7 @@ function ScoreCardMobile({ item, weight, selected, note, onSelect, onNote, shade
         <span style={{ fontSize: 16, fontWeight: 800, color: selected ? "#1b5e20" : "#ccc" }}>{rowScore}</span>
       </div>
 
-      <NoteCell itemNo={item.no ?? ""} value={note} onChange={onNote} />
+      <NoteCell itemNo={item.no ?? ""} value={note} onChange={onNote} attachment={attachment} onAttachmentChange={onAttachment} />
     </div>
   );
 }
@@ -1859,13 +1887,40 @@ function MissingScoresModal({ items, criteria, answered, total, onClose }: {
 }
 
 // ---- NoteCell: คลิกแล้วป๊อปอัพกลางจอ ----------------------------------------
-function NoteCell({ itemNo, value, onChange }: { itemNo: string; value: string; onChange: (v: string) => void }) {
+function NoteCell({ itemNo, value, onChange, attachment, onAttachmentChange }: {
+  itemNo: string; value: string; onChange: (v: string) => void;
+  attachment: EvalAttachment | null; onAttachmentChange: (a: EvalAttachment | null) => void;
+}) {
   const [open,  setOpen]  = useState(false);
   const [draft, setDraft] = useState(value);
+  const [draftAttachment, setDraftAttachment] = useState<EvalAttachment | null>(attachment);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const openPopup = () => { setDraft(value); setOpen(true); };
-  const save      = () => { onChange(draft); setOpen(false); };
-  const cancel    = () => { setDraft(value); setOpen(false); };
+  const openPopup = () => { setDraft(value); setDraftAttachment(attachment); setUploadError(""); setOpen(true); };
+  const save      = () => { if (uploading) return; onChange(draft); onAttachmentChange(draftAttachment); setOpen(false); };
+  const cancel    = () => { setDraft(value); setDraftAttachment(attachment); setOpen(false); };
+
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+    setUploading(true);
+    setUploadError("");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await authFetch("/api/uploads/attachment", { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "แนบไฟล์ไม่สำเร็จ");
+      setDraftAttachment({ path: data.path, name: data.name });
+    } catch (err) {
+      setUploadError((err as Error).message || "แนบไฟล์ไม่สำเร็จ");
+    } finally {
+      setUploading(false);
+    }
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -1876,7 +1931,7 @@ function NoteCell({ itemNo, value, onChange }: { itemNo: string; value: string; 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, draft]);
+  }, [open, draft, draftAttachment, uploading]);
 
   return (
     <>
@@ -1902,9 +1957,14 @@ function NoteCell({ itemNo, value, onChange }: { itemNo: string; value: string; 
           }}>
             {value}
           </span>
+        ) : attachment ? (
+          <span style={{ fontSize: 11, color: "#2e7d32", fontStyle: "italic", display: "flex", alignItems: "center", gap: 4 }}>
+            <Paperclip size={11} /> แนบไฟล์แล้ว
+          </span>
         ) : (
           <span style={{ fontSize: 11, color: "#bbb", fontStyle: "italic" }}>+ หมายเหตุ</span>
         )}
+        {value && attachment && <Paperclip size={11} style={{ marginLeft: 5, color: "#2e7d32", flexShrink: 0 }} />}
       </div>
 
       {/* modal กลางจอ */}
@@ -1966,6 +2026,56 @@ function NoteCell({ itemNo, value, onChange }: { itemNo: string; value: string; 
               <div style={{ fontSize: 11, color: "#aaa", marginTop: 6, textAlign: "right" }}>
                 {draft.length} ตัวอักษร &nbsp;·&nbsp; Ctrl+Enter = บันทึก &nbsp;·&nbsp; Esc = ยกเลิก
               </div>
+
+              {/* attachment */}
+              <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #eee" }}>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  onChange={handleFileSelect}
+                  style={{ display: "none" }}
+                />
+                {draftAttachment ? (
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    background: "#f1f8e9", border: "1.5px solid #a5d6a7", borderRadius: 8,
+                    padding: "8px 12px",
+                  }}>
+                    <Paperclip size={14} style={{ color: "#2e7d32", flexShrink: 0 }} />
+                    <a
+                      href={`${API_BASE}${draftAttachment.path}`}
+                      target="_blank" rel="noopener noreferrer"
+                      style={{ fontSize: 12.5, color: "#1b5e20", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                    >
+                      {draftAttachment.name}
+                    </a>
+                    <button
+                      onClick={() => setDraftAttachment(null)}
+                      title="เอาไฟล์แนบออก"
+                      style={{ background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex", color: "#888", flexShrink: 0 }}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 7,
+                      background: "#fff", border: "1.5px dashed #bbb", borderRadius: 8,
+                      padding: "8px 14px", fontSize: 12.5, color: "#666",
+                      cursor: uploading ? "default" : "pointer", fontFamily: "Sarabun, sans-serif",
+                    }}
+                  >
+                    <Paperclip size={14} />
+                    {uploading ? "กำลังอัปโหลด..." : "แนบไฟล์ (รูปภาพ/เอกสาร)"}
+                  </button>
+                )}
+                {uploadError && (
+                  <div style={{ fontSize: 11.5, color: "#c62828", marginTop: 6 }}>{uploadError}</div>
+                )}
+              </div>
             </div>
 
             {/* footer */}
@@ -1988,15 +2098,17 @@ function NoteCell({ itemNo, value, onChange }: { itemNo: string; value: string; 
               </button>
               <button
                 onClick={save}
+                disabled={uploading}
                 style={{
                   background: "#2e7d32", color: "#fff", border: "none",
                   borderRadius: 8, padding: "10px 32px", fontSize: 14,
-                  fontWeight: 700, cursor: "pointer", fontFamily: "Sarabun, sans-serif",
+                  fontWeight: 700, cursor: uploading ? "default" : "pointer", fontFamily: "Sarabun, sans-serif",
+                  opacity: uploading ? 0.6 : 1,
                 }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "#1b5e20")}
-                onMouseLeave={(e) => (e.currentTarget.style.background = "#2e7d32")}
+                onMouseEnter={(e) => { if (!uploading) e.currentTarget.style.background = "#1b5e20"; }}
+                onMouseLeave={(e) => { if (!uploading) e.currentTarget.style.background = "#2e7d32"; }}
               >
-                บันทึก ✓
+                {uploading ? "กำลังอัปโหลด..." : "บันทึก ✓"}
               </button>
             </div>
           </div>

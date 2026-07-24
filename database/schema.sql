@@ -149,11 +149,6 @@ CREATE TABLE evaluation_sub_criteria (
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   criteria_set    VARCHAR(10) NOT NULL DEFAULT 'legacy',
   level_values    JSONB,                              -- custom level→score map (e.g. [1,3,5]); NULL = default 1-5
-  is_critical     BOOLEAN     NOT NULL DEFAULT FALSE,  -- a score of 1 on this criterion flags the
-                                                        -- whole evaluation as a critical fail (see
-                                                        -- evaluations.has_critical_fail) — e.g. safety/
-                                                        -- legal items where "poor" isn't just a low
-                                                        -- score, it's something Supervisors must see
   UNIQUE (criteria_set, code)
 );
 
@@ -302,10 +297,6 @@ CREATE TABLE evaluations (
   custom_module_items JSONB,                          -- only set when module_code='custom': evaluator-typed
                                                        -- [{no, title, levels:[lvl1,lvl3,lvl5]}], since these
                                                        -- items have no catalog row to look text up from later
-  has_critical_fail   BOOLEAN NOT NULL DEFAULT FALSE, -- TRUE if any is_critical criterion scored 1 here —
-                                                       -- set once at submit time, triggers an immediate
-                                                       -- escalation email to Supervisors (see
-                                                       -- emailService.sendCriticalFailEmail)
   UNIQUE (session_id, role)                          -- one USER eval + one GCP eval per session
 );
 
@@ -330,6 +321,14 @@ CREATE TABLE evaluation_scores (
   -- written before this existed; readers fall back to a live join for those.
   name_th_snapshot           TEXT,
   category_name_th_snapshot  TEXT,
+  -- Optional evidence file attached alongside the note (e.g. a photo of a
+  -- damaged shipment, a certificate scan) — stored on disk under
+  -- backend/uploads/attachments/ (see routes/shared/uploads.ts), not in the
+  -- DB itself. attachment_path is the served URL path
+  -- (/uploads/attachments/<uuid>.<ext>); attachment_name is the original
+  -- filename, kept separately since the on-disk name is UUID-randomized.
+  attachment_path  TEXT,
+  attachment_name  TEXT,
   weighted_score  DECIMAL(8,4)
                     GENERATED ALWAYS AS
                       (CASE WHEN score IS NOT NULL

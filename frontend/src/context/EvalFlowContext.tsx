@@ -41,6 +41,10 @@ export interface EvalResult {
   scores: Record<string, number>;
   weights: Record<string, number>;
   notes: Record<string, string>;
+  // Evidence file attached alongside a note (EvalForm's NoteCell) — keyed
+  // by item code same as scores/weights/notes. Uploaded ahead of submit via
+  // POST /api/uploads/attachment; path/name mirror evaluation_scores.
+  attachments?: Record<string, { path: string; name: string }>;
   // Criterion titles as they were when this evaluation was submitted (see
   // evaluation_scores.name_th_snapshot) — undefined/missing entries just
   // fall back to today's live criteria title, same as before this existed.

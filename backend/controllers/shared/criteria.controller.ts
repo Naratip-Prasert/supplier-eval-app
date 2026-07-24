@@ -52,8 +52,7 @@ async function getCriteria(req: Request, res: Response) {
                       default_weight AS "defaultWeight",
                       display_order AS "displayOrder",
                       is_active AS "isActive",
-                      level_values AS "levelValues",
-                      is_critical AS "isCritical"
+                      level_values AS "levelValues"
                  FROM evaluation_sub_criteria
                 WHERE criteria_set ~ $1
                 ORDER BY substring(criteria_set from '^${funcSetPrefix}(\\d+)')::integer, display_order`,
@@ -66,8 +65,7 @@ async function getCriteria(req: Request, res: Response) {
                       default_weight AS "defaultWeight",
                       display_order AS "displayOrder",
                       is_active AS "isActive",
-                      level_values AS "levelValues",
-                      is_critical AS "isCritical"
+                      level_values AS "levelValues"
                  FROM evaluation_sub_criteria
                 WHERE criteria_set = $1
                 ORDER BY display_order`,
@@ -100,8 +98,7 @@ async function getCriteria(req: Request, res: Response) {
                   default_weight AS "defaultWeight",
                   display_order AS "displayOrder",
                   is_active AS "isActive",
-                  level_values AS "levelValues",
-                  is_critical AS "isCritical"
+                  level_values AS "levelValues"
              FROM evaluation_sub_criteria
             WHERE criteria_set = $1
             ORDER BY display_order, code`,
@@ -133,7 +130,6 @@ async function getCriteria(req: Request, res: Response) {
         defaultWeight: parseFloat(c.defaultWeight),
         displayOrder:  c.displayOrder,
         isActive:      c.isActive,
-        isCritical:    c.isCritical ?? false,
         levelValues:   Array.isArray(c.levelValues) ? c.levelValues : null,
         levels:        levelsByCriterion[c.id] ?? [],
       });
@@ -515,8 +511,8 @@ async function deleteItem(req: Request, res: Response) {
 // ── PATCH /api/criteria/items/:id ────────────────────────────
 async function updateItem(req: Request, res: Response) {
   const { id } = req.params;
-  const { nameTh, detailTh, defaultWeight, code, levelValues, isActive, isCritical } = req.body;
-  if (nameTh === undefined && detailTh === undefined && defaultWeight === undefined && code === undefined && levelValues === undefined && isActive === undefined && isCritical === undefined) {
+  const { nameTh, detailTh, defaultWeight, code, levelValues, isActive } = req.body;
+  if (nameTh === undefined && detailTh === undefined && defaultWeight === undefined && code === undefined && levelValues === undefined && isActive === undefined) {
     return res.status(400).json({ message: 'ไม่มีข้อมูลที่ต้องอัปเดต' });
   }
   // Lets the Admin UI reactivate a soft-deleted item (createItem's 409
@@ -525,9 +521,6 @@ async function updateItem(req: Request, res: Response) {
   // admin is explicitly confirming it, unlike createItem silently doing so.
   if (isActive !== undefined && typeof isActive !== 'boolean') {
     return res.status(400).json({ message: 'isActive ต้องเป็น boolean' });
-  }
-  if (isCritical !== undefined && typeof isCritical !== 'boolean') {
-    return res.status(400).json({ message: 'isCritical ต้องเป็น boolean' });
   }
   if (nameTh !== undefined && !nameTh?.trim()) {
     return res.status(400).json({ message: 'nameTh ต้องไม่เป็นค่าว่าง' });
@@ -554,9 +547,8 @@ async function updateItem(req: Request, res: Response) {
               default_weight = COALESCE($3, default_weight),
               code           = COALESCE($4, code),
               level_values   = CASE WHEN $5 THEN $6::jsonb ELSE level_values END,
-              is_active      = COALESCE($7, is_active),
-              is_critical    = COALESCE($8, is_critical)
-        WHERE id = $9
+              is_active      = COALESCE($7, is_active)
+        WHERE id = $8
         RETURNING id`,
       [
         nameTh        !== undefined ? nameTh : null,
@@ -566,7 +558,6 @@ async function updateItem(req: Request, res: Response) {
         levelValues !== undefined,
         levelValues !== undefined ? (levelValues === null ? null : JSON.stringify(levelValues)) : null,
         isActive !== undefined ? isActive : null,
-        isCritical !== undefined ? isCritical : null,
         id,
       ]
     );

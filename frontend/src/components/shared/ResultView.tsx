@@ -12,8 +12,8 @@ import { Header, GreenButton, useModal, useClickOutside } from "@/components";
 import { isPostEvalType, GRADE_MAP, GRADE_GUIDE, getCriteria, getScoredCriteriaFrom, findEsgSectionIndex, type CriteriaEntry } from "@/constants";
 import { useCriteriaOverrides, useFunctionOverrides } from "@/context/CriteriaContext";
 import { applyOverrides } from "@/utils/shared/criteriaOverlay";
-import { authFetch } from "@/utils/api";
-import { Download, Printer, CheckCircle2, XCircle } from "lucide-react";
+import { authFetch, API_BASE } from "@/utils/api";
+import { Download, Printer, CheckCircle2, XCircle, Paperclip } from "lucide-react";
 import type { EvalFormData, EvalResult } from "@/context/EvalFlowContext";
 import type { AuthUser } from "@/context/AuthContext";
 
@@ -269,9 +269,10 @@ export default function ResultView({ formData, result, user, profilePic, onBack,
     if (!ok) { setDoneStatus("idle"); return; }
     setDoneErrMsg("");
     try {
-      const rawScores  = result.scores  ?? {};
-      const rawNotes   = result.notes   ?? {};
-      const rawWeights = result.weights ?? {};
+      const rawScores      = result.scores      ?? {};
+      const rawNotes       = result.notes       ?? {};
+      const rawWeights     = result.weights     ?? {};
+      const rawAttachments = result.attachments ?? {};
 
       // Build maxLv lookup from CRITERIA so backend divides by correct max
       const maxLvMap: Record<string, number> = {};
@@ -286,7 +287,11 @@ export default function ResultView({ formData, result, user, profilePic, onBack,
           const maxLv   = maxLvMap[no] ?? 5;
           // Normalize to 0-5 scale so backend formula (score/5)*weight is always correct
           const normScore = rawLv != null ? (rawLv / maxLv) * 5 : rawLv;
-          return [no, { score: normScore, weight: rawWeights[no], note: rawNotes[no] ?? "" }];
+          const attachment = rawAttachments[no];
+          return [no, {
+            score: normScore, weight: rawWeights[no], note: rawNotes[no] ?? "",
+            attachmentPath: attachment?.path ?? null, attachmentName: attachment?.name ?? null,
+          }];
         })
       );
       const res = await authFetch("/api/evaluations", {
@@ -725,6 +730,17 @@ export default function ResultView({ formData, result, user, profilePic, onBack,
                             </td>
                             <td style={{ padding: "5px 10px", fontSize: 11, lineHeight: 1.5, color: "#2d3748" }}>
                               {item.title}
+                              {item.no && result.attachments?.[item.no] && (
+                                <a
+                                  href={`${API_BASE}${result.attachments[item.no]!.path}`}
+                                  target="_blank" rel="noopener noreferrer"
+                                  title={result.attachments[item.no]!.name}
+                                  style={{ display: "inline-flex", alignItems: "center", gap: 3, marginLeft: 8, color: "#1565c0", fontSize: 10.5, verticalAlign: "middle" }}
+                                  className="no-print"
+                                >
+                                  <Paperclip size={10} /> ไฟล์แนบ
+                                </a>
+                              )}
                             </td>
                             <td style={{ padding: "5px 10px", textAlign: "center", fontSize: 11, color: "#4a5568" }}>
                               {fmtN(iw)}%

@@ -33,7 +33,6 @@ interface EvalEntry {
   profilePicture?: string | null;
   totalScore: number | string;
   grade: string;
-  hasCriticalFail?: boolean;
 }
 
 interface QueueSession {
@@ -846,15 +845,6 @@ export default function SupervisorPage() {
                           <div style={{ marginTop: 7, fontWeight: 700, color: GRADE_COLOR[ev.grade] || "#0f172a" }}>
                             {ev.totalScore} <span style={{ fontWeight: 500, fontSize: 11, color: "#94a3b8" }}>({ev.grade})</span>
                           </div>
-                          {ev.hasCriticalFail && (
-                            <div style={{
-                              display: "flex", alignItems: "center", gap: 4, marginTop: 7, width: "fit-content",
-                              background: "#fef2f2", color: "#b91c1c", border: "1px solid #fecaca",
-                              padding: "2px 8px", borderRadius: 6, fontSize: 10.5, fontWeight: 700,
-                            }}>
-                              <AlertCircle size={11} /> Critical Fail
-                            </div>
-                          )}
                         </div>
                       );
                     })}

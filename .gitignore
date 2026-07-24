@@ -26,6 +26,7 @@ dist-ssr
 # Backend
 .env
 backend/node_modules
+backend/uploads
 
 # Loose stdout/stderr captures from ad-hoc `node server.js > out 2> err` runs
 server_out.txt

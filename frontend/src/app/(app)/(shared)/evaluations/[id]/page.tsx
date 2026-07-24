@@ -67,6 +67,7 @@ function EvalDetailPageInner() {
         const scoresObj: Record<string, number> = {};
         const weightsObj: Record<string, number> = {};
         const notesObj: Record<string, string> = {};
+        const attachmentsObj: Record<string, { path: string; name: string }> = {};
         const titleSnapshots: Record<string, string> = {};
         const categorySnapshots: Record<string, string> = {};
 
@@ -74,23 +75,25 @@ function EvalDetailPageInner() {
         const raw = d.rawScores ?? {};
         const hasRaw = Object.keys(raw).length > 0;
         Object.entries(raw).forEach(([code, entry]) => {
-          const e = entry as { score?: number; weight?: number; note?: string };
+          const e = entry as { score?: number; weight?: number; note?: string; attachmentPath?: string; attachmentName?: string };
           if (e.score != null) {
             const maxLv = maxLvMap[code] ?? 5;
             scoresObj[code] = (Number(e.score) / 5) * maxLv;
           }
           if (e.weight != null) weightsObj[code] = Number(e.weight);
           notesObj[code] = e.note || "";
+          if (e.attachmentPath) attachmentsObj[code] = { path: e.attachmentPath, name: e.attachmentName || "ไฟล์แนบ" };
         });
 
         // 2. Overlay with DB evaluation_scores (also stored as 0-5 normalized)
-        (d.scores ?? []).forEach((s: { code: string; score?: number; weight?: number; note?: string; nameTh?: string; categoryNameTh?: string }) => {
+        (d.scores ?? []).forEach((s: { code: string; score?: number; weight?: number; note?: string; nameTh?: string; categoryNameTh?: string; attachmentPath?: string; attachmentName?: string }) => {
           if (s.score != null) {
             const maxLv = maxLvMap[s.code] ?? 5;
             scoresObj[s.code] = (Number(s.score) / 5) * maxLv;
           }
           if (s.weight != null) weightsObj[s.code] = Number(s.weight);
           notesObj[s.code] = s.note || "";
+          if (s.attachmentPath) attachmentsObj[s.code] = { path: s.attachmentPath, name: s.attachmentName || "ไฟล์แนบ" };
           if (s.categoryNameTh) categorySnapshots[s.code] = s.categoryNameTh;
           // Present on every row (backend falls back to the live name when no
           // snapshot was taken) — harmless to apply to old evaluations too,
@@ -125,6 +128,7 @@ function EvalDetailPageInner() {
             scores:       scoresObj,
             weights:      weightsObj,
             notes:        notesObj,
+            attachments:  attachmentsObj,
             radarOverride,
             moduleCode:   d.moduleCode ?? null,
             customItems:  d.customModuleItems ?? [],

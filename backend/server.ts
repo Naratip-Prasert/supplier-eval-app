@@ -5,6 +5,7 @@ const express      = require('express'); // express เป็น framework ท�
 const helmet       = require('helmet'); // ตั้ง security headers มาตรฐาน (CSP, HSTS, X-Frame-Options ฯลฯ) และปิด X-Powered-By
 const cors         = require('cors'); // เช็คว่าโดเมนที่เรียกเข้ามา ได้รับอนุญาตให้ดึงข้อมูลจาก API ของเราไหม
 const cookieParser = require('cookie-parser');
+const path         = require('path');
 
 const pool = require('./db'); // ./db already calls dotenv.config() — no need to call it again here
 
@@ -37,6 +38,12 @@ app.use(cors({ // app.use(...) คือการเพิ่ม middleware - �
 }));
 app.use(express.json({ limit: '8mb' })); //บอก Express ให้แปลง JSON ที่ส่งมาใน request body เป็น JavaScript object อัตโนมัติ
 app.use(cookieParser());
+
+// Evidence-file attachments (EvalForm note popup) — served back out as
+// plain downloadable links, never embedded via <img>/fetch from the
+// frontend, so helmet's default Cross-Origin-Resource-Policy (which would
+// otherwise block a cross-origin <img src>) never comes into play here.
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Blocks CSRF against the two multer/multipart upload routes below — those
 // use a CORS "simple" content-type (multipart/form-data) that skips the
@@ -112,6 +119,7 @@ app.use('/api', apiLimiter);
 
 app.use('/api/auth',        require('./routes/public/auth'));          // public
 app.use('/api/evaluations', requireAuth, require('./routes/shared/evaluations'));
+app.use('/api/uploads',     requireAuth, require('./routes/shared/uploads'));
 app.use('/api/employees',   requireAuth, require('./routes/shared/employees'));
 app.use('/api/suppliers',   requireAuth, require('./routes/shared/suppliers'));
 app.use('/api/criteria',    requireAuth, require('./routes/shared/criteria'));
