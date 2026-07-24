@@ -1,10 +1,30 @@
 'use strict';
-import type { Resend as ResendClient } from 'resend';
-const { Resend } = require('resend');
+export {}; // forces file (module) scope — without a top-level import/export, TS treats this
+           // as a global script and its top-level `const`s (pool, transporter, FROM, ...)
+           // collide with same-named consts in other non-module files like cronJobs.ts
+const nodemailer = require('nodemailer');
 const pool = require('../db');
-const resend: ResendClient = new Resend(process.env.RESEND_API_KEY);
 
-const FROM    = process.env.EMAIL_FROM || 'Supplier Eval <onboarding@resend.dev>';
+// Office 365 / Outlook SMTP relay, sent through the mailbox at
+// SMTP_USER/SMTP_PASS — lets this app send real email using a company
+// Microsoft 365 account instead of a separate provider (Resend) that needed
+// its own domain verification. If the tenant has legacy SMTP AUTH disabled
+// (Microsoft's default since 2022 for new tenants), sends will fail with an
+// auth error — that has to be re-enabled per-mailbox by the org's admin.
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || 'smtp.office365.com',
+  port: Number(process.env.SMTP_PORT) || 587,
+  secure: false, // STARTTLS on port 587, not implicit TLS
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+});
+
+// Office 365 generally requires (or silently rewrites) the From address to
+// match the authenticated mailbox, so that's the sensible default rather
+// than an arbitrary display address.
+const FROM    = process.env.EMAIL_FROM || process.env.SMTP_USER;
 const FE_URL  = process.env.FRONTEND_URL || 'http://localhost:5173';
 
 interface TaskEmailInfo {
@@ -98,8 +118,8 @@ async function send(
   let lastErr: any;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const result = await resend.emails.send({
-        from: FROM, to: [to], subject, html,
+      const result = await transporter.sendMail({
+        from: FROM, to, subject, html,
         ...(cc && cc.length > 0 ? { cc } : {}),
       });
       await logEmail(taskId, emailType, to, subject, 'sent', null, attempt);
@@ -196,39 +216,6 @@ async function sendOverdueEscalationEmail(
   return send(supervisorEmail, `[SPE] Escalation: เกินกำหนดประเมิน ${supplier.supplier_name}`, html, { taskId: task.id, emailType: 'overdue_escalation' });
 }
 
-// ── 3c. Critical fail escalation → Supervisor (fired immediately at
-// submit time, not on a cron schedule — a critical-criterion score of 1
-// shouldn't wait until the next day's job to reach anyone) ────────────
-interface CriticalFailInfo {
-  supplier_name: string;
-  vendor_code: string;
-  eval_type_label?: string;
-  submitted_by_name?: string | null;
-  submitted_by_role?: string;
-  failed_items: string[]; // name_th of each critical criterion that scored 1
-}
-async function sendCriticalFailEmail(
-  supervisorEmail: string,
-  supervisorName: string | null | undefined,
-  info: CriticalFailInfo
-) {
-  const html = wrap('Critical Fail: พบข้อวิกฤตที่ได้คะแนนต่ำสุด', `
-    <p>เรียน <strong>${esc(supervisorName || supervisorEmail)}</strong></p>
-    <p>การประเมิน Supplier ต่อไปนี้มีข้อวิกฤต (Critical) ที่ได้คะแนน 1 — กรุณาพิจารณา corrective action:</p>
-    <table style="width:100%;border-collapse:collapse;margin:12px 0">
-      <tr><td style="padding:6px 0;color:#555;width:140px">Supplier</td><td><strong>${esc(info.supplier_name)}</strong></td></tr>
-      <tr><td style="padding:6px 0;color:#555">รหัส</td><td>${esc(info.vendor_code)}</td></tr>
-      <tr><td style="padding:6px 0;color:#555">ประเภทการประเมิน</td><td>${esc(info.eval_type_label || '')}</td></tr>
-      <tr><td style="padding:6px 0;color:#555">ผู้ประเมิน</td><td>${esc(info.submitted_by_name || '')} (${esc(info.submitted_by_role || '')})</td></tr>
-    </table>
-    <p style="background:#fef2f2;padding:12px;border-radius:6px;border-left:4px solid #c62828">
-      <strong>ข้อที่ fail:</strong><br/>${info.failed_items.map(esc).join('<br/>')}
-    </p>
-    <a href="${FE_URL}/supervisor" style="display:inline-block;background:#c62828;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">เข้าสู่ระบบ</a>
-  `);
-  return send(supervisorEmail, `[SPE] Critical Fail: ${info.supplier_name}`, html, { emailType: 'critical_fail' });
-}
-
 // ── 4. Thank-you (หลัง submit) ────────────────────────────────
 async function sendThankyouEmail(task: TaskEmailInfo, supplier: SupplierEmailInfo) {
   const html = wrap('ขอบคุณสำหรับการประเมิน', `
@@ -300,7 +287,6 @@ module.exports = {
   sendReminderEmail,
   sendOverdueEmail,
   sendOverdueEscalationEmail,
-  sendCriticalFailEmail,
   sendThankyouEmail,
   sendSupervisorNotifyEmail,
   sendSupervisorResultEmail,
