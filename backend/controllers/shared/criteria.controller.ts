@@ -14,6 +14,11 @@ const pool   = require('../../db');
 async function getCriteria(req: Request, res: Response) {
   try {
     const et = (req.query.evalType as string) ?? '';
+    // Flat, single-group criteria sets (service-direction evaluations) —
+    // no Core/Function/ESG split, just sections summing to 100%. Mirrors
+    // the read pattern in serviceEvaluations.controller.ts's criteria().
+    const FLAT_SETS: Record<string, string> = { service: 'SVC%', sup2user: 'S2U%' };
+    const isFlatLoad = et in FLAT_SETS;
     const isFunctionLoad = et === 'function' || /^m\d+$/i.test(et);
     // Function modules are configured separately per Pre/Post track (each
     // track needs its own weight so Core+Func+ESG can independently total
@@ -25,7 +30,36 @@ async function getCriteria(req: Request, res: Response) {
 
     let categoriesResult, criteriaResult, levelsResult;
 
-    if (isFunctionLoad) {
+    if (isFlatLoad) {
+      [categoriesResult, criteriaResult, levelsResult] = await Promise.all([
+        pool.query(
+          `SELECT id, code, name_th AS "nameTh", name_en AS "nameEn",
+                  total_weight AS "totalWeight", display_order AS "displayOrder"
+             FROM evaluation_main_criteria
+            WHERE code LIKE $1 AND (is_active = TRUE OR is_active IS NULL)
+            ORDER BY display_order, code`,
+          [FLAT_SETS[et]]
+        ),
+        pool.query(
+          `SELECT id, category_id AS "categoryId", code,
+                  name_th AS "nameTh", name_en AS "nameEn",
+                  detail_th AS "detailTh",
+                  default_weight AS "defaultWeight",
+                  display_order AS "displayOrder",
+                  is_active AS "isActive",
+                  level_values AS "levelValues"
+             FROM evaluation_sub_criteria
+            WHERE criteria_set = $1 AND is_active = TRUE
+            ORDER BY display_order, code`,
+          [et]
+        ),
+        pool.query(
+          `SELECT criterion_id AS "criterionId", level, description
+             FROM score_level_descriptions
+            ORDER BY criterion_id, level`
+        ),
+      ]);
+    } else if (isFunctionLoad) {
       const isAllModules = et === 'function';
       [categoriesResult, criteriaResult, levelsResult] = await Promise.all([
         isAllModules

@@ -331,6 +331,14 @@ export default function TasksPanel({ embedded = false }: { embedded?: boolean })
       "ยืนยันการแก้ไข"
     );
     if (!ok) return;
+    // Editing the email alone doesn't send anything right away — the
+    // backend just clears invitation_sent_at/reminder_sent_at so the next
+    // daily cron run (08:00) picks it up automatically. That silence reads
+    // as "the email didn't send" to an admin expecting an immediate notify
+    // like a fresh upload gets, so flag it explicitly when the email
+    // actually changed and point at the separate "ส่ง reminder" button.
+    const originalTask = tasks.find(t => t.id === taskId);
+    const emailChanged = !!originalTask && editDraft.assignedEmail.trim().toLowerCase() !== (originalTask.assignedEmail || "").toLowerCase();
     setSavingEdit(true);
     try {
       const res  = await authFetch(`/api/admin/tasks/${taskId}`, {
@@ -341,13 +349,18 @@ export default function TasksPanel({ embedded = false }: { embedded?: boolean })
       const data = await res.json();
       if (!res.ok) throw new Error(data.message);
       setEditingId(null);
-      setRemindMsg({ ok: true, msg: "แก้ไขสำเร็จ" });
+      setRemindMsg({
+        ok: true,
+        msg: emailChanged
+          ? "แก้ไขสำเร็จ — ยังไม่ได้ส่งอีเมลแจ้งผู้รับผิดชอบใหม่ (จะส่งอัตโนมัติในรอบพรุ่งนี้ 08:00 หรือกด \"ส่ง reminder\" ที่แถวนี้ถ้าต้องการแจ้งทันที)"
+          : "แก้ไขสำเร็จ",
+      });
       await fetchAll();
     } catch (e) {
       setRemindMsg({ ok: false, msg: (e as Error).message });
     } finally {
       setSavingEdit(false);
-      setTimeout(() => setRemindMsg(null), 4000);
+      setTimeout(() => setRemindMsg(null), emailChanged ? 8000 : 4000);
     }
   }
 

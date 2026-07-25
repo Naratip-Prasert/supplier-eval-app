@@ -125,6 +125,7 @@ app.use('/api/suppliers',   requireAuth, require('./routes/shared/suppliers'));
 app.use('/api/criteria',    requireAuth, require('./routes/shared/criteria'));
 app.use('/api/sessions',    requireAuth, require('./routes/supervisor/sessions'));
 app.use('/api/admin',       requireAuth, require('./routes/admin/admin'));
+app.use('/api/admin',       requireAuth, require('./routes/admin/emailSettings'));
 app.use('/api/supervisor',  requireAuth, require('./routes/supervisor/supervisor'));
 // Suppliers have no login in this system — reached only via a one-time
 // emailed token, see database/CROSS_EVALUATION_SPEC.md.
@@ -194,6 +195,16 @@ pool.connect()
     await seedCriteriaFromConstants(client)
       .then(() => console.log('✅ evaluation_sub_criteria seeded from shared/criteria-data.json'))
       .catch((err: any) => console.warn('criteria seed warning:', err.message));
+
+    const { seedSupplierToBuyerCriteria } = require('./utils/seedSupplierToBuyerCriteria');
+    await seedSupplierToBuyerCriteria(client)
+      .then(() => console.log('✅ evaluation_sub_criteria seeded from shared/supplierToBuyerCriteria.json'))
+      .catch((err: any) => console.warn('supplier-to-buyer criteria seed warning:', err.message));
+
+    const { seedEmailTemplates } = require('./utils/seedEmailTemplates');
+    await seedEmailTemplates(client)
+      .then(() => console.log('✅ email_templates / email_settings seeded with default copy'))
+      .catch((err: any) => console.warn('email template seed warning:', err.message));
 
     // Create default ADMIN account if none exists. The bootstrap password
     // is randomly generated (not a fixed, guessable default like the old

@@ -8,7 +8,7 @@
 import type { Request, Response } from 'express';
 import type { PoolClient } from 'pg';
 const pool   = require('../../db');
-const { sendSupervisorNotifyEmail, sendThankyouEmail } = require('../../utils/emailService');
+const { sendSupervisorNotifyEmail, sendThankyouEmail, getEmailSetting } = require('../../utils/emailService');
 
 // ── helpers ──────────────────────────────────────────────────
 
@@ -346,7 +346,8 @@ async function createEvaluation(req: Request, res: Response) {
       if (parseInt(r.rows[0].cnt, 10) < 2) return;
 
       // Both submitted — create supervisor review record
-      const reviewDue = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      const reviewDueDays = await getEmailSetting('review_due_days');
+      const reviewDue = new Date(Date.now() + reviewDueDays * 24 * 60 * 60 * 1000);
       // Two near-simultaneous USER+GCP submission commits can both read
       // count=2 and reach here — ON CONFLICT (backed by a partial unique
       // index on session_id WHERE status='pending', schema.sql) keeps only
@@ -502,11 +503,18 @@ async function listMyEvaluations(req: Request, res: Response) {
 }
 
 // ── GET /api/evaluations/my-tasks ─────────────────────────────
-// Returns pending/overdue evaluation tasks assigned to the current user
-// (by email), so GCP/USER can see which suppliers they must evaluate
-// instead of typing a vendor code blind.
+// Returns pending/overdue evaluation tasks assigned to the current user, so
+// GCP/USER can see which suppliers they must evaluate instead of typing a
+// vendor code blind.
+//
+// Matches by BOTH assigned_employee_id (the stable FK, resolved at task
+// creation time) and assigned_email (frozen at that same moment) — an
+// email-only match used to strand every pre-existing task the moment an
+// employee's email changed, since assigned_email never gets updated
+// retroactively but assigned_employee_id still correctly points at the
+// same employee row.
 async function myTasks(req: Request, res: Response) {
-  if (!req.user!.email) return res.json([]);
+  if (!req.user!.email && !req.user!.empId) return res.json([]);
   try {
     const result = await pool.query(`
       SELECT
@@ -527,11 +535,14 @@ async function myTasks(req: Request, res: Response) {
       FROM evaluation_tasks et
       JOIN evaluation_sessions es ON es.id = et.session_id
       JOIN suppliers s             ON s.id = et.supplier_id
-      WHERE et.assigned_email = $1
+      WHERE (
+        et.assigned_employee_id = (SELECT id FROM employees WHERE UPPER(employee_id) = UPPER($1) LIMIT 1)
+        OR et.assigned_email = $2
+      )
         AND et.status != 'completed'
         AND es.status IN ('pending', 'in_progress', 'returned')
       ORDER BY et.due_date ASC
-    `, [req.user!.email]);
+    `, [req.user!.empId, req.user!.email]);
     res.json(result.rows);
   } catch (err: any) {
     console.error('GET /api/evaluations/my-tasks error:', err);
@@ -546,7 +557,7 @@ async function myTasks(req: Request, res: Response) {
 // tracker (Not Started → In Process → Submitted → Approved/Returned)
 // that keeps following the session after their own part is done.
 async function myTimeline(req: Request, res: Response) {
-  if (!req.user!.email) return res.json([]);
+  if (!req.user!.email && !req.user!.empId) return res.json([]);
   try {
     const result = await pool.query(`
       SELECT
@@ -571,10 +582,13 @@ async function myTimeline(req: Request, res: Response) {
       FROM evaluation_tasks et
       JOIN evaluation_sessions es ON es.id = et.session_id
       JOIN suppliers s             ON s.id = et.supplier_id
-      WHERE et.assigned_email = $1
+      WHERE (
+        et.assigned_employee_id = (SELECT id FROM employees WHERE UPPER(employee_id) = UPPER($1) LIMIT 1)
+        OR et.assigned_email = $2
+      )
       ORDER BY es.created_at DESC
       LIMIT 50
-    `, [req.user!.email]);
+    `, [req.user!.empId, req.user!.email]);
     res.json(result.rows);
   } catch (err: any) {
     console.error('GET /api/evaluations/my-timeline error:', err);

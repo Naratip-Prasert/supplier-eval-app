@@ -1,15 +1,14 @@
-AdminPage shell renders pixel-perfect, matching the original design exactly (tab cards, error handling, all identical). That "1 Issue" badge in the corner is just Next.jswhich are the expected 403s from testing unauthorized access — not a bug.
+Confirmed working end-to-end — popup UI shows the attach button correctly, "ยกเลิก" correctly discards the draft (no test note leaked into real task data), backend upload endpoint returns 201 with a working file path, and the static route serves the file back correctly.
 
-Track B pages 4-11 are complete. Summary of this session's work:
+สรุปฟีเจอร์แนบไฟล์ในหมายเหตุ EvalForm — เสร็จแล้ว:
 
-Track A (backend) — 100% done, fully TypeScript, verified end-to-end including a real compiled production build.
+Backend:
+- database/schema.sql + DB จริง — เพิ่ม attachment_path, attachment_name ใน evaluation_scores
+- backend/routes/shared/uploads.ts + controllers/shared/uploads.controller.ts — endpoint ใหม่ POST /api/uploads/attachment เก็บไฟล์ที่ backend/uploads/attachments/ (ตั้งชื่อไฟล์แบบ UUID กัน path traversal/ชื่อชนกัน) รับได้ทุกประเภทไฟล์ จำกัดขนาด 15MB
+- backend/uploads/ ใส่ไว้ใน .gitignore แล้ว (ไฟล์ที่อัปโหลดจะไม่ถูก commit)
 
-Track B (frontend) — done so far:
-- Next.js + TS app scaffolded, groundwork wired (shared JSON import, env vars, browser-lib handling)
-- All shared utils/components ported to TS
-- Pilot page (supplier feedback) verified in a real browser against your live backend
-- Full auth architecture (AuthContext, (app) layout guard, CriteriaConlogin
-- 10 of 14 pages ported and build-verified: SupplierFeedback, Login, Portal, Profile, UploadHistory, ServiceEval, History, Supervisor, Landing, AdminPage (+ TasksPanel + AdminUploadModal as supporting components)
-- Full production build passes cleanly for all 13 routes
+Frontend:
+- ป๊อปอัพหมายเหตุใน EvalForm มีปุ่ม "แนบไฟล์ (รูปภาพ/เอกสาร)" ใต้ช่องข้อความ อัปโหลดทันทีตอนเลือกไฟล์ มีปุ่มลบไฟล์ที่แนบได้
+- แสดงลิงก์ "ไฟล์แนบ" ในตารางสรุปผลทั้งหน้า preview หลังประเมินเสร็จ และหน้าประวัติ (/evaluations/[id])
 
-I created one throwaway test account (E2E-VERIFY-USER, USER role) in your DB for verification — let me know if you'd like me to delete it, or I can leave it for continued testing. Taking a break here as requested — ping me when you want to continue with the last 3 pages.
+ตรวจสอบแล้ว: tsc ผ่านทั้ง 2 ฝั่ง, next build ผ่าน, ทดสอบ endpoint จริงผ่าน API เห็นไฟล์ถูกเซฟและดึงกลับมาได้จริง

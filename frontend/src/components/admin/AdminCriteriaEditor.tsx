@@ -1135,7 +1135,25 @@ export default function AdminCriteriaEditor() {
     esgNormalized.current  = { ho: false, factory: false };
     coreNormalized.current = false;
     savedSections.current  = null;
+    // Flat, single-group sets (service-direction evaluations) — no
+    // Function-module track to fetch, no Core/ESG split; every section
+    // just lives together in coreEsgSections and is treated as "Core"
+    // (isEsgCategory never matches these code/name shapes), which is
+    // exactly the single-pool behavior these tabs need for free.
+    const isFlat = et === 'service' || et === 'sup2user';
     try {
+      if (isFlat) {
+        const r1 = await authFetch(`/api/criteria?evalType=${et}`);
+        if (!r1.ok) throw new Error();
+        const d1 = await r1.json() as CritSection[];
+        setCoreEsgSections(d1);
+        setFuncSections([]);
+        savedSections.current = d1;
+        const total = d1.reduce((s, c) => s + (parseFloat(String(c.totalWeight)) || 0), 0);
+        setCoreTarget(total);
+        setEsgTarget(0);
+        return;
+      }
       const track = et === 'post_eval' ? 'post' : 'pre';
       const [r1, r2] = await Promise.all([
         authFetch(`/api/criteria?evalType=${et}`),
@@ -1931,6 +1949,7 @@ export default function AdminCriteriaEditor() {
   const totalWeight = r2adm(coreWeight + funcWeight + esgWeight);
   const weightOk    = Math.abs(totalWeight - 100) < 0.1;
   const allEmpty    = !loading && coreEsgSections.length === 0 && funcSections.length === 0;
+  const isFlatTab   = evalType === 'service' || evalType === 'sup2user';
 
   // Function: evaluator picks one M1-M7 module; each module carries the
   // full Function weight (admin-configurable, defaults to 100 − Core − ESG)
@@ -1949,11 +1968,13 @@ export default function AdminCriteriaEditor() {
             เปลี่ยนเกณฑ์และ Parameter
           </div>
 
-          {/* PRE / POST toggle */}
-          <div style={{ display: "flex", background: "#f0f4f0", borderRadius: 10, padding: 3, gap: 2 }}>
+          {/* Pre / Post / User→Buyer / Supplier→User Buyer toggle */}
+          <div style={{ display: "flex", background: "#f0f4f0", borderRadius: 10, padding: 3, gap: 2, flexWrap: "wrap" }}>
             {[
               { key: "pre_eval",  label: "Pre — ผู้ขายใหม่" },
               { key: "post_eval", label: "Post — ประเมินประจำ" },
+              { key: "service",   label: "User→Buyer" },
+              { key: "sup2user",  label: "Supplier→User Buyer" },
             ].map(opt => (
               <SegButton key={opt.key} active={evalType === opt.key} onClick={() => setEvalType(opt.key)}>
                 {opt.label}
@@ -1971,9 +1992,11 @@ export default function AdminCriteriaEditor() {
           }}>
             {weightOk ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}
             รวม: {totalWeight.toFixed(1)} / 100
-            <span style={{ fontWeight: 400, color: "#888", fontSize: 11 }}>
-              (Core {coreWeight.toFixed(1)} + Func {funcWeight.toFixed(1)} + ESG {esgWeight.toFixed(1)})
-            </span>
+            {!isFlatTab && (
+              <span style={{ fontWeight: 400, color: "#888", fontSize: 11 }}>
+                (Core {coreWeight.toFixed(1)} + Func {funcWeight.toFixed(1)} + ESG {esgWeight.toFixed(1)})
+              </span>
+            )}
           </div>
 
           <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
@@ -2036,8 +2059,36 @@ export default function AdminCriteriaEditor() {
         </div>
       )}
 
-      {/* ── Three Part Cards ─── */}
-      {!loading && !allEmpty && (
+      {/* ── Criteria cards ─── */}
+      {!loading && !allEmpty && (isFlatTab ? (
+        <PartCard label={evalType === 'service' ? 'User→Buyer' : 'Supplier→User Buyer'}
+          weight={coreWeight} onWeightSave={handleCoreWeightSave} disabled={!!saving}>
+          {coreSections.length === 0 && addingSection !== 'core'
+            ? <div style={{ textAlign: "center", padding: "30px", color: "#bbb", fontSize: 13 }}>ไม่พบข้อมูล — กด &quot;เพิ่มรายการที่ขาดหาย&quot;</div>
+            : coreSections.map((section, idx) => (
+                <SectionCard key={section.id ?? idx} section={section} idx={idx}
+                  onUpdate={handleUpdate} onOpenLevels={setLevelsModal}
+                  saving={saving} disabled={!!saving}
+                  onDelete={handleDeleteSection}
+                />
+              ))
+          }
+          {addingSection === 'core'
+            ? <AddSectionRow saving={savingSection} onCancel={() => setAddingSection(null)}
+                onSave={({ nameTh, totalWeight: tw }) => handleAddSection(
+                  evalType === 'service' ? 'SVC' : 'S2U-CAT', nameTh, tw
+                )}
+              />
+            : <button onClick={() => setAddingSection('core')} disabled={!!saving}
+                style={{
+                  marginTop: 8, display: "flex", alignItems: "center", gap: 5,
+                  padding: "6px 14px", borderRadius: 8, border: "1.5px dashed #a5d6a7",
+                  background: "#f6faf6", color: "#1b5e20", fontFamily: FONT,
+                  fontSize: 12, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer",
+                }}>+ เพิ่มหัวข้อ</button>
+          }
+        </PartCard>
+      ) : (
         <>
           {/* Core */}
           <PartCard label="Core" weight={coreWeight} onWeightSave={handleCoreWeightSave} disabled={!!saving}
@@ -2138,7 +2189,7 @@ export default function AdminCriteriaEditor() {
             }
           </PartCard>
         </>
-      )}
+      ))}
 
       {/* ── Levels modal ─── */}
       {levelsModal && (

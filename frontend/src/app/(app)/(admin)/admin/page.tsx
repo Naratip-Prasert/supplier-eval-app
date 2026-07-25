@@ -14,6 +14,7 @@ import { useAuth, type AuthUser } from "@/context/AuthContext";
 import { authFetch } from "@/utils/api";
 import TasksPanel from "@/components/admin/TasksPanel";
 import AdminCriteriaEditor from "@/components/admin/AdminCriteriaEditor";
+import EmailSettingsEditor from "@/components/admin/EmailSettingsEditor";
 import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter, type DateFilter } from "@/utils/shared/dateFilter";
 import { SESSION_STATUS_LABELS, SESSION_STATUS_COLORS, getDisplayStatus } from "@/utils/shared/statusLabels";
 import { TimelineStepper } from "@/components/shared/TimelineStepper";
@@ -22,7 +23,7 @@ import { SortableTh, nextSort, type SortState } from "@/components/shared/Sortab
 import {
   Users, ClipboardList, Upload,
   ArrowLeft, Search, RefreshCw, X,
-  AlertCircle, SlidersHorizontal, Star, type LucideIcon,
+  AlertCircle, SlidersHorizontal, Star, Mail, type LucideIcon,
 } from "lucide-react";
 import { ROLE_THEME, GRADE_COLOR } from "@/styles/theme";
 
@@ -39,29 +40,44 @@ interface TabDef {
   icon: LucideIcon;
   color: string;
   circleBg: string;
+  group: "data" | "settings";
 }
 
 const TABS: TabDef[] = [
   {
     key: "employees", label: "พนักงาน", labelEn: "Employees", icon: Users,
     color: "#1b5e20", circleBg: "radial-gradient(circle at 38% 35%, #f1f8e9, #a5d6a7 130%)",
+    group: "data",
   },
   {
     key: "tasks", label: "งานประเมิน (Upload)", labelEn: "Evaluation Tasks", icon: Upload,
     color: "#00897b", circleBg: "radial-gradient(circle at 38% 35%, #e0f7f5, #80cbc4 130%)",
+    group: "data",
   },
   {
     key: "sessions", label: "ผลและประวัติการประเมิน", labelEn: "Results & History", icon: ClipboardList,
     color: "#6a1b9a", circleBg: "radial-gradient(circle at 38% 35%, #f3e8fd, #b39ddb 130%)",
+    group: "data",
   },
   {
     key: "serviceEval", label: "ผลประเมินเชิงบริการ", labelEn: "Service Feedback", icon: Star,
     color: "#e65100", circleBg: "radial-gradient(circle at 38% 35%, #fff3e0, #ffcc80 130%)",
+    group: "data",
   },
   {
     key: "criteria", label: "เปลี่ยนเกณฑ์และ Parameter", labelEn: "Criteria Editor", icon: SlidersHorizontal,
     color: "#bf360c", circleBg: "radial-gradient(circle at 38% 35%, #fbe9e7, #ffab91 130%)",
+    group: "settings",
   },
+  {
+    key: "emailParams", label: "Email Parameter", labelEn: "Email Settings", icon: Mail,
+    color: "#1565c0", circleBg: "radial-gradient(circle at 38% 35%, #e3f2fd, #90caf9 130%)",
+    group: "settings",
+  },
+];
+const TAB_GROUPS: { key: "data" | "settings"; label: string }[] = [
+  { key: "data",     label: "ข้อมูลและการประเมิน" },
+  { key: "settings", label: "ตั้งค่าระบบ" },
 ];
 // Small count badges next to each tab label — only for counts already
 // loaded at this level (tasks' pending count lives inside TasksPanel itself).
@@ -211,21 +227,37 @@ function AdminPageInner() {
           </div>
         )}
 
-        {/* ── Tab nav (styled like the Portal module cards) ── */}
-        <div style={{
-          display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
-          gap: 16, marginBottom: 28,
-        }}>
-          {TABS.map(t => (
-            <TabCard
-              key={t.key}
-              tab={t}
-              active={tab === t.key}
-              count={TAB_COUNTS[t.key]?.(tabCounts)}
-              onClick={() => setTab(t.key)}
-            />
-          ))}
-        </div>
+        {/* ── Tab nav (styled like the Portal module cards), grouped so a
+             6-card list ends in a clean rectangle per group instead of an
+             auto-fit remainder row ── */}
+        {TAB_GROUPS.map(g => (
+          <div key={g.key} style={{ marginBottom: 24 }}>
+            <div style={{
+              fontSize: 12.5, fontWeight: 700, color: "#8a978a",
+              textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 10,
+            }}>
+              {g.label}
+            </div>
+            <div style={{
+              // auto-fill (not auto-fit) so a short group (e.g. 2 settings
+              // cards) keeps the same card width as a full group instead of
+              // stretching to fill the row — consistent card size across
+              // groups matters more here than filling whitespace.
+              display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))",
+              gap: 16,
+            }}>
+              {TABS.filter(t => t.group === g.key).map(t => (
+                <TabCard
+                  key={t.key}
+                  tab={t}
+                  active={tab === t.key}
+                  count={TAB_COUNTS[t.key]?.(tabCounts)}
+                  onClick={() => setTab(t.key)}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
 
         {/* ── Tab content ── */}
         {tab === "employees" && <EmployeesTab employees={employees} onRefresh={fetchAll} authUser={authUser} />}
@@ -239,6 +271,7 @@ function AdminPageInner() {
         )}
         {tab === "criteria"  && <AdminCriteriaEditor />}
         {tab === "serviceEval" && <ServiceEvalTab />}
+        {tab === "emailParams" && <EmailSettingsEditor />}
       </div>
 
       <style>{`

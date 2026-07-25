@@ -735,10 +735,16 @@ export default function ResultView({ formData, result, user, profilePic, onBack,
                                   href={`${API_BASE}${result.attachments[item.no]!.path}`}
                                   target="_blank" rel="noopener noreferrer"
                                   title={result.attachments[item.no]!.name}
-                                  style={{ display: "inline-flex", alignItems: "center", gap: 3, marginLeft: 8, color: "#1565c0", fontSize: 10.5, verticalAlign: "middle" }}
+                                  style={{
+                                    display: "inline-flex", alignItems: "center", gap: 4,
+                                    marginLeft: 8, padding: "2px 9px",
+                                    background: "#e3f2fd", border: "1px solid #64b5f6",
+                                    borderRadius: 20, color: "#0d47a1", fontSize: 11, fontWeight: 700,
+                                    verticalAlign: "middle", textDecoration: "none",
+                                  }}
                                   className="no-print"
                                 >
-                                  <Paperclip size={10} /> ไฟล์แนบ
+                                  <Paperclip size={12} /> ไฟล์แนบ
                                 </a>
                               )}
                             </td>

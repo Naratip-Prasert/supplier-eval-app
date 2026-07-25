@@ -11,7 +11,7 @@ import type { Request, Response } from 'express';
 type RequestWithFile = Request & { file?: { buffer: Buffer; originalname: string } };
 const pool   = require('../../db');
 const XLSX   = require('xlsx');
-const { sendInvitationEmail, sendReminderEmail } = require('../../utils/emailService');
+const { sendInvitationEmail, sendReminderEmail, getEmailSetting } = require('../../utils/emailService');
 
 // ── Parse uploaded file → array of row objects ────────────────
 function parseFile(buffer: Buffer, originalname: string): any[] {
@@ -104,6 +104,9 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
       { processed: 0, skipped: 0, pre_eval: 0, post_eval: 0, warnings: [] };
     const invitationTasks: any[] = []; // collect for email after commit
 
+    const preEvalDueDays  = await getEmailSetting('pre_eval_due_days');
+    const postEvalDueDays = await getEmailSetting('post_eval_due_days');
+
     for (const row of rows) {
       const taxId        = String(norm(row, 'TAX_ID') || '').trim();
       const supplierName = String(norm(row, 'Supplier Name') || '').trim();
@@ -151,9 +154,9 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
       // Calculate due_date
       let dueDate;
       if (evalType === 'pre_eval') {
-        dueDate = addDays(new Date(), 30);
+        dueDate = addDays(new Date(), preEvalDueDays);
       } else {
-        dueDate = addDays(ptaDate!, 90);
+        dueDate = addDays(ptaDate!, postEvalDueDays);
       }
 
       const period = evalType === 'pre_eval' ? 'New Supplier / ผู้ขายรายใหม่' : 'Post 90 Days';
@@ -298,7 +301,8 @@ async function uploadPeriodic(req: RequestWithFile, res: Response) {
     `, [uploaderId, evalType, req.file.originalname, rows.length]);
     batchId = batchResult.rows[0].id;
 
-    const dueDate = addDays(new Date(), 7);
+    const periodicDueDays = await getEmailSetting('periodic_due_days');
+    const dueDate = addDays(new Date(), periodicDueDays);
     // Tag with the calendar year so the SAME supplier's half_year/yearly
     // round next year is a genuinely new period, not a collision with this
     // year's round under the open-session unique index — without a year
@@ -720,6 +724,11 @@ async function deleteSession(req: Request, res: Response) {
       return res.status(400).json({ message: 'ไม่สามารถลบรายการที่เข้าสู่การอนุมัติหรือเสร็จสิ้นแล้วได้' });
     }
 
+    // email_logs.task_id has no ON DELETE CASCADE — deleting a task that
+    // already had an invitation/reminder sent (true for nearly every real
+    // task) would otherwise fail with a foreign-key violation. The log rows
+    // are meaningless once their task is gone anyway, so drop them first.
+    await client.query(`DELETE FROM email_logs WHERE task_id IN (SELECT id FROM evaluation_tasks WHERE session_id = $1)`, [req.params.sessionId]);
     await client.query(`DELETE FROM evaluation_tasks WHERE session_id = $1`, [req.params.sessionId]);
     await client.query(`DELETE FROM supervisor_reviews WHERE session_id = $1`, [req.params.sessionId]);
     await client.query(`DELETE FROM evaluations WHERE session_id = $1`, [req.params.sessionId]);

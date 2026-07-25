@@ -7,6 +7,7 @@ const {
   sendOverdueEscalationEmail,
   sendThankyouEmail,
   sendSupervisorNotifyEmail,
+  getEmailSetting,
 } = require('./emailService');
 
 // ── Daily job: 08:00 Asia/Bangkok ─────────────────────────────
@@ -26,6 +27,7 @@ async function runDailyEmailJobs() {
 // ── 1. Reminder: 7 วันก่อน due ───────────────────────────────
 async function sendReminderEmails() {
   try {
+    const reminderDaysBefore = await getEmailSetting('reminder_days_before');
     const result = await pool.query(`
       SELECT et.id, et.assigned_email, et.assigned_name, et.due_date,
              et.role, et.session_id,
@@ -35,8 +37,8 @@ async function sendReminderEmails() {
        WHERE et.status = 'pending'
          AND et.reminder_sent_at IS NULL
          AND et.due_date >= CURRENT_DATE
-         AND et.due_date <= CURRENT_DATE + INTERVAL '7 days'
-    `);
+         AND et.due_date <= CURRENT_DATE + make_interval(days => $1::int)
+    `, [reminderDaysBefore]);
 
     for (const task of result.rows) {
       try {
@@ -59,6 +61,7 @@ async function sendReminderEmails() {
 // with no visibility for anyone who could actually intervene.
 async function sendOverdueEmails() {
   try {
+    const overdueDaysAfter = await getEmailSetting('overdue_days_after');
     const result = await pool.query(`
       SELECT et.id, et.assigned_email, et.assigned_name, et.due_date,
              et.role, et.session_id,
@@ -69,8 +72,8 @@ async function sendOverdueEmails() {
         JOIN evaluation_sessions es ON es.id = et.session_id
        WHERE et.status = 'pending'
          AND et.overdue_sent_at IS NULL
-         AND et.due_date <= CURRENT_DATE - INTERVAL '3 days'
-    `);
+         AND et.due_date <= CURRENT_DATE - make_interval(days => $1::int)
+    `, [overdueDaysAfter]);
 
     if (result.rows.length === 0) return;
 

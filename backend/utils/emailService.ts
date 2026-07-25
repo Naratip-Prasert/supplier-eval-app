@@ -1,30 +1,10 @@
 'use strict';
-export {}; // forces file (module) scope — without a top-level import/export, TS treats this
-           // as a global script and its top-level `const`s (pool, transporter, FROM, ...)
-           // collide with same-named consts in other non-module files like cronJobs.ts
-const nodemailer = require('nodemailer');
+import type { Resend as ResendClient } from 'resend';
+const { Resend } = require('resend');
 const pool = require('../db');
+const resend: ResendClient = new Resend(process.env.RESEND_API_KEY);
 
-// Office 365 / Outlook SMTP relay, sent through the mailbox at
-// SMTP_USER/SMTP_PASS — lets this app send real email using a company
-// Microsoft 365 account instead of a separate provider (Resend) that needed
-// its own domain verification. If the tenant has legacy SMTP AUTH disabled
-// (Microsoft's default since 2022 for new tenants), sends will fail with an
-// auth error — that has to be re-enabled per-mailbox by the org's admin.
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.office365.com',
-  port: Number(process.env.SMTP_PORT) || 587,
-  secure: false, // STARTTLS on port 587, not implicit TLS
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
-
-// Office 365 generally requires (or silently rewrites) the From address to
-// match the authenticated mailbox, so that's the sensible default rather
-// than an arbitrary display address.
-const FROM    = process.env.EMAIL_FROM || process.env.SMTP_USER;
+const FROM    = process.env.EMAIL_FROM || 'Supplier Eval <onboarding@resend.dev>';
 const FE_URL  = process.env.FRONTEND_URL || 'http://localhost:5173';
 
 interface TaskEmailInfo {
@@ -75,6 +55,141 @@ function wrap(titleTh: string, bodyHtml: string): string {
     </div>`;
 }
 
+function buttonHtml(label: string | null | undefined, href: string, color = '#1a6b1a'): string {
+  if (!label) return '';
+  return `<a href="${href}" style="display:inline-block;background:${color};color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">${esc(label)}</a>`;
+}
+
+// ============================================================
+//  Admin-editable templates (email_templates / email_settings) —
+//  see database/schema.sql and utils/seedEmailTemplates.ts, which seeds
+//  both tables with the exact copy this file used to hardcode. A missing
+//  row (shouldn't happen once seeded, but defensive) falls back to that
+//  same hardcoded default so the app never sends a broken/empty email.
+// ============================================================
+interface EmailTemplate {
+  subject: string;
+  titleTh: string;
+  bodyText: string;
+  buttonLabel: string | null;
+}
+
+const TEMPLATE_DEFAULTS: Record<string, EmailTemplate> = {
+  invitation: {
+    subject: '[SPE] กรุณาประเมิน Supplier: {{supplierName}}',
+    titleTh: 'แจ้งการประเมิน Supplier',
+    bodyText: 'เรียน {{assignedName}}\n\nคุณได้รับมอบหมายให้ประเมิน Supplier รายการต่อไปนี้:',
+    buttonLabel: 'เข้าสู่ระบบประเมิน',
+  },
+  reminder: {
+    subject: '[SPE] เตือน: ครบกำหนดประเมิน {{supplierName}} ใน {{reminderDaysBefore}} วัน',
+    titleTh: 'เตือนความจำ: ใกล้ครบกำหนดประเมิน',
+    bodyText: 'เรียน {{assignedName}}\n\nคุณยังไม่ได้ส่งผลการประเมิน Supplier {{supplierName}}\n\nครบกำหนดใน {{reminderDaysBefore}} วัน: {{dueDate}}',
+    buttonLabel: 'ประเมินเดี๋ยวนี้',
+  },
+  overdue: {
+    subject: '[SPE] เกินกำหนด: ยังไม่ประเมิน {{supplierName}}',
+    titleTh: 'เกินกำหนด: ยังไม่ได้ประเมิน',
+    bodyText: 'เรียน {{assignedName}}\n\nการประเมิน Supplier {{supplierName}} เกินกำหนด {{dueDate}} แล้ว {{overdueDaysAfter}} วัน\n\nกรุณาดำเนินการโดยด่วน หากมีข้อขัดข้องกรุณาติดต่อ Admin',
+    buttonLabel: 'ประเมินทันที',
+  },
+  overdue_escalation: {
+    subject: '[SPE] Escalation: เกินกำหนดประเมิน {{supplierName}}',
+    titleTh: 'Escalation: งานประเมินเกินกำหนด',
+    bodyText: 'เรียน {{supervisorName}}\n\nงานประเมิน Supplier ต่อไปนี้เกินกำหนดมาแล้ว {{overdueDaysAfter}} วัน และผู้รับผิดชอบยังไม่ส่งผล:',
+    buttonLabel: 'เข้าสู่ระบบ',
+  },
+  thankyou: {
+    subject: '[SPE] ขอบคุณสำหรับการประเมิน: {{supplierName}}',
+    titleTh: 'ขอบคุณสำหรับการประเมิน',
+    bodyText: 'เรียน {{assignedName}}\n\nขอบคุณที่ส่งผลการประเมิน Supplier {{supplierName}} เรียบร้อยแล้ว\n\nผลการประเมินจะถูกส่งให้ Supervisor พิจารณาอนุมัติภายใน {{reviewDueDays}} วัน',
+    buttonLabel: null,
+  },
+  supervisor_notify: {
+    subject: '[SPE] รออนุมัติ: ผลประเมิน {{supplierName}}',
+    titleTh: 'รอการอนุมัติผลประเมิน',
+    bodyText: 'เรียน {{supervisorName}}\n\nมีผลการประเมิน Supplier รอการอนุมัติของคุณ:',
+    buttonLabel: 'เข้าสู่ระบบอนุมัติ',
+  },
+  supervisor_result_approved: {
+    subject: '[SPE] อนุมัติแล้ว: ผลประเมิน {{supplierName}}',
+    titleTh: 'ผลการประเมินได้รับการอนุมัติ',
+    bodyText: 'เรียน {{toName}}\n\nผลการประเมิน Supplier {{supplierName}} ได้รับการพิจารณาแล้ว\n\nผล: ✅ อนุมัติ',
+    buttonLabel: null,
+  },
+  supervisor_result_returned: {
+    subject: '[SPE] กรุณาแก้ไข: ผลประเมิน {{supplierName}}',
+    titleTh: 'ผลการประเมินถูกส่งคืน',
+    bodyText: 'เรียน {{toName}}\n\nผลการประเมิน Supplier {{supplierName}} ได้รับการพิจารณาแล้ว\n\nผล: 🔄 ส่งคืนเพื่อแก้ไข',
+    buttonLabel: 'แก้ไขและส่งใหม่',
+  },
+  supplier_eval_invite: {
+    subject: 'ขอความคิดเห็นเกี่ยวกับการให้บริการ',
+    titleTh: 'ขอความคิดเห็นเกี่ยวกับการให้บริการ',
+    bodyText: 'เรียน {{supplierName}}\n\nการประเมินรอบล่าสุดของท่านเสร็จสมบูรณ์แล้ว ทางเราขอความคิดเห็นของท่านเกี่ยวกับการให้บริการของทีมงานที่ดูแลท่าน เพื่อนำไปพัฒนาการทำงานร่วมกันต่อไป',
+    buttonLabel: 'ให้ความคิดเห็น',
+  },
+};
+
+const SETTING_DEFAULTS: Record<string, number> = {
+  reminder_days_before: 7,
+  overdue_days_after: 3,
+  review_due_days: 7,
+  pre_eval_due_days: 30,
+  post_eval_due_days: 90,
+  periodic_due_days: 7,
+};
+
+async function getTemplate(emailType: string): Promise<EmailTemplate> {
+  try {
+    const r = await pool.query(
+      `SELECT subject, title_th AS "titleTh", body_text AS "bodyText", button_label AS "buttonLabel"
+         FROM email_templates WHERE email_type = $1`,
+      [emailType]
+    );
+    if (r.rows[0]) return r.rows[0];
+  } catch (e: any) {
+    console.warn(`[emailService] getTemplate(${emailType}) failed, using default:`, e.message);
+  }
+  return TEMPLATE_DEFAULTS[emailType];
+}
+
+async function getEmailSetting(key: string): Promise<number> {
+  try {
+    const r = await pool.query(`SELECT value FROM email_settings WHERE key = $1`, [key]);
+    if (r.rows[0]) return Number(r.rows[0].value);
+  } catch (e: any) {
+    console.warn(`[emailService] getEmailSetting(${key}) failed, using default:`, e.message);
+  }
+  return SETTING_DEFAULTS[key];
+}
+
+// Plain-text substitution for subject/title (not rendered as HTML by mail
+// clients, so no esc() needed — raw values go in directly).
+function renderText(template: string, vars: Record<string, unknown>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (_, key) => (key in vars ? String(vars[key] ?? '') : ''));
+}
+
+// Body text is admin-authored plain text — escape the whole thing first
+// (protects against a stray '<'/'&' the admin typed, same as any other
+// user input), THEN substitute {{placeholders}} with escaped dynamic
+// values (esc() never touches '{'/'}', so this order is safe). Blank-line
+// separated blocks become <p> tags; a single newline inside a block
+// becomes <br/>.
+function renderBodyHtml(template: string, vars: Record<string, unknown>): string {
+  const escapedVars: Record<string, string> = {};
+  for (const [k, v] of Object.entries(vars)) escapedVars[k] = esc(v);
+  const rendered = esc(template).replace(/\{\{(\w+)\}\}/g, (_, key) => (key in escapedVars ? escapedVars[key] : ''));
+  // Explicit inline margin — some mail clients (Outlook desktop's Word
+  // rendering engine in particular) don't reliably apply a default <p>
+  // margin, which would silently collapse every paragraph gap.
+  return rendered
+    .split(/\n\s*\n/)
+    .filter(block => block.trim())
+    .map(block => `<p style="margin:0 0 14px;">${block.split('\n').join('<br/>')}</p>`)
+    .join('\n');
+}
+
 // email_logs exists specifically so send failures (and successes) are
 // visible somewhere other than console output, which most deployments
 // never persist — previously nothing ever wrote to this table at all.
@@ -118,8 +233,8 @@ async function send(
   let lastErr: any;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const result = await transporter.sendMail({
-        from: FROM, to, subject, html,
+      const result = await resend.emails.send({
+        from: FROM, to: [to], subject, html,
         ...(cc && cc.length > 0 ? { cc } : {}),
       });
       await logEmail(taskId, emailType, to, subject, 'sent', null, attempt);
@@ -136,73 +251,63 @@ async function send(
   throw lastErr;
 }
 
-// Supervisors have no per-supplier assignment in this schema (see the
-// broadcast pattern already used by the overdue-escalation cron job below)
-// — CC'ing them here is the same "every active Supervisor" set, just
-// applied earlier (at invitation/reminder time) instead of only once a task
-// is already late.
-async function getActiveSupervisorEmails(): Promise<string[]> {
-  const result = await pool.query(
-    `SELECT email FROM employees WHERE role = 'SUPERVISOR' AND is_active = TRUE AND email IS NOT NULL`
-  );
-  return result.rows.map((r: any) => r.email);
-}
-
 // ── 1. Invitation ──────────────────────────────────────────────
 async function sendInvitationEmail(task: TaskEmailInfo, supplier: SupplierEmailInfo) {
+  const t = await getTemplate('invitation');
   const dueStr = new Date(task.due_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
-  const evalUrl = `${FE_URL}`;
-  const html = wrap('แจ้งการประเมิน Supplier', `
-    <p>เรียน <strong>${esc(task.assigned_name || task.assigned_email)}</strong></p>
-    <p>คุณได้รับมอบหมายให้ประเมิน Supplier รายการต่อไปนี้:</p>
+  const vars = { assignedName: task.assigned_name || task.assigned_email, supplierName: supplier.supplier_name };
+  const html = wrap(renderText(t.titleTh, vars), `
+    ${renderBodyHtml(t.bodyText, vars)}
     <table style="width:100%;border-collapse:collapse;margin:12px 0">
       <tr><td style="padding:6px 0;color:#555;width:140px">ชื่อ Supplier</td><td><strong>${esc(supplier.supplier_name)}</strong></td></tr>
       <tr><td style="padding:6px 0;color:#555">รหัส</td><td>${esc(supplier.vendor_code)}</td></tr>
       <tr><td style="padding:6px 0;color:#555">ประเภทการประเมิน</td><td>${esc(task.eval_type_label || '')}</td></tr>
       <tr><td style="padding:6px 0;color:#555">วันครบกำหนด</td><td><strong style="color:#c62828">${dueStr}</strong></td></tr>
     </table>
-    <a href="${evalUrl}" style="display:inline-block;background:#1a6b1a;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">เข้าสู่ระบบประเมิน</a>
+    ${buttonHtml(t.buttonLabel, FE_URL)}
   `);
-  const cc = await getActiveSupervisorEmails().catch(() => []);
-  return send(task.assigned_email, `[SPE] กรุณาประเมิน Supplier: ${supplier.supplier_name}`, html, { taskId: task.id, emailType: 'invitation', cc });
+  return send(task.assigned_email, renderText(t.subject, vars), html, { taskId: task.id, emailType: 'invitation' });
 }
 
-// ── 2. Reminder (7 วันก่อน due) ───────────────────────────────
+// ── 2. Reminder (N วันก่อน due — reminder_days_before) ─────────
 async function sendReminderEmail(task: TaskEmailInfo, supplier: SupplierEmailInfo) {
+  const t = await getTemplate('reminder');
+  const reminderDaysBefore = await getEmailSetting('reminder_days_before');
   const dueStr = new Date(task.due_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
-  const html = wrap('เตือนความจำ: ใกล้ครบกำหนดประเมิน', `
-    <p>เรียน <strong>${esc(task.assigned_name || task.assigned_email)}</strong></p>
-    <p>คุณยังไม่ได้ส่งผลการประเมิน Supplier <strong>${esc(supplier.supplier_name)}</strong></p>
-    <p style="color:#c62828"><strong>ครบกำหนดใน 7 วัน: ${dueStr}</strong></p>
-    <a href="${FE_URL}" style="display:inline-block;background:#1a6b1a;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">ประเมินเดี๋ยวนี้</a>
+  const vars = { assignedName: task.assigned_name || task.assigned_email, supplierName: supplier.supplier_name, dueDate: dueStr, reminderDaysBefore };
+  const html = wrap(renderText(t.titleTh, vars), `
+    ${renderBodyHtml(t.bodyText, vars)}
+    ${buttonHtml(t.buttonLabel, FE_URL)}
   `);
-  const cc = await getActiveSupervisorEmails().catch(() => []);
-  return send(task.assigned_email, `[SPE] เตือน: ครบกำหนดประเมิน ${supplier.supplier_name} ใน 7 วัน`, html, { taskId: task.id, emailType: 'reminder', cc });
+  return send(task.assigned_email, renderText(t.subject, vars), html, { taskId: task.id, emailType: 'reminder' });
 }
 
-// ── 3. Overdue (3 วันหลัง due) ────────────────────────────────
+// ── 3. Overdue (N วันหลัง due — overdue_days_after) ────────────
 async function sendOverdueEmail(task: TaskEmailInfo, supplier: SupplierEmailInfo) {
+  const t = await getTemplate('overdue');
+  const overdueDaysAfter = await getEmailSetting('overdue_days_after');
   const dueStr = new Date(task.due_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
-  const html = wrap('เกินกำหนด: ยังไม่ได้ประเมิน', `
-    <p>เรียน <strong>${esc(task.assigned_name || task.assigned_email)}</strong></p>
-    <p>การประเมิน Supplier <strong>${esc(supplier.supplier_name)}</strong> เกินกำหนด <strong>${dueStr}</strong> แล้ว 3 วัน</p>
-    <p>กรุณาดำเนินการโดยด่วน หากมีข้อขัดข้องกรุณาติดต่อ Admin</p>
-    <a href="${FE_URL}" style="display:inline-block;background:#c62828;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">ประเมินทันที</a>
+  const vars = { assignedName: task.assigned_name || task.assigned_email, supplierName: supplier.supplier_name, dueDate: dueStr, overdueDaysAfter };
+  const html = wrap(renderText(t.titleTh, vars), `
+    ${renderBodyHtml(t.bodyText, vars)}
+    ${buttonHtml(t.buttonLabel, FE_URL, '#c62828')}
   `);
-  return send(task.assigned_email, `[SPE] เกินกำหนด: ยังไม่ประเมิน ${supplier.supplier_name}`, html, { taskId: task.id, emailType: 'overdue' });
+  return send(task.assigned_email, renderText(t.subject, vars), html, { taskId: task.id, emailType: 'overdue' });
 }
 
-// ── 3b. Overdue escalation → Supervisor (same 3-day-overdue trigger) ──
+// ── 3b. Overdue escalation → Supervisor (same overdue_days_after trigger) ──
 async function sendOverdueEscalationEmail(
   supervisorEmail: string,
   supervisorName: string | null | undefined,
   task: TaskEmailInfo & { role?: string },
   supplier: SupplierEmailInfo
 ) {
+  const t = await getTemplate('overdue_escalation');
+  const overdueDaysAfter = await getEmailSetting('overdue_days_after');
   const dueStr = new Date(task.due_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
-  const html = wrap('Escalation: งานประเมินเกินกำหนด', `
-    <p>เรียน <strong>${esc(supervisorName || supervisorEmail)}</strong></p>
-    <p>งานประเมิน Supplier ต่อไปนี้เกินกำหนดมาแล้ว 3 วัน และผู้รับผิดชอบยังไม่ส่งผล:</p>
+  const vars = { supervisorName: supervisorName || supervisorEmail, supplierName: supplier.supplier_name, overdueDaysAfter };
+  const html = wrap(renderText(t.titleTh, vars), `
+    ${renderBodyHtml(t.bodyText, vars)}
     <table style="width:100%;border-collapse:collapse;margin:12px 0">
       <tr><td style="padding:6px 0;color:#555;width:140px">Supplier</td><td><strong>${esc(supplier.supplier_name)}</strong></td></tr>
       <tr><td style="padding:6px 0;color:#555">รหัส</td><td>${esc(supplier.vendor_code)}</td></tr>
@@ -210,20 +315,18 @@ async function sendOverdueEscalationEmail(
       <tr><td style="padding:6px 0;color:#555">ผู้รับผิดชอบ (${esc(task.role || '')})</td><td>${esc(task.assigned_name || task.assigned_email)}</td></tr>
       <tr><td style="padding:6px 0;color:#555">ครบกำหนด</td><td><strong style="color:#c62828">${dueStr}</strong></td></tr>
     </table>
-    <p>กรุณาติดตามหรือดำเนินการตามความเหมาะสม</p>
-    <a href="${FE_URL}/supervisor?tab=overdue" style="display:inline-block;background:#1a6b1a;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">เข้าสู่ระบบ</a>
+    ${buttonHtml(t.buttonLabel, `${FE_URL}/supervisor?tab=overdue`)}
   `);
-  return send(supervisorEmail, `[SPE] Escalation: เกินกำหนดประเมิน ${supplier.supplier_name}`, html, { taskId: task.id, emailType: 'overdue_escalation' });
+  return send(supervisorEmail, renderText(t.subject, vars), html, { taskId: task.id, emailType: 'overdue_escalation' });
 }
 
 // ── 4. Thank-you (หลัง submit) ────────────────────────────────
 async function sendThankyouEmail(task: TaskEmailInfo, supplier: SupplierEmailInfo) {
-  const html = wrap('ขอบคุณสำหรับการประเมิน', `
-    <p>เรียน <strong>${esc(task.assigned_name || task.assigned_email)}</strong></p>
-    <p>ขอบคุณที่ส่งผลการประเมิน Supplier <strong>${esc(supplier.supplier_name)}</strong> เรียบร้อยแล้ว</p>
-    <p>ผลการประเมินจะถูกส่งให้ Supervisor พิจารณาอนุมัติภายใน 7 วัน</p>
-  `);
-  return send(task.assigned_email, `[SPE] ขอบคุณสำหรับการประเมิน: ${supplier.supplier_name}`, html, { taskId: task.id, emailType: 'thankyou' });
+  const t = await getTemplate('thankyou');
+  const reviewDueDays = await getEmailSetting('review_due_days');
+  const vars = { assignedName: task.assigned_name || task.assigned_email, supplierName: supplier.supplier_name, reviewDueDays };
+  const html = wrap(renderText(t.titleTh, vars), renderBodyHtml(t.bodyText, vars));
+  return send(task.assigned_email, renderText(t.subject, vars), html, { taskId: task.id, emailType: 'thankyou' });
 }
 
 // ── 5. Supervisor notification (ทั้ง USER+GCP submit แล้ว) ───────
@@ -233,19 +336,20 @@ async function sendSupervisorNotifyEmail(
   session: SessionEmailInfo,
   reviewDue: string | Date
 ) {
+  const t = await getTemplate('supervisor_notify');
   const dueStr = new Date(reviewDue).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
-  const html = wrap('รอการอนุมัติผลประเมิน', `
-    <p>เรียน <strong>${esc(supervisorName || supervisorEmail)}</strong></p>
-    <p>มีผลการประเมิน Supplier รอการอนุมัติของคุณ:</p>
+  const vars = { supervisorName: supervisorName || supervisorEmail, supplierName: session.supplier_name };
+  const html = wrap(renderText(t.titleTh, vars), `
+    ${renderBodyHtml(t.bodyText, vars)}
     <table style="width:100%;border-collapse:collapse;margin:12px 0">
       <tr><td style="padding:6px 0;color:#555;width:140px">Supplier</td><td><strong>${esc(session.supplier_name)}</strong></td></tr>
       <tr><td style="padding:6px 0;color:#555">ประเภท</td><td>${esc(session.eval_type)}</td></tr>
       <tr><td style="padding:6px 0;color:#555">คะแนนรวม</td><td>${session.final_score ?? '-'}</td></tr>
       <tr><td style="padding:6px 0;color:#555">กรุณาอนุมัติภายใน</td><td><strong style="color:#c62828">${dueStr}</strong></td></tr>
     </table>
-    <a href="${FE_URL}" style="display:inline-block;background:#1a6b1a;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">เข้าสู่ระบบอนุมัติ</a>
+    ${buttonHtml(t.buttonLabel, FE_URL)}
   `);
-  return send(supervisorEmail, `[SPE] รออนุมัติ: ผลประเมิน ${session.supplier_name}`, html, { emailType: 'supervisor_notify' });
+  return send(supervisorEmail, renderText(t.subject, vars), html, { emailType: 'supervisor_notify' });
 }
 
 // ── 6. Supervisor result → GCP + USER ───────────────────────────
@@ -257,29 +361,27 @@ async function sendSupervisorResultEmail(
   notes?: string | null
 ) {
   const isApproved = status === 'approved';
-  const titleTh = isApproved ? 'ผลการประเมินได้รับการอนุมัติ' : 'ผลการประเมินถูกส่งคืน';
-  const html = wrap(titleTh, `
-    <p>เรียน <strong>${esc(toName || toEmail)}</strong></p>
-    <p>ผลการประเมิน Supplier <strong>${esc(supplier.supplier_name)}</strong> ได้รับการพิจารณาแล้ว</p>
-    <p><strong>ผล: ${isApproved ? '✅ อนุมัติ' : '🔄 ส่งคืนเพื่อแก้ไข'}</strong></p>
+  const emailType = isApproved ? 'supervisor_result_approved' : 'supervisor_result_returned';
+  const t = await getTemplate(emailType);
+  const vars = { toName: toName || toEmail, supplierName: supplier.supplier_name };
+  const html = wrap(renderText(t.titleTh, vars), `
+    ${renderBodyHtml(t.bodyText, vars)}
     ${notes ? `<p style="background:#fff3e0;padding:12px;border-radius:6px;border-left:4px solid #f57f17"><strong>หมายเหตุ:</strong> ${esc(notes).replace(/\n/g, '<br/>')}</p>` : ''}
-    ${!isApproved ? `<a href="${FE_URL}" style="display:inline-block;background:#1565c0;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">แก้ไขและส่งใหม่</a>` : ''}
+    ${buttonHtml(t.buttonLabel, FE_URL, '#1565c0')}
   `);
-  const subject = isApproved
-    ? `[SPE] อนุมัติแล้ว: ผลประเมิน ${supplier.supplier_name}`
-    : `[SPE] กรุณาแก้ไข: ผลประเมิน ${supplier.supplier_name}`;
-  return send(toEmail, subject, html, { emailType: 'supervisor_result' });
+  return send(toEmail, renderText(t.subject, vars), html, { emailType });
 }
 
 // ── 7. Supplier eval invite (magic-link, no login) ─────────────
 async function sendSupplierEvalInviteEmail(toEmail: string, supplierName: string, evalUrl: string) {
-  const html = wrap('ขอความคิดเห็นเกี่ยวกับการให้บริการ', `
-    <p>เรียน <strong>${esc(supplierName)}</strong></p>
-    <p>การประเมินรอบล่าสุดของท่านเสร็จสมบูรณ์แล้ว ทางเราขอความคิดเห็นของท่านเกี่ยวกับการให้บริการของทีมงานที่ดูแลท่าน เพื่อนำไปพัฒนาการทำงานร่วมกันต่อไป</p>
-    <a href="${evalUrl}" style="display:inline-block;background:#1a6b1a;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">ให้ความคิดเห็น</a>
+  const t = await getTemplate('supplier_eval_invite');
+  const vars = { supplierName };
+  const html = wrap(renderText(t.titleTh, vars), `
+    ${renderBodyHtml(t.bodyText, vars)}
+    ${buttonHtml(t.buttonLabel, evalUrl)}
     <p style="margin-top:16px;color:#888;font-size:12px">ลิงก์นี้ใช้ได้ครั้งเดียวและมีอายุจำกัด</p>
   `);
-  return send(toEmail, `[SPE] ขอความคิดเห็นเกี่ยวกับการให้บริการ`, html, { emailType: 'supplier_eval_invite' });
+  return send(toEmail, renderText(t.subject, vars), html, { emailType: 'supplier_eval_invite' });
 }
 
 module.exports = {
@@ -291,4 +393,5 @@ module.exports = {
   sendSupervisorNotifyEmail,
   sendSupervisorResultEmail,
   sendSupplierEvalInviteEmail,
+  getEmailSetting,
 };

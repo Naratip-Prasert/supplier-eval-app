@@ -40,6 +40,8 @@ export function getCriteriaSetFromCode(code: string | null | undefined): string 
   if (!code) return 'pre_eval';
   const m = code.match(/^FUNC-(PRE|POST)-M(\d+)$/i);
   if (m) return `${m[1].toLowerCase()}_m${m[2]}`;
+  if (code.startsWith('S2U')) return 'sup2user';
+  if (code.startsWith('SVC')) return 'service';
   return code.startsWith('POST-') ? 'post_eval' : 'pre_eval';
 }
 
@@ -68,6 +70,19 @@ export function nextItemCode(sectionCode: string | null | undefined, allItems: A
       if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
     });
     return `M${mn}.${maxN + 1}`;
+  }
+
+  // Flat service-direction sets (User→Buyer / Supplier→User Buyer) — same
+  // "{section}.{item}" numbering as Core, just a different section-code shape.
+  const flatMatch = sectionCode.match(/^(?:S2U-CAT|SVC)(\d+)$/i);
+  if (flatMatch) {
+    const sn = flatMatch[1];
+    let maxN = 0;
+    activeItems.forEach(it => {
+      const m = it.code?.match(new RegExp(`^${sn}\\.(\\d+)$`));
+      if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+    });
+    return `${sn}.${maxN + 1}`;
   }
 
   if (sectionCode.match(/^(?:PRE|POST)-ESG$/i)) {

@@ -382,7 +382,10 @@ CREATE UNIQUE INDEX idx_supervisor_reviews_one_pending_per_session
 -- ============================================================
 CREATE TABLE email_logs (
   id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  task_id     UUID        REFERENCES evaluation_tasks(id),
+  -- ON DELETE CASCADE: a log row is meaningless once its task is gone, and
+  -- without this any DELETE of a task with an email already sent against it
+  -- (true for nearly every real task) fails on this FK — see deleteSession.
+  task_id     UUID        REFERENCES evaluation_tasks(id) ON DELETE CASCADE,
   email_type  VARCHAR(30),
   to_email    VARCHAR(200) NOT NULL,
   subject     VARCHAR(300),
@@ -393,6 +396,40 @@ CREATE TABLE email_logs (
                                                -- before this row's final status (send() in
                                                -- emailService.ts retries transient failures
                                                -- itself; this is 0 for a first-try success)
+);
+
+-- ============================================================
+-- 16b. EMAIL_TEMPLATES — admin-editable subject/title/body/button text
+--      for each outgoing email type. Seeded once at startup with today's
+--      hardcoded copy (see emailService.ts) so nothing changes until an
+--      admin actually edits a row; emailService.ts falls back to its own
+--      hardcoded default if a row is ever missing.
+-- ============================================================
+CREATE TABLE email_templates (
+  email_type    VARCHAR(40) PRIMARY KEY,   -- 'invitation' | 'reminder' | 'overdue' | 'overdue_escalation'
+                                            -- | 'thankyou' | 'supervisor_notify'
+                                            -- | 'supervisor_result_approved' | 'supervisor_result_returned'
+                                            -- | 'supplier_eval_invite'
+  subject       TEXT NOT NULL,             -- supports {{placeholders}}, see emailService.ts renderTemplate()
+  title_th      TEXT NOT NULL,             -- the green header-bar text inside wrap()
+  body_text     TEXT NOT NULL,             -- multi-line; blank-line-separated blocks become <p> tags
+  button_label  TEXT,                      -- NULL = no button (e.g. thank-you)
+  updated_at    TIMESTAMPTZ DEFAULT NOW(),
+  updated_by    UUID REFERENCES employees(id)
+);
+
+-- ============================================================
+-- 16c. EMAIL_SETTINGS — admin-editable day-interval "parameters" that
+--      used to be hardcoded literals scattered across cronJobs.ts,
+--      admin.controller.ts, and evaluations.controller.ts.
+-- ============================================================
+CREATE TABLE email_settings (
+  key         VARCHAR(50) PRIMARY KEY,     -- reminder_days_before | overdue_days_after
+                                            -- | review_due_days | pre_eval_due_days
+                                            -- | post_eval_due_days | periodic_due_days
+  value       INTEGER NOT NULL,
+  label_th    TEXT,
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- ============================================================
