@@ -1,4 +1,15 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+// On a real deployed domain, call the API via a same-origin relative path —
+// next.config.js rewrites /api/* and /uploads/* to the Render backend, so
+// the browser only ever talks to its own origin. This is what makes the
+// auth cookie same-origin instead of cross-site between the vercel.app and
+// onrender.com domains; without it, iOS Safari's cross-site tracking
+// prevention silently refuses to keep the cookie after login (desktop
+// browsers are more lenient, which is why this only ever showed up on
+// iPhone/iPad — see next.config.ts for the full explanation). Local dev has
+// no rewrite configured, so it keeps calling the backend directly.
+const isBrowser = typeof window !== 'undefined';
+const isLocalhost = isBrowser && window.location.hostname === 'localhost';
+const BASE = (isBrowser && !isLocalhost) ? '' : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000');
 
 // Every route except these two prefixes sits behind requireAuth on the
 // backend (see server.ts) — so a 401 from anything else unambiguously means
