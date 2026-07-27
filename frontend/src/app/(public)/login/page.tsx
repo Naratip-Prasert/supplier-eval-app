@@ -1,5 +1,15 @@
 // ============================================================
 //  app/login/page.tsx
+//  ---------------------------------------------------------
+//  REDESIGN NOTES (read me before pasting over the original):
+//  - Replaces frontend/src/app/(public)/login/page.tsx
+//  - Needs two new static assets in frontend/public/:
+//      bjc-logo.png        (full-color BJC mark, transparent bg)
+//      bjc-logo-white.png  (white silhouette, for the dark hero)
+//  - Depends on the updated GreenInput / PasswordInput / GreenButton
+//    from components-index-patch.md (focus ring + hover states).
+//    The page still works with the old components if you don't
+//    apply that patch yet — it just won't have the focus glow.
 // ============================================================
 "use client";
 
@@ -100,21 +110,56 @@ export default function LoginPage() {
           .login-card-logo { display: none; }
           .login-field { margin-bottom: 8px !important; }
         }
+        @media (max-width: 420px) {
+          .login-bjc-watermark { width: 340px !important; right: -60px !important; }
+        }
+        /* Video motion can trigger discomfort for some users — respect the
+           OS-level reduced-motion preference by hiding the video entirely
+           and falling back to the plain gradient background already set
+           on the page body. */
+        @media (prefers-reduced-motion: reduce) {
+          .login-bg-video { display: none; }
+        }
       `}</style>
 
+      {/* Looping factory-entrance video background — muted/autoplay/loop so
+          it behaves like a live photo rather than something requiring
+          playback controls; poster covers the gap before the video loads. */}
+      <video
+        className="login-bg-video"
+        autoPlay muted loop playsInline
+        poster="/login-bg-poster.jpg"
+        style={{
+          position: "absolute", top: "50%", left: "50%",
+          minWidth: "100%", minHeight: "100%", width: "auto", height: "auto",
+          transform: "translate(-50%, -50%)", objectFit: "cover", zIndex: 0,
+        }}
+      >
+        <source src="/login-bg.mp4" type="video/mp4" />
+      </video>
       <div style={{
-        position: "absolute", width: 260, height: 260, borderRadius: "50%",
-        background: "rgba(255,255,255,0.06)", top: -100, left: -80,
-      }} />
-      <div style={{
-        position: "absolute", width: 200, height: 200, borderRadius: "50%",
-        background: "rgba(255,255,255,0.05)", top: 60, right: -70,
+        position: "absolute", inset: 0, zIndex: 0,
+        background: "linear-gradient(135deg, rgba(20,83,45,0.66) 0%, rgba(27,94,32,0.6) 55%, rgba(46,125,50,0.52) 100%)",
       }} />
 
-      <div className="login-hero" style={{ position: "relative", zIndex: 1, width: 140 }}>
+      {/* Large, low-opacity BJC watermark — sits above the video/overlay but
+          behind the hero/card. */}
+      <img
+        src="/bjc-logo-white.png"
+        alt=""
+        aria-hidden="true"
+        className="login-bjc-watermark"
+        style={{
+          position: "absolute", width: 520, height: "auto",
+          right: -90, bottom: -60, opacity: 0.07,
+          transform: "rotate(-6deg)", pointerEvents: "none", zIndex: 1,
+        }}
+      />
+
+      <div className="login-hero" style={{ position: "relative", zIndex: 2, width: 140 }}>
         <EvalIllustration />
       </div>
-      <div className="login-hero" style={{ position: "relative", zIndex: 1, textAlign: "center", marginBottom: 24 }}>
+      <div className="login-hero" style={{ position: "relative", zIndex: 2, textAlign: "center", marginBottom: 24 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginBottom: 6 }}>
           <Logo size={30} />
           <span style={{ color: "#fff", fontSize: 22, fontWeight: 800, letterSpacing: 1, fontFamily: "monospace" }}>SPES</span>
@@ -127,10 +172,11 @@ export default function LoginPage() {
 
       {/* ── Login form card ── */}
       <div className="login-card" style={{
-        position: "relative", zIndex: 1, width: "100%", maxWidth: 400,
-        background: "#fff", borderRadius: 16,
-        boxShadow: "0 12px 36px rgba(0,0,0,0.18)",
-        padding: "28px 28px 24px", textAlign: "center",
+        position: "relative", zIndex: 2, width: "100%", maxWidth: 400,
+        background: "#fff", borderRadius: 18,
+        boxShadow: "0 20px 50px rgba(0,0,0,0.16)",
+        border: "1px solid rgba(255,255,255,0.5)",
+        padding: "30px 28px 24px", textAlign: "center",
       }}>
         <div className="login-card-header" style={{ marginBottom: 22 }}>
           <div className="login-card-logo" style={{
@@ -179,6 +225,17 @@ export default function LoginPage() {
             {loading ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
           </GreenButton>
         </form>
+
+        {/* NEW — small crisp brand attribution footer (separate from the
+            faint watermark above, so the mark is still legible somewhere) */}
+        <div style={{
+          marginTop: 18, paddingTop: 14, borderTop: "1px solid #f0f2f0",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+        }}>
+          <span style={{ fontSize: 10.5, color: "#aaa" }}>A</span>
+          <img src="/bjc-logo.png" alt="BJC" style={{ height: 14, width: "auto" }} />
+          <span style={{ fontSize: 10.5, color: "#aaa" }}>Company</span>
+        </div>
       </div>
     </div>
   );

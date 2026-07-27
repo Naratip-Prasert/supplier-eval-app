@@ -193,6 +193,7 @@ interface PasswordInputProps {
 
 export function PasswordInput({ label, required, value, onChange, placeholder, error }: PasswordInputProps) {
   const [show, setShow] = useState(false);
+  const [focused, setFocused] = useState(false);
   // Only render the reveal toggle once there's something to reveal — an
   // empty field showed our custom eye icon stacked on top of the browser's
   // own native reveal icon (Edge in particular), which only appears once
@@ -210,11 +211,16 @@ export function PasswordInput({ label, required, value, onChange, placeholder, e
           type={show ? "text" : "password"}
           value={value}
           onChange={(e) => onChange && onChange(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           placeholder={placeholder || ""}
           style={{
             width: "100%", boxSizing: "border-box",
-            background: "#d4f5c8", border: `1.5px solid ${error ? "#e53935" : "#888"}`,
-            borderRadius: 8, padding: `8px ${hasValue ? 44 : 14}px 8px 14px`, fontSize: 14, outline: "none",
+            background: "#fafcfa",
+            border: `1.5px solid ${error ? "#e53935" : focused ? "#1b5e20" : "#dde3dd"}`,
+            borderRadius: 8, padding: `9px ${hasValue ? 44 : 14}px 9px 14px`, fontSize: 14, outline: "none",
+            boxShadow: focused ? "0 0 0 3px rgba(27,94,32,0.12)" : "none",
+            transition: "border-color 0.15s, box-shadow 0.15s",
           }}
         />
         {hasValue && (
@@ -224,7 +230,7 @@ export function PasswordInput({ label, required, value, onChange, placeholder, e
             style={{
               position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
               background: "none", border: "none", cursor: "pointer",
-              fontSize: 16, color: "#666", lineHeight: 1,
+              fontSize: 16, color: "#888", lineHeight: 1,
             }}
             tabIndex={-1}
           >
@@ -325,6 +331,7 @@ interface GreenInputProps {
 }
 
 export function GreenInput({ label, required, value, onChange, onBlur, placeholder, disabled, error }: GreenInputProps) {
+  const [focused, setFocused] = useState(false);
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
       {label && (
@@ -335,14 +342,17 @@ export function GreenInput({ label, required, value, onChange, onBlur, placehold
       <input
         value={value}
         onChange={(e) => onChange && onChange(e.target.value)}
-        onBlur={onBlur}
+        onFocus={() => setFocused(true)}
+        onBlur={(e) => { setFocused(false); onBlur && onBlur(e); }}
         placeholder={placeholder || ""}
         disabled={disabled}
         style={{
           width: "100%", boxSizing: "border-box",
-          background: disabled ? "#f0f0f0" : "#d4f5c8",
-          border: `1.5px solid ${error ? "#e53935" : "#888"}`,
-          borderRadius: 8, padding: "8px 14px", fontSize: 14, outline: "none",
+          background: disabled ? "#f0f0f0" : "#fafcfa",
+          border: `1.5px solid ${error ? "#e53935" : focused ? "#1b5e20" : "#dde3dd"}`,
+          borderRadius: 8, padding: "9px 14px", fontSize: 14, outline: "none",
+          boxShadow: focused ? "0 0 0 3px rgba(27,94,32,0.12)" : "none",
+          transition: "border-color 0.15s, box-shadow 0.15s",
           opacity: disabled ? 0.65 : 1,
         }}
       />
@@ -516,11 +526,14 @@ interface GreenButtonProps {
 }
 
 export function GreenButton({ children, onClick, color = "#2e7d32", fullWidth = false, disabled = false, style = {}, className }: GreenButtonProps) {
+  const [hover, setHover] = useState(false);
   return (
     <button
       onClick={disabled ? undefined : onClick}
       disabled={disabled}
       className={className}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       style={{
         background: disabled ? "#9e9e9e" : color,
         color: "#fff", border: "none", borderRadius: 8,
@@ -529,6 +542,9 @@ export function GreenButton({ children, onClick, color = "#2e7d32", fullWidth = 
         fontFamily: "monospace", letterSpacing: 1,
         width: fullWidth ? "100%" : undefined,
         opacity: disabled ? 0.7 : 1,
+        boxShadow: !disabled && hover ? "0 6px 16px rgba(27,94,32,0.28)" : "none",
+        transform: !disabled && hover ? "translateY(-1px)" : "translateY(0)",
+        transition: "transform 0.15s, box-shadow 0.15s",
         ...style,
       }}
     >

@@ -5,7 +5,7 @@
 
 import { useState, useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { useModal, Clock as ClockWidget, Logo } from "@/components";
+import { useModal, Logo } from "@/components";
 import { useAuth } from "@/context/AuthContext";
 import { authFetch } from "@/utils/api";
 import {
@@ -26,7 +26,13 @@ interface ModuleDef {
   roles: string[];
   available: boolean;
   buttonLabel: string;
+  group: "daily" | "system";
 }
+
+const MODULE_GROUPS: { key: "daily" | "system"; label: string }[] = [
+  { key: "daily",  label: "งานประจำวัน" },
+  { key: "system", label: "ภาพรวม / ระบบ" },
+];
 
 // ── Module definitions ────────────────────────────────────────
 const MODULES: ModuleDef[] = [
@@ -43,6 +49,7 @@ const MODULES: ModuleDef[] = [
     roles: ["USER", "GCP", "ADMIN"],
     available: true,
     buttonLabel: "เริ่มประเมิน",
+    group: "daily",
   },
   {
     key: "history",
@@ -57,6 +64,7 @@ const MODULES: ModuleDef[] = [
     roles: ["USER", "GCP"],
     available: true,
     buttonLabel: "ดูประวัติ",
+    group: "daily",
   },
   {
     key: "serviceEval",
@@ -71,6 +79,7 @@ const MODULES: ModuleDef[] = [
     roles: ["USER"],
     available: true,
     buttonLabel: "ให้คะแนน",
+    group: "daily",
   },
   {
     key: "dashboard",
@@ -85,6 +94,7 @@ const MODULES: ModuleDef[] = [
     roles: ["USER", "GCP", "ADMIN"],
     available: false,
     buttonLabel: "เร็วๆ นี้",
+    group: "system",
   },
   {
     key: "admin",
@@ -99,6 +109,7 @@ const MODULES: ModuleDef[] = [
     roles: ["ADMIN"],
     available: true,
     buttonLabel: "เข้าสู่ระบบจัดการ",
+    group: "system",
   },
   {
     key: "supervisor",
@@ -113,6 +124,7 @@ const MODULES: ModuleDef[] = [
     roles: ["SUPERVISOR", "ADMIN"],
     available: true,
     buttonLabel: "เข้าสู่หน้าอนุมัติ",
+    group: "system",
   },
 ];
 
@@ -132,6 +144,27 @@ const ROLE_SIDEBAR: Record<string, string> = {
   ADMIN:      "linear-gradient(180deg, #ad1457 0%, #6d0e37 100%)",
   SUPERVISOR: "linear-gradient(180deg, #6a1b9a 0%, #421263 100%)",
 };
+
+// Portal-specific clock — bigger bold time + Thai weekday/date underneath,
+// richer than the shared `Clock` widget (hh:mm:ss + dd/mm/yyyy) used
+// elsewhere, so it lives here rather than changing that shared component's
+// format for every other consumer.
+function SidebarClock() {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    <div style={{ fontFamily: "monospace", fontSize: 13, color: "rgba(255,255,255,0.75)" }}>
+      <div style={{ fontSize: 20, fontWeight: 700, color: "#fff", letterSpacing: 1 }}>
+        {pad(now.getHours())}:{pad(now.getMinutes())}:{pad(now.getSeconds())}
+      </div>
+      <div>{now.toLocaleDateString("th-TH", { weekday: "short", day: "numeric", month: "long", year: "numeric" })}</div>
+    </div>
+  );
+}
 
 interface ReturnedTask {
   sessionStatus: string;
@@ -240,7 +273,7 @@ export default function PortalPage() {
         </div>
 
         <div className="portal-sidebar-clock" style={{ marginBottom: 24, paddingBottom: 20, borderBottom: "1px solid rgba(255,255,255,0.15)" }}>
-          <ClockWidget />
+          <SidebarClock />
         </div>
 
         {/* Profile */}
@@ -313,61 +346,109 @@ export default function PortalPage() {
       <div style={{ flex: 1, minWidth: 0 }}>
       <div style={{ maxWidth: 940, margin: "0 auto", padding: "32px 24px 48px" }}>
 
-        {/* ── Returned-by-supervisor alert ── */}
-        {returnedTasks.length > 0 && (
-          <div
-            onClick={() => goEvaluate("returned")}
-            style={{
-              background: "#fff3e0", border: "1.5px solid #ffb74d", borderRadius: 14,
-              padding: "14px 20px", marginBottom: 24, cursor: "pointer",
-              display: "flex", alignItems: "center", gap: 14,
-              boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
-            }}
-          >
+        {/* ── Action-needed zone — combines every "you must do something"
+             signal (returned tasks, pending Buyer ratings) into one place
+             instead of a separate banner per condition, so a USER with
+             both doesn't have to notice two differently-styled alerts. ── */}
+        {(returnedTasks.length > 0 || pendingServiceEval.length > 0) && (
+          <div style={{
+            background: "#fff3e0", border: "1.5px solid #ffcc80", borderRadius: 16,
+            marginBottom: 28, overflow: "hidden",
+          }}>
             <div style={{
-              width: 38, height: 38, borderRadius: "50%", background: "#fb8c00",
-              display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+              fontSize: 12, fontWeight: 700, color: "#bf6c00", textTransform: "uppercase",
+              letterSpacing: 0.5, padding: "12px 20px 4px",
             }}>
-              <AlertTriangle size={19} color="#fff" />
+              ต้องดำเนินการ
             </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: "#e65100" }}>
-                มีงานถูกส่งคืนจาก Supervisor {returnedTasks.length} รายการ — ต้องประเมินใหม่
+
+            {returnedTasks.length > 0 && (
+              <div
+                onClick={() => goEvaluate("returned")}
+                style={{
+                  display: "flex", alignItems: "center", gap: 14, padding: "12px 20px",
+                  cursor: "pointer", borderTop: "1px solid rgba(191,108,0,0.14)",
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.5)"}
+                onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+              >
+                <div style={{
+                  width: 36, height: 36, borderRadius: "50%", background: "#fb8c00", flexShrink: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  <AlertTriangle size={18} color="#fff" />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "#e65100" }}>
+                    มีงานถูกส่งคืนจาก Supervisor {returnedTasks.length} รายการ — ต้องประเมินใหม่
+                  </div>
+                  <div style={{ fontSize: 12, color: "#bf6c00", marginTop: 2 }}>
+                    {returnedTasks.map(t => t.supplierName).join(", ")}
+                  </div>
+                </div>
+                <ArrowRight size={18} style={{ color: "#e65100", flexShrink: 0 }} />
               </div>
-              <div style={{ fontSize: 12, color: "#bf6c00", marginTop: 2 }}>
-                {returnedTasks.map(t => t.supplierName).join(", ")}
+            )}
+
+            {pendingServiceEval.length > 0 && (
+              <div
+                onClick={() => router.push("/service-eval")}
+                style={{
+                  display: "flex", alignItems: "center", gap: 14, padding: "12px 20px",
+                  cursor: "pointer", borderTop: returnedTasks.length > 0 ? "1px solid rgba(191,108,0,0.14)" : "none",
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.5)"}
+                onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+              >
+                <div style={{
+                  width: 36, height: 36, borderRadius: "50%", background: "#ef6c00", flexShrink: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  <Star size={18} color="#fff" />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "#e65100" }}>
+                    รอให้คะแนน Buyer {pendingServiceEval.length} รายการ
+                  </div>
+                  <div style={{ fontSize: 12, color: "#bf6c00", marginTop: 2 }}>
+                    จากงานประเมินที่ได้รับการอนุมัติแล้ว
+                  </div>
+                </div>
+                <ArrowRight size={18} style={{ color: "#e65100", flexShrink: 0 }} />
               </div>
-            </div>
-            <ArrowRight size={18} style={{ color: "#e65100", flexShrink: 0 }} />
+            )}
           </div>
         )}
 
-        {/* ── Section label ── */}
-        <div style={{ fontSize: 15, fontWeight: 700, color: "#555", marginBottom: 16, letterSpacing: 0.3 }}>
-          เลือกโมดูล
-        </div>
-
-        {/* ── Module cards grid ── */}
-        <div className="portal-module-grid" style={{
-          display: "grid",
-          gap: 18,
-        }}>
-          {modules.map((mod) => {
-            const Icon = mod.icon;
-            return (
-              <ModuleCard
-                key={mod.key}
-                mod={mod}
-                Icon={Icon}
-                onClick={() => handleModule(mod)}
-                badgeCount={
-                  mod.key === "evaluate" ? returnedTasks.length :
-                  mod.key === "serviceEval" ? pendingServiceEval.length : 0
-                }
-              />
-            );
-          })}
-        </div>
+        {/* ── Module cards, grouped by section ── */}
+        {MODULE_GROUPS.map(g => {
+          const groupModules = modules.filter(m => m.group === g.key);
+          if (groupModules.length === 0) return null;
+          return (
+            <div key={g.key} style={{ marginBottom: 28 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#8a978a", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 14 }}>
+                {g.label}
+              </div>
+              <div className="portal-module-grid" style={{ display: "grid", gap: 18 }}>
+                {groupModules.map((mod) => {
+                  const Icon = mod.icon;
+                  return (
+                    <ModuleCard
+                      key={mod.key}
+                      mod={mod}
+                      Icon={Icon}
+                      onClick={() => handleModule(mod)}
+                      badgeCount={
+                        mod.key === "evaluate" ? returnedTasks.length :
+                        mod.key === "serviceEval" ? pendingServiceEval.length : 0
+                      }
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
 
         {/* ── Footer note ── */}
         <div style={{
