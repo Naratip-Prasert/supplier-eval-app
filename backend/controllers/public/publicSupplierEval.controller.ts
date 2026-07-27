@@ -36,7 +36,7 @@ async function getToken(req: Request, res: Response) {
 
     // Independent queries, no shared client/transaction — run concurrently
     // instead of paying two sequential round trips.
-    const [targetsResult, criteriaResult] = await Promise.all([
+    const [targetsResult, catResult, itemResult] = await Promise.all([
       pool.query(
         `SELECT ev.role, e.id AS "employeeId", e.full_name AS "fullName"
            FROM evaluations ev
@@ -45,20 +45,46 @@ async function getToken(req: Request, res: Response) {
         [row.sessionId]
       ),
       pool.query(
-        `SELECT m.id AS "categoryId", m.name_th AS "categoryNameTh", m.display_order AS "categoryOrder",
-                s.id, s.code, s.name_th AS "nameTh", s.default_weight AS "defaultWeight",
-                s.display_order AS "displayOrder", s.level_values AS "levelValues"
+        `SELECT id, name_th AS "nameTh", total_weight AS "totalWeight", display_order AS "displayOrder"
+           FROM evaluation_main_criteria
+          WHERE code LIKE 'SVC%' AND is_active = TRUE
+          ORDER BY display_order`
+      ),
+      pool.query(
+        `SELECT s.id, s.category_id AS "categoryId", s.code, s.name_th AS "nameTh",
+                s.default_weight AS "defaultWeight", s.display_order AS "displayOrder"
            FROM evaluation_sub_criteria s
            JOIN evaluation_main_criteria m ON m.id = s.category_id
           WHERE s.criteria_set = 'service' AND s.is_active = TRUE AND m.is_active = TRUE
-          ORDER BY m.display_order, s.display_order`
+          ORDER BY s.display_order`
       ),
     ]);
+
+    // Same shape as GET /api/service-evaluations/criteria — sections of
+    // items, each item carrying its 1-5 level description text, so this
+    // page can render the same colored-level-card grid as service-eval
+    // instead of the old flat list of plain numbered buttons.
+    const itemIds = itemResult.rows.map((r: any) => r.id);
+    const levelResult = itemIds.length
+      ? await pool.query(
+          `SELECT criterion_id AS "criterionId", level, description FROM score_level_descriptions
+            WHERE criterion_id = ANY($1::uuid[]) ORDER BY criterion_id, level`,
+          [itemIds]
+        )
+      : { rows: [] };
+    const levelsByCrit: Record<string, string[]> = {};
+    levelResult.rows.forEach((r: any) => { (levelsByCrit[r.criterionId] ??= [])[r.level - 1] = r.description; });
+
+    const itemsByCat: Record<string, any[]> = {};
+    itemResult.rows.forEach((it: any) => {
+      (itemsByCat[it.categoryId] ??= []).push({ ...it, defaultWeight: parseFloat(it.defaultWeight), levels: levelsByCrit[it.id] ?? [] });
+    });
+    const sections = catResult.rows.map((c: any) => ({ ...c, totalWeight: parseFloat(c.totalWeight), items: itemsByCat[c.id] ?? [] }));
 
     res.json({
       supplierName: row.supplierName,
       targets: targetsResult.rows,
-      criteria: criteriaResult.rows,
+      sections,
     });
   } catch (err: any) {
     console.error('GET /api/public/supplier-eval/:token error:', err);

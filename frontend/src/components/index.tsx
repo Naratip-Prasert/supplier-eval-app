@@ -193,6 +193,11 @@ interface PasswordInputProps {
 
 export function PasswordInput({ label, required, value, onChange, placeholder, error }: PasswordInputProps) {
   const [show, setShow] = useState(false);
+  // Only render the reveal toggle once there's something to reveal — an
+  // empty field showed our custom eye icon stacked on top of the browser's
+  // own native reveal icon (Edge in particular), which only appears once
+  // a value is typed, so gating on `value` here keeps the two from overlapping.
+  const hasValue = value.length > 0;
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
       {label && (
@@ -209,21 +214,23 @@ export function PasswordInput({ label, required, value, onChange, placeholder, e
           style={{
             width: "100%", boxSizing: "border-box",
             background: "#d4f5c8", border: `1.5px solid ${error ? "#e53935" : "#888"}`,
-            borderRadius: 8, padding: "8px 44px 8px 14px", fontSize: 14, outline: "none",
+            borderRadius: 8, padding: `8px ${hasValue ? 44 : 14}px 8px 14px`, fontSize: 14, outline: "none",
           }}
         />
-        <button
-          type="button"
-          onClick={() => setShow((s) => !s)}
-          style={{
-            position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
-            background: "none", border: "none", cursor: "pointer",
-            fontSize: 16, color: "#666", lineHeight: 1,
-          }}
-          tabIndex={-1}
-        >
-          {show ? <EyeOff size={16} /> : <Eye size={16} />}
-        </button>
+        {hasValue && (
+          <button
+            type="button"
+            onClick={() => setShow((s) => !s)}
+            style={{
+              position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
+              background: "none", border: "none", cursor: "pointer",
+              fontSize: 16, color: "#666", lineHeight: 1,
+            }}
+            tabIndex={-1}
+          >
+            {show ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        )}
       </div>
       {error && <div style={{ color: "#e53935", fontSize: 11, marginTop: 3 }}>{error}</div>}
     </div>

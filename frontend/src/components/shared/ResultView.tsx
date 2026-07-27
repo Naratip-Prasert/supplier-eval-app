@@ -886,7 +886,7 @@ export default function ResultView({ formData, result, user, profilePic, onBack,
             }}>
               {[
                 { th: "ผู้ประเมิน / Evaluator" },
-                { th: "หัวหน้าแผนก / Supervisor" },
+                { th: "ผู้อนุมัติ / Supervisor" },
               ].map((col, ci) => (
                 <div key={ci} style={{
                   padding: "20px 32px 28px",
