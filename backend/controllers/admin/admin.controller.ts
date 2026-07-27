@@ -879,7 +879,39 @@ async function listServiceEvaluations(req: Request, res: Response) {
   }
 }
 
+// ── GET /api/admin/suppliers — read-only supplier directory ───
+// Unlike GET /api/suppliers (kept minimal for dropdown/autocomplete use),
+// this surfaces every field an admin would want to check at a glance —
+// the same data an Excel upload row carries — without exposing a way to
+// edit it here.
+async function listSuppliersAdmin(req: Request, res: Response) {
+  try {
+    const result = await pool.query(`
+      SELECT vendor_code AS "vendorCode", supplier_name AS "supplierName",
+             product_type AS "productType", tax_id AS "taxId", category,
+             function_owner AS "functionOwner", job_value_thb AS "jobValueThb",
+             pta_approve_date AS "ptaApproveDate",
+             buyer_name AS "buyerName", buyer_email AS "buyerEmail",
+             evaluator_name AS "evaluatorName", evaluator_email AS "evaluatorEmail",
+             contact_email AS "contactEmail", is_active AS "isActive"
+        FROM suppliers
+       ORDER BY supplier_name
+    `);
+    // NUMERIC columns come back as strings from pg — parse once here so the
+    // frontend can format/sort without every consumer re-parsing itself.
+    const rows = result.rows.map((r: any) => ({
+      ...r,
+      jobValueThb: r.jobValueThb != null ? parseFloat(r.jobValueThb) : null,
+    }));
+    res.json(rows);
+  } catch (err: any) {
+    console.error('GET /api/admin/suppliers error:', err);
+    res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
+  }
+}
+
 module.exports = {
   uploadPrePost, uploadPeriodic, createAdHocEvaluation, listTasks, remindTask, updateTask,
   deleteSession, remindAllTasks, bulkDeleteSessions, listBatches, listServiceEvaluations,
+  listSuppliersAdmin,
 };

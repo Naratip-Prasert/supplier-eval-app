@@ -232,9 +232,9 @@ export default function LoginPage() {
           marginTop: 18, paddingTop: 14, borderTop: "1px solid #f0f2f0",
           display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
         }}>
-          <span style={{ fontSize: 10.5, color: "#aaa" }}>A</span>
+          <span style={{ fontSize: 10.5, color: "#aaa" }}></span>
           <img src="/bjc-logo.png" alt="BJC" style={{ height: 14, width: "auto" }} />
-          <span style={{ fontSize: 10.5, color: "#aaa" }}>Company</span>
+          <span style={{ fontSize: 10.5, color: "#aaa" }}></span>
         </div>
       </div>
     </div>

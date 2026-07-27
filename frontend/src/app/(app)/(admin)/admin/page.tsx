@@ -21,7 +21,7 @@ import { TimelineStepper } from "@/components/shared/TimelineStepper";
 import { FilterChips, toggleInSet } from "@/components/shared/FilterChips";
 import { SortableTh, nextSort, type SortState } from "@/components/shared/SortableTh";
 import {
-  Users, ClipboardList, Upload,
+  Users, ClipboardList, Upload, Building2,
   ArrowLeft, Search, RefreshCw, X,
   AlertCircle, SlidersHorizontal, Star, Mail, type LucideIcon,
 } from "lucide-react";
@@ -47,6 +47,11 @@ const TABS: TabDef[] = [
   {
     key: "employees", label: "พนักงาน", labelEn: "Employees", icon: Users,
     color: "#1b5e20", circleBg: "radial-gradient(circle at 38% 35%, #f1f8e9, #a5d6a7 130%)",
+    group: "data",
+  },
+  {
+    key: "suppliers", label: "ซัพพลายเออร์", labelEn: "Suppliers", icon: Building2,
+    color: "#3949ab", circleBg: "radial-gradient(circle at 38% 35%, #e8eaf6, #9fa8da 130%)",
     group: "data",
   },
   {
@@ -261,6 +266,7 @@ function AdminPageInner() {
 
         {/* ── Tab content ── */}
         {tab === "employees" && <EmployeesTab employees={employees} onRefresh={fetchAll} authUser={authUser} />}
+        {tab === "suppliers" && <SuppliersTab />}
         {tab === "tasks"     && <TasksPanel embedded />}
         {tab === "sessions"  && (
           <SessionsTab
@@ -391,6 +397,130 @@ function ServiceEvalTab() {
                   <td style={{ padding: "10px 16px", color: "#666" }}>{r.period}</td>
                   <td style={{ padding: "10px 16px", color: "#666" }}>{formatThaiDate(r.submittedAt)}</td>
                   <td style={{ padding: "10px 16px", textAlign: "right", fontWeight: 700, color: "#e65100" }}>{r.totalScore}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface SupplierRow {
+  vendorCode: string;
+  supplierName: string;
+  productType: string;
+  taxId?: string | null;
+  category?: string | null;
+  functionOwner?: string | null;
+  jobValueThb?: number | null;
+  ptaApproveDate?: string | null;
+  buyerName?: string | null;
+  buyerEmail?: string | null;
+  evaluatorName?: string | null;
+  evaluatorEmail?: string | null;
+  contactEmail?: string | null;
+  isActive: boolean;
+}
+
+const PRODUCT_TYPE_LABEL: Record<string, string> = { goods: "สินค้า", services: "บริการ", both: "สินค้า+บริการ" };
+
+// ── Suppliers Tab — view-only directory, same fields an Excel upload row
+// carries. No create/edit here; that stays as upload/API-driven only. ──
+function SuppliersTab() {
+  const [rows,   setRows]   = useState<SupplierRow[] | null>(null); // null = loading
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    authFetch("/api/admin/suppliers")
+      .then(r => r.json())
+      .then(d => setRows(Array.isArray(d) ? d : []))
+      .catch(() => setRows([]));
+  }, []);
+
+  const filtered = (rows ?? []).filter(r => {
+    const q = search.toLowerCase();
+    return !q ||
+      r.supplierName?.toLowerCase().includes(q) || r.vendorCode?.toLowerCase().includes(q) ||
+      r.category?.toLowerCase().includes(q)      || r.taxId?.toLowerCase().includes(q);
+  });
+
+  return (
+    <div>
+      <div style={{ position: "relative", maxWidth: 320, marginBottom: 16 }}>
+        <Search size={15} style={{ position: "absolute", left: 12, top: 11, color: "#aaa" }} />
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="ค้นหาชื่อ, รหัส vendor, หมวดหมู่, เลขผู้เสียภาษี"
+          style={{
+            width: "100%", padding: "9px 12px 9px 34px", borderRadius: 10,
+            border: "1.5px solid #e0e0e0", fontSize: 13, fontFamily: "Sarabun, sans-serif",
+          }}
+        />
+      </div>
+
+      {rows === null && <div style={{ textAlign: "center", padding: 40, color: "#888" }}>กำลังโหลด...</div>}
+
+      {rows?.length === 0 && (
+        <div style={{ textAlign: "center", padding: 40, color: "#bbb" }}>ยังไม่มีซัพพลายเออร์ในระบบ</div>
+      )}
+
+      {rows !== null && rows.length > 0 && (
+        <div style={{ fontSize: 12, color: "#aaa", marginBottom: 10 }}>
+          แสดง {filtered.length} จาก {rows.length} รายการ
+        </div>
+      )}
+
+      {filtered.length > 0 && (
+        <div style={{ background: "#fff", borderRadius: 14, overflow: "auto", boxShadow: "0 2px 10px rgba(0,0,0,0.06)" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: "#fafafa", textAlign: "left" }}>
+                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap" }}>Supplier</th>
+                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap" }}>ประเภท</th>
+                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap" }}>หมวดหมู่</th>
+                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap", textAlign: "right" }}>มูลค่างาน (THB)</th>
+                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap" }}>PTA Approve</th>
+                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap" }}>Buyer</th>
+                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap" }}>Evaluator</th>
+                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap" }}>สถานะ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(r => (
+                <tr key={r.vendorCode} style={{ borderTop: "1px solid #f0f0f0" }}>
+                  <td style={{ padding: "10px 16px" }}>
+                    <div style={{ fontWeight: 600, color: "#2a2a2a" }}>{r.supplierName}</div>
+                    <div style={{ fontSize: 11, color: "#aaa", fontFamily: "monospace" }}>{r.vendorCode}{r.taxId ? ` · ${r.taxId}` : ""}</div>
+                  </td>
+                  <td style={{ padding: "10px 16px", color: "#666", whiteSpace: "nowrap" }}>{PRODUCT_TYPE_LABEL[r.productType] ?? r.productType}</td>
+                  <td style={{ padding: "10px 16px", color: "#666" }}>
+                    {r.category ?? "—"}
+                    {r.functionOwner && <div style={{ fontSize: 11, color: "#bbb" }}>{r.functionOwner}</div>}
+                  </td>
+                  <td style={{ padding: "10px 16px", color: "#333", textAlign: "right", whiteSpace: "nowrap" }}>
+                    {r.jobValueThb != null ? r.jobValueThb.toLocaleString("th-TH") : "—"}
+                  </td>
+                  <td style={{ padding: "10px 16px", color: "#666", whiteSpace: "nowrap" }}>{formatThaiDate(r.ptaApproveDate)}</td>
+                  <td style={{ padding: "10px 16px" }}>
+                    <div style={{ color: "#2a2a2a" }}>{r.buyerName ?? "—"}</div>
+                    {r.buyerEmail && <div style={{ fontSize: 11, color: "#aaa" }}>{r.buyerEmail}</div>}
+                  </td>
+                  <td style={{ padding: "10px 16px" }}>
+                    <div style={{ color: "#2a2a2a" }}>{r.evaluatorName ?? "—"}</div>
+                    {r.evaluatorEmail && <div style={{ fontSize: 11, color: "#aaa" }}>{r.evaluatorEmail}</div>}
+                  </td>
+                  <td style={{ padding: "10px 16px" }}>
+                    <span style={{
+                      background: r.isActive ? "#e8f5e9" : "#f5f5f5",
+                      color: r.isActive ? "#1b5e20" : "#999",
+                      borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap",
+                    }}>
+                      {r.isActive ? "ใช้งานอยู่" : "ปิดใช้งาน"}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>
