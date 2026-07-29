@@ -425,12 +425,18 @@ interface SupplierRow {
 }
 
 const PRODUCT_TYPE_LABEL: Record<string, string> = { goods: "สินค้า", services: "บริการ", both: "สินค้า+บริการ" };
+const SUPPLIERS_PAGE_SIZE = 10;
 
 // ── Suppliers Tab — view-only directory, same fields an Excel upload row
 // carries. No create/edit here; that stays as upload/API-driven only. ──
 function SuppliersTab() {
   const [rows,   setRows]   = useState<SupplierRow[] | null>(null); // null = loading
   const [search, setSearch] = useState("");
+  const [typeFilter,   setTypeFilter]   = useState<Set<string>>(new Set());
+  const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set());
+  const [minValue, setMinValue] = useState("");
+  const [maxValue, setMaxValue] = useState("");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     authFetch("/api/admin/suppliers")
@@ -439,26 +445,97 @@ function SuppliersTab() {
       .catch(() => setRows([]));
   }, []);
 
+  // Any filter change should snap back to page 1 — otherwise a narrower
+  // result set can leave the view stuck on a now-nonexistent later page.
+  useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter, minValue, maxValue]);
+
+  const min = minValue.trim() === "" ? null : Number(minValue);
+  const max = maxValue.trim() === "" ? null : Number(maxValue);
+
   const filtered = (rows ?? []).filter(r => {
     const q = search.toLowerCase();
-    return !q ||
+    const matchSearch = !q ||
       r.supplierName?.toLowerCase().includes(q) || r.vendorCode?.toLowerCase().includes(q) ||
       r.category?.toLowerCase().includes(q)      || r.taxId?.toLowerCase().includes(q);
+    const matchType   = typeFilter.size === 0   || typeFilter.has(r.productType);
+    const matchStatus = statusFilter.size === 0 || statusFilter.has(r.isActive ? "active" : "inactive");
+    // A supplier with no recorded job value can't fall inside any
+    // specific range the admin asks for, so it's excluded once either
+    // bound is set — same "missing data ≠ a match" reasoning as the
+    // other filters, just for a number range instead of a fixed set.
+    const matchValue = (min === null && max === null) ? true :
+      r.jobValueThb != null && (min === null || r.jobValueThb >= min) && (max === null || r.jobValueThb <= max);
+    return matchSearch && matchType && matchStatus && matchValue;
   });
+
+  const totalPages  = Math.max(1, Math.ceil(filtered.length / SUPPLIERS_PAGE_SIZE));
+  const pageClamped = Math.min(page, totalPages);
+  const pageRows    = filtered.slice((pageClamped - 1) * SUPPLIERS_PAGE_SIZE, pageClamped * SUPPLIERS_PAGE_SIZE);
 
   return (
     <div>
-      <div style={{ position: "relative", maxWidth: 320, marginBottom: 16 }}>
-        <Search size={15} style={{ position: "absolute", left: 12, top: 11, color: "#aaa" }} />
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="ค้นหาชื่อ, รหัส vendor, หมวดหมู่, เลขผู้เสียภาษี"
-          style={{
-            width: "100%", padding: "9px 12px 9px 34px", borderRadius: 10,
-            border: "1.5px solid #e0e0e0", fontSize: 13, fontFamily: "Sarabun, sans-serif",
-          }}
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
+        <div style={{ position: "relative", width: 320, flexShrink: 0 }}>
+          <Search size={15} style={{ position: "absolute", left: 12, top: 11, color: "#aaa" }} />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="ค้นหาชื่อ, รหัส vendor, หมวดหมู่, เลขผู้เสียภาษี"
+            style={{
+              width: "100%", padding: "9px 12px 9px 34px", borderRadius: 10, boxSizing: "border-box",
+              border: "1.5px solid #e0e0e0", fontSize: 13, fontFamily: "Sarabun, sans-serif",
+            }}
+          />
+        </div>
+        <FilterChips
+          options={[{ v: "goods", l: "สินค้า" }, { v: "services", l: "บริการ" }, { v: "both", l: "สินค้า+บริการ" }]}
+          selected={typeFilter}
+          onToggle={v => setTypeFilter(s => toggleInSet(s, v))}
+          onClear={() => setTypeFilter(new Set())}
+          activeColor="#3949ab"
         />
+        <FilterChips
+          options={[{ v: "active", l: "ใช้งานอยู่" }, { v: "inactive", l: "ปิดใช้งาน" }]}
+          selected={statusFilter}
+          onToggle={v => setStatusFilter(s => toggleInSet(s, v))}
+          onClear={() => setStatusFilter(new Set())}
+        />
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 12, color: "#888" }}>มูลค่างาน (THB)</span>
+          <input
+            type="number" min={0} inputMode="numeric"
+            value={minValue}
+            onChange={e => setMinValue(e.target.value)}
+            placeholder="ตั้งแต่"
+            style={{
+              width: 100, padding: "8px 10px", borderRadius: 8, boxSizing: "border-box",
+              border: "1.5px solid #e0e0e0", fontSize: 12.5, fontFamily: "Sarabun, sans-serif",
+            }}
+          />
+          <span style={{ color: "#bbb" }}>–</span>
+          <input
+            type="number" min={0} inputMode="numeric"
+            value={maxValue}
+            onChange={e => setMaxValue(e.target.value)}
+            placeholder="ถึง"
+            style={{
+              width: 100, padding: "8px 10px", borderRadius: 8, boxSizing: "border-box",
+              border: "1.5px solid #e0e0e0", fontSize: 12.5, fontFamily: "Sarabun, sans-serif",
+            }}
+          />
+          {(minValue || maxValue) && (
+            <button
+              onClick={() => { setMinValue(""); setMaxValue(""); }}
+              style={{
+                display: "flex", alignItems: "center", background: "none", border: "none",
+                cursor: "pointer", color: "#bbb", padding: 2,
+              }}
+              title="ล้างตัวกรองมูลค่างาน"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
       </div>
 
       {rows === null && <div style={{ textAlign: "center", padding: 40, color: "#888" }}>กำลังโหลด...</div>}
@@ -489,7 +566,7 @@ function SuppliersTab() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(r => (
+              {pageRows.map(r => (
                 <tr key={r.vendorCode} style={{ borderTop: "1px solid #f0f0f0" }}>
                   <td style={{ padding: "10px 16px" }}>
                     <div style={{ fontWeight: 600, color: "#2a2a2a" }}>{r.supplierName}</div>
@@ -526,6 +603,17 @@ function SuppliersTab() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {filtered.length > 0 && (
+        <PaginationBar
+          page={pageClamped}
+          totalPages={totalPages}
+          total={filtered.length}
+          pageSize={SUPPLIERS_PAGE_SIZE}
+          onPrev={() => setPage(p => Math.max(1, p - 1))}
+          onNext={() => setPage(p => Math.min(totalPages, p + 1))}
+        />
       )}
     </div>
   );

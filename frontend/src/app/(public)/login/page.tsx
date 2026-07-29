@@ -1,15 +1,9 @@
 // ============================================================
 //  app/login/page.tsx
-//  ---------------------------------------------------------
-//  REDESIGN NOTES (read me before pasting over the original):
-//  - Replaces frontend/src/app/(public)/login/page.tsx
-//  - Needs two new static assets in frontend/public/:
-//      bjc-logo.png        (full-color BJC mark, transparent bg)
-//      bjc-logo-white.png  (white silhouette, for the dark hero)
-//  - Depends on the updated GreenInput / PasswordInput / GreenButton
-//    from components-index-patch.md (focus ring + hover states).
-//    The page still works with the old components if you don't
-//    apply that patch yet — it just won't have the focus glow.
+//  Split-screen layout: compact white form panel (fixed width) +
+//  a green branding panel carrying the SPES wordmark, headline,
+//  and BJC/Big C lockup — replaces the earlier single-column
+//  hero-over-card layout.
 // ============================================================
 "use client";
 
@@ -17,46 +11,6 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Logo, GreenInput, PasswordInput, GreenButton } from "@/components";
 import { API_BASE } from "@/utils/api";
-
-// Flat, few-color illustration — a clipboard being checked off with a
-// star/badge result, echoing "supplier evaluation" without needing a
-// real photo asset (none exist in this project yet).
-function EvalIllustration() {
-  return (
-    <svg viewBox="0 0 360 320" width="100%" height="100%" style={{ maxWidth: 200 }}>
-      <ellipse cx="180" cy="290" rx="120" ry="14" fill="rgba(0,0,0,0.12)" />
-
-      {/* clipboard */}
-      <rect x="90" y="40" width="160" height="220" rx="14" fill="#ffffff" />
-      <rect x="90" y="40" width="160" height="220" rx="14" fill="none" stroke="#e8f5e9" strokeWidth="2" />
-      <rect x="140" y="28" width="60" height="24" rx="8" fill="#e8f5e9" />
-      <rect x="150" y="20" width="40" height="20" rx="8" fill="#a5d6a7" />
-
-      {/* checklist rows */}
-      {[0, 1, 2].map((i) => (
-        <g key={i} transform={`translate(112, ${88 + i * 46})`}>
-          <circle cx="10" cy="10" r="10" fill={i < 2 ? "#2e7d32" : "#c8e6c9"} />
-          {i < 2 && (
-            <path d="M5 10l3.2 3.2L15.5 6" stroke="#fff" strokeWidth="2.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-          )}
-          <rect x="30" y="3" width="106" height="14" rx="7" fill="#eef5ee" />
-        </g>
-      ))}
-
-      {/* badge / star result, overlapping bottom-right of the clipboard */}
-      <circle cx="246" cy="232" r="38" fill="#1b5e20" />
-      <path
-        d="M246 210 l6.5 13.2 14.6 2.1 -10.6 10.3 2.5 14.5 -13 -6.8 -13 6.8 2.5-14.5 -10.6-10.3 14.6-2.1z"
-        fill="#ffd54f"
-      />
-
-      {/* decorative dots */}
-      <circle cx="64" cy="70" r="6" fill="#a5d6a7" opacity="0.8" />
-      <circle cx="300" cy="90" r="9" fill="#a5d6a7" opacity="0.6" />
-      <circle cx="62" cy="230" r="7" fill="#a5d6a7" opacity="0.6" />
-    </svg>
-  );
-}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -94,103 +48,65 @@ export default function LoginPage() {
   return (
     <div style={{
       minHeight: "100vh",
-      background: "linear-gradient(135deg, #14532d 0%, #1b5e20 55%, #2e7d32 100%)",
       fontFamily: "Sarabun, sans-serif",
-      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-      padding: "32px 20px", position: "relative", overflow: "hidden",
+      display: "flex", overflow: "hidden",
     }}>
-      {/* On short/landscape viewports (phone rotated sideways) the
-          illustration+title would push the form below the fold — collapse
-          it so the form is reachable without scrolling. */}
       <style>{`
-        @media (max-height: 560px) and (orientation: landscape) {
-          .login-hero { display: none; }
-          .login-card { padding: 14px 24px !important; }
-          .login-card-header { margin-bottom: 10px !important; }
-          .login-card-logo { display: none; }
-          .login-field { margin-bottom: 8px !important; }
+        /* Below ~860px there's no room for both panels — the branding
+           panel is decorative, so it's the one that goes, and the form
+           panel expands to fill the screen instead of staying pinned to
+           a 420px sliver. */
+        @media (max-width: 860px) {
+          .login-brand-panel { display: none; }
+          .login-form-panel { width: 100% !important; max-width: 440px; margin: 0 auto; }
         }
-        @media (max-width: 420px) {
-          .login-bjc-watermark { width: 340px !important; right: -60px !important; }
+
+        @keyframes loginFadeUp {
+          from { opacity: 0; transform: translateY(18px); }
+          to   { opacity: 1; transform: translateY(0); }
         }
-        /* Video motion can trigger discomfort for some users — respect the
-           OS-level reduced-motion preference by hiding the video entirely
-           and falling back to the plain gradient background already set
-           on the page body. */
+        .login-form-panel > * { animation: loginFadeUp .6s ease-out both; }
+        .login-brand-block { animation: loginFadeUp .6s ease-out .15s both; }
+
+        @keyframes loginLogoPulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(255,213,79,0.35); }
+          70%      { box-shadow: 0 0 0 16px rgba(255,213,79,0); }
+        }
+        .login-logo-ring { animation: loginLogoPulse 2.6s ease-out infinite; }
+
         @media (prefers-reduced-motion: reduce) {
           .login-bg-video { display: none; }
+          .login-form-panel > *, .login-brand-block, .login-logo-ring { animation: none; }
         }
       `}</style>
 
-      {/* Looping factory-entrance video background — muted/autoplay/loop so
-          it behaves like a live photo rather than something requiring
-          playback controls; poster covers the gap before the video loads. */}
-      <video
-        className="login-bg-video"
-        autoPlay muted loop playsInline
-        poster="/login-bg-poster.jpg"
-        style={{
-          position: "absolute", top: "50%", left: "50%",
-          minWidth: "100%", minHeight: "100%", width: "auto", height: "auto",
-          transform: "translate(-50%, -50%)", objectFit: "cover", zIndex: 0,
-        }}
-      >
-        <source src="/login-bg.mp4" type="video/mp4" />
-      </video>
-      <div style={{
-        position: "absolute", inset: 0, zIndex: 0,
-        background: "linear-gradient(135deg, rgba(20,83,45,0.66) 0%, rgba(27,94,32,0.6) 55%, rgba(46,125,50,0.52) 100%)",
-      }} />
-
-      {/* Large, low-opacity BJC watermark — sits above the video/overlay but
-          behind the hero/card. */}
-      <img
-        src="/bjc-logo-white.png"
-        alt=""
-        aria-hidden="true"
-        className="login-bjc-watermark"
-        style={{
-          position: "absolute", width: 520, height: "auto",
-          right: -90, bottom: -60, opacity: 0.07,
-          transform: "rotate(-6deg)", pointerEvents: "none", zIndex: 1,
-        }}
-      />
-
-      <div className="login-hero" style={{ position: "relative", zIndex: 2, width: 140 }}>
-        <EvalIllustration />
-      </div>
-      <div className="login-hero" style={{ position: "relative", zIndex: 2, textAlign: "center", marginBottom: 24 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginBottom: 6 }}>
-          <Logo size={30} />
-          <span style={{ color: "#fff", fontSize: 22, fontWeight: 800, letterSpacing: 1, fontFamily: "monospace" }}>SPES</span>
-        </div>
-        <div style={{ color: "rgba(255,255,255,0.78)", fontSize: 13, lineHeight: 1.6, maxWidth: 340, margin: "0 auto" }}>
-          Supplier Performance Evaluation System<br />
-          ระบบประเมินผลการดำเนินงานของซัพพลายเออร์
-        </div>
-      </div>
-
-      {/* ── Login form card ── */}
-      <div className="login-card" style={{
-        position: "relative", zIndex: 2, width: "100%", maxWidth: 400,
-        background: "#fff", borderRadius: 18,
-        boxShadow: "0 20px 50px rgba(0,0,0,0.16)",
-        border: "1px solid rgba(255,255,255,0.5)",
-        padding: "30px 28px 24px", textAlign: "center",
+      {/* ── Left: form panel ── */}
+      <div className="login-form-panel" style={{
+        width: 440, flexShrink: 0, background: "#fff",
+        display: "flex", flexDirection: "column", justifyContent: "center",
+        padding: "40px 44px", position: "relative", overflow: "hidden",
       }}>
-        <div className="login-card-header" style={{ marginBottom: 22 }}>
-          <div className="login-card-logo" style={{
+        {/* Faint decorative blob, top-left — echoes the brand green without
+            competing with the form itself. */}
+        <div style={{
+          position: "absolute", top: -80, left: -80, width: 240, height: 240,
+          borderRadius: "50%", background: "radial-gradient(circle, rgba(46,125,50,0.08), transparent 70%)",
+          pointerEvents: "none",
+        }} />
+
+        <div style={{ textAlign: "center", marginBottom: 28, position: "relative" }}>
+          <div className="login-logo-ring" style={{
             display: "inline-flex", alignItems: "center", justifyContent: "center",
-            width: 48, height: 48, borderRadius: 14, marginBottom: 10,
-            background: "#1b5e20",
+            width: 60, height: 60, borderRadius: 18, marginBottom: 14,
+            background: "#2e7d32",
           }}>
-            <Logo size={30} />
+            <Logo size={32} />
           </div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: "#1b5e20" }}>เข้าสู่ระบบ</div>
-          <div style={{ fontSize: 12.5, color: "#888", marginTop: 4 }}>กรอกข้อมูลบัญชีของคุณเพื่อเข้าใช้งาน</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "#1b5e20" }}>เข้าสู่ระบบ</div>
+          <div style={{ fontSize: 13, color: "#888", marginTop: 5 }}>กรอกข้อมูลบัญชีของคุณเพื่อเข้าใช้งาน</div>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ textAlign: "left" }}>
+        <form onSubmit={handleSubmit} style={{ textAlign: "left", position: "relative" }}>
           {error && (
             <div style={{
               background: "#ffebee", border: "1.5px solid #ef9a9a",
@@ -201,7 +117,7 @@ export default function LoginPage() {
             </div>
           )}
 
-          <div className="login-field" style={{ marginBottom: 14 }}>
+          <div style={{ marginBottom: 14 }}>
             <GreenInput
               label="รหัสพนักงาน หรือ Email"
               required
@@ -211,7 +127,7 @@ export default function LoginPage() {
             />
           </div>
 
-          <div className="login-field" style={{ marginBottom: 20 }}>
+          <div style={{ marginBottom: 22 }}>
             <PasswordInput
               label="รหัสผ่าน"
               required
@@ -226,15 +142,67 @@ export default function LoginPage() {
           </GreenButton>
         </form>
 
-        {/* NEW — small crisp brand attribution footer (separate from the
-            faint watermark above, so the mark is still legible somewhere) */}
         <div style={{
-          marginTop: 18, paddingTop: 14, borderTop: "1px solid #f0f2f0",
-          display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+          marginTop: 28, paddingTop: 16, borderTop: "1px solid #f0f2f0",
+          display: "flex", alignItems: "center", justifyContent: "center", position: "relative",
         }}>
-          <span style={{ fontSize: 10.5, color: "#aaa" }}></span>
-          <img src="/bjc-logo.png" alt="BJC" style={{ height: 14, width: "auto" }} />
-          <span style={{ fontSize: 10.5, color: "#aaa" }}></span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: "#aaa", letterSpacing: 0.5 }}>SPES 2026</span>
+        </div>
+      </div>
+
+      {/* ── Right: branding panel ── */}
+      <div className="login-brand-panel" style={{
+        flex: 1, position: "relative", overflow: "hidden",
+        background: "linear-gradient(135deg, #14532d 0%, #1b5e20 55%, #2e7d32 100%)",
+      }}>
+        <video
+          className="login-bg-video"
+          autoPlay muted loop playsInline
+          poster="/login-bg-poster.jpg"
+          style={{
+            position: "absolute", top: "50%", left: "50%",
+            minWidth: "100%", minHeight: "100%", width: "auto", height: "auto",
+            transform: "translate(-50%, -50%)", objectFit: "cover", zIndex: 0,
+          }}
+        >
+          <source src="/login-bg.mp4" type="video/mp4" />
+        </video>
+        <div style={{
+          position: "absolute", inset: 0, zIndex: 0,
+          background: "linear-gradient(135deg, rgba(20,83,45,0.72) 0%, rgba(27,94,32,0.66) 55%, rgba(46,125,50,0.58) 100%)",
+        }} />
+
+        <div className="login-brand-block" style={{
+          position: "relative", zIndex: 1, height: "100%",
+          display: "flex", flexDirection: "column", justifyContent: "space-between",
+          padding: "44px 64px", textAlign: "right",
+        }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 14, marginBottom: 14 }}>
+              <Logo size={38} />
+              <span style={{
+                fontSize: 64, fontWeight: 800, letterSpacing: 1.5, fontFamily: "monospace",
+                backgroundImage: "linear-gradient(100deg, #fff 20%, #ffd54f 40%, #fff 60%)",
+                WebkitBackgroundClip: "text", backgroundClip: "text",
+                color: "transparent", WebkitTextFillColor: "transparent",
+              }}>
+                SPES
+              </span>
+            </div>
+            <div style={{ fontSize: 32, fontWeight: 700, color: "#fff", lineHeight: 1.35, textShadow: "0 1px 10px rgba(0,0,0,0.25)" }}>
+              Supplier Performance<br />Evaluation System
+            </div>
+            <div style={{ fontSize: 18, color: "rgba(255,255,255,0.85)", marginTop: 14 }}>
+              ระบบประเมินผลการดำเนินงานของซัพพลายเออร์
+            </div>
+            <div style={{ width: 120, height: 5, background: "#ffd54f", borderRadius: 2, marginTop: 22, marginLeft: "auto" }} />
+          </div>
+
+          <img
+            src="/bjgbgc-CRGzxnoC.png"
+            alt="BJC · Big C"
+            style={{ width: 180, height: "auto", alignSelf: "flex-end", filter: "drop-shadow(0 4px 14px rgba(0,0,0,0.25))" }}
+          />
         </div>
       </div>
     </div>

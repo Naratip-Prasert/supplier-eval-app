@@ -4,7 +4,7 @@
 "use client";
 
 import { useState, useEffect, useRef, type RefObject, type ReactNode, type CSSProperties } from "react";
-import { Eye, EyeOff, AlertTriangle, HelpCircle } from "lucide-react";
+import { AlertTriangle, HelpCircle } from "lucide-react";
 import { GREEN } from "../styles/theme";
 
 // ------ useClickOutside ----------------------------------------
@@ -218,7 +218,7 @@ export function PasswordInput({ label, required, value, onChange, placeholder, e
             width: "100%", boxSizing: "border-box",
             background: "#fafcfa",
             border: `1.5px solid ${error ? "#e53935" : focused ? "#1b5e20" : "#dde3dd"}`,
-            borderRadius: 8, padding: `9px ${hasValue ? 44 : 14}px 9px 14px`, fontSize: 14, outline: "none",
+            borderRadius: 8, padding: `9px ${hasValue ? 56 : 14}px 9px 14px`, fontSize: 14, outline: "none",
             boxShadow: focused ? "0 0 0 3px rgba(27,94,32,0.12)" : "none",
             transition: "border-color 0.15s, box-shadow 0.15s",
           }}
@@ -230,11 +230,12 @@ export function PasswordInput({ label, required, value, onChange, placeholder, e
             style={{
               position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
               background: "none", border: "none", cursor: "pointer",
-              fontSize: 16, color: "#888", lineHeight: 1,
+              fontSize: 12.5, fontWeight: 700, color: "#1b5e20", lineHeight: 1,
+              fontFamily: "Sarabun, sans-serif",
             }}
             tabIndex={-1}
           >
-            {show ? <EyeOff size={16} /> : <Eye size={16} />}
+            {show ? "ซ่อน" : "แสดง"}
           </button>
         )}
       </div>
