@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, CheckCircle2, RotateCcw, Clock, RefreshCw, AlertCircle, Pencil, Check, X, Eye, ChevronDown, ChevronRight, History as HistoryIcon, Search, SlidersHorizontal } from "lucide-react";
+import { ArrowLeft, CheckCircle2, RotateCcw, Clock, RefreshCw, AlertCircle, Pencil, Check, X, Eye, ChevronDown, ChevronRight, History as HistoryIcon, Search, SlidersHorizontal, Paperclip } from "lucide-react";
 import { Header, useModal } from "@/components";
 import { useAuth } from "@/context/AuthContext";
 import { authFetch } from "@/utils/api";
@@ -33,6 +33,7 @@ interface EvalEntry {
   profilePicture?: string | null;
   totalScore: number | string;
   grade: string;
+  attachmentCount?: number;
 }
 
 interface QueueSession {
@@ -842,8 +843,23 @@ export default function SupervisorPage() {
                           </div>
                           <div style={{ fontWeight: 700, fontSize: 13.5, color: "#0f172a" }}>{ev.fullName}</div>
                           <div style={{ fontSize: 12, color: "#64748b" }}>{ev.department}</div>
-                          <div style={{ marginTop: 7, fontWeight: 700, color: GRADE_COLOR[ev.grade] || "#0f172a" }}>
-                            {ev.totalScore} <span style={{ fontWeight: 500, fontSize: 11, color: "#94a3b8" }}>({ev.grade})</span>
+                          <div style={{ marginTop: 7, display: "flex", alignItems: "center", gap: 8 }}>
+                            <div style={{ fontWeight: 700, color: GRADE_COLOR[ev.grade] || "#0f172a" }}>
+                              {ev.totalScore} <span style={{ fontWeight: 500, fontSize: 11, color: "#94a3b8" }}>({ev.grade})</span>
+                            </div>
+                            {!!ev.attachmentCount && ev.attachmentCount > 0 && (
+                              <span
+                                title={`มีไฟล์แนบ ${ev.attachmentCount} รายการ`}
+                                style={{
+                                  display: "inline-flex", alignItems: "center", gap: 3,
+                                  background: "#fff7e6", border: "1px solid #ffd591", color: "#b45309",
+                                  borderRadius: 999, padding: "2px 8px", fontSize: 10.5, fontWeight: 700,
+                                }}
+                              >
+                                <Paperclip size={11} />
+                                {ev.attachmentCount}
+                              </span>
+                            )}
                           </div>
                         </div>
                       );

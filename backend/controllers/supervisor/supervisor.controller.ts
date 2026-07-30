@@ -76,10 +76,21 @@ async function queue(req: Request, res: Response) {
       ORDER BY ev.role
     `, [sessionIds]);
 
+    // Lets the queue card show a paperclip badge without the supervisor
+    // having to open every evaluation first just to check for evidence files.
+    const attachResult = await pool.query(`
+      SELECT evaluation_id AS "evaluationId", COUNT(*)::int AS count
+        FROM evaluation_scores
+       WHERE evaluation_id = ANY($1) AND attachment_path IS NOT NULL
+       GROUP BY evaluation_id
+    `, [evalsResult.rows.map((ev: any) => ev.id)]);
+    const attachCountByEval: Record<string, number> = {};
+    attachResult.rows.forEach((r: any) => { attachCountByEval[r.evaluationId] = r.count; });
+
     const evalsBySession: Record<string, any[]> = {};
     evalsResult.rows.forEach((ev: any) => {
       if (!evalsBySession[ev.sessionId]) evalsBySession[ev.sessionId] = [];
-      evalsBySession[ev.sessionId].push(ev);
+      evalsBySession[ev.sessionId].push({ ...ev, attachmentCount: attachCountByEval[ev.id] ?? 0 });
     });
 
     const response = sessionsResult.rows.map((s: any) => ({

@@ -4,6 +4,16 @@ const pool    = require('../../db');
 const bcrypt  = require('bcrypt');
 const jwt     = require('jsonwebtoken');
 const { AUTH_COOKIE, cookieOptions } = require('../../utils/cookieOptions');
+const { verifyViaEhr } = require('../../utils/ehrAuth');
+
+// Tries the corporate EHR system first (real employees' passwords live
+// there, not in our DB), then falls back to local bcrypt — covers local/
+// system accounts that don't exist in EHR and EHR outages alike.
+async function verifyCredentials(empno: string, password: string, localHash: string | null | undefined): Promise<boolean> {
+  if (await verifyViaEhr(empno, password)) return true;
+  if (!localHash) return false;
+  return bcrypt.compare(password, localHash);
+}
 
 // ── POST /api/auth/login ──────────────────────────────────────
 async function login(req: Request, res: Response) {
@@ -27,12 +37,12 @@ async function login(req: Request, res: Response) {
     );
 
     const emp = result.rows[0];
-    if (!emp || !emp.password_hash) {
+    if (!emp) {
       console.warn(`[auth] login failed: ไม่พบบัญชี "${identifier}"`);
       return res.status(401).json({ message: 'รหัสพนักงาน/Email หรือรหัสผ่านไม่ถูกต้อง' });
     }
 
-    const valid = await bcrypt.compare(password, emp.password_hash);
+    const valid = await verifyCredentials(emp.employee_id, password, emp.password_hash);
     if (!valid) {
       console.warn(`[auth] login failed: password ผิด สำหรับ "${identifier}"`);
       return res.status(401).json({ message: 'รหัสพนักงาน/Email หรือรหัสผ่านไม่ถูกต้อง' });
@@ -90,8 +100,11 @@ async function verifyPassword(req: Request, res: Response) {
       `SELECT password_hash FROM employees WHERE employee_id = $1 AND is_active = TRUE`,
       [req.user!.empId]
     );
-    const hash = result.rows[0]?.password_hash;
-    if (!hash || !(await bcrypt.compare(password, hash))) {
+    if (!result.rows[0]) {
+      return res.status(401).json({ message: 'รหัสผ่านไม่ถูกต้อง' });
+    }
+    const valid = await verifyCredentials(req.user!.empId, password, result.rows[0].password_hash);
+    if (!valid) {
       return res.status(401).json({ message: 'รหัสผ่านไม่ถูกต้อง' });
     }
     res.json({ verified: true });
