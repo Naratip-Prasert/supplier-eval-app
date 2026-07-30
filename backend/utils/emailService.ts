@@ -144,7 +144,7 @@ async function getTemplate(emailType: string): Promise<EmailTemplate> {
   try {
     const r = await pool.query(
       `SELECT subject, title_th AS "titleTh", body_text AS "bodyText", button_label AS "buttonLabel"
-         FROM email_templates WHERE email_type = $1`,
+         FROM "SPES_email_templates" WHERE email_type = $1`,
       [emailType]
     );
     if (r.rows[0]) return r.rows[0];
@@ -156,7 +156,7 @@ async function getTemplate(emailType: string): Promise<EmailTemplate> {
 
 async function getEmailSetting(key: string): Promise<number> {
   try {
-    const r = await pool.query(`SELECT value FROM email_settings WHERE key = $1`, [key]);
+    const r = await pool.query(`SELECT value FROM "SPES_email_settings" WHERE key = $1`, [key]);
     if (r.rows[0]) return Number(r.rows[0].value);
   } catch (e: any) {
     console.warn(`[emailService] getEmailSetting(${key}) failed, using default:`, e.message);
@@ -203,7 +203,7 @@ async function logEmail(
   retryCount: number = 0
 ): Promise<void> {
   await pool.query(
-    `INSERT INTO email_logs (task_id, email_type, to_email, subject, status, error_msg, retry_count)
+    `INSERT INTO "SPES_email_logs" (task_id, email_type, to_email, subject, status, error_msg, retry_count)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [taskId, emailType, toEmail, subject, status, errorMsg || null, retryCount]
   ).catch((e: Error) => console.warn('[emailService] email_logs insert failed:', e.message));

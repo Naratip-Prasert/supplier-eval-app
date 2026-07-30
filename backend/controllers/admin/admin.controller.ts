@@ -89,13 +89,13 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
 
     // Get uploader employee id
     const uploaderResult = await client.query(
-      `SELECT id FROM employees WHERE employee_id = $1`, [req.user!.empId]
+      `SELECT emp_no AS id FROM "Master_Data_GCP" WHERE UPPER(emp_no) = UPPER($1)`, [req.user!.empId]
     );
     const uploaderId = uploaderResult.rows[0]?.id || null;
 
     // Create batch record
     const batchResult = await client.query(`
-      INSERT INTO supplier_upload_batches (uploaded_by, batch_type, filename, row_count, status)
+      INSERT INTO "SPES_supplier_upload_batches" (uploaded_by, batch_type, filename, row_count, status)
       VALUES ($1, 'pre_post_eval', $2, $3, 'processing') RETURNING id
     `, [uploaderId, req.file.originalname, rows.length]);
     batchId = batchResult.rows[0].id;
@@ -129,7 +129,7 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
 
       // Upsert supplier
       const supUpsert = await client.query(`
-        INSERT INTO suppliers (vendor_code, supplier_name, product_type, tax_id, category,
+        INSERT INTO "SPES_suppliers" (vendor_code, supplier_name, product_type, tax_id, category,
           function_owner, job_value_thb, pta_approve_date, buyer_name, buyer_email,
           evaluator_name, evaluator_email)
         VALUES ($1, $2, 'both', $3, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -138,7 +138,7 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
           category        = EXCLUDED.category,
           function_owner  = EXCLUDED.function_owner,
           job_value_thb   = EXCLUDED.job_value_thb,
-          pta_approve_date = COALESCE(EXCLUDED.pta_approve_date, suppliers.pta_approve_date),
+          pta_approve_date = COALESCE(EXCLUDED.pta_approve_date, "SPES_suppliers".pta_approve_date),
           buyer_name      = EXCLUDED.buyer_name,
           buyer_email     = EXCLUDED.buyer_email,
           evaluator_name  = EXCLUDED.evaluator_name,
@@ -166,7 +166,7 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
       // across uploads) used to silently spawn a second parallel session +
       // task pair, letting both get evaluated independently with no warning.
       const existingOpen = await client.query(`
-        SELECT id FROM evaluation_sessions
+        SELECT id FROM "SPES_evaluation_sessions"
          WHERE supplier_id = $1 AND eval_type = $2 AND period = $3 AND status != 'completed'
          LIMIT 1
       `, [supplier.id, evalType, period]);
@@ -178,17 +178,17 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
 
       // Create evaluation session
       const sessionResult = await client.query(`
-        INSERT INTO evaluation_sessions (supplier_id, eval_type, period, status, initiated_by)
+        INSERT INTO "SPES_evaluation_sessions" (supplier_id, eval_type, period, status, initiated_by)
         VALUES ($1, $2, $3, 'pending', $4) RETURNING id
       `, [supplier.id, evalType, period, uploaderId]);
       const sessionId = sessionResult.rows[0].id;
 
       // Match buyer (GCP) and evaluator (USER) by email
       const gcpMatch = buyerEmail
-        ? await client.query(`SELECT id, full_name, email FROM employees WHERE email = $1 AND is_active = TRUE LIMIT 1`, [buyerEmail])
+        ? await client.query(`SELECT emp_no AS id, name AS full_name FROM "Master_Data_GCP" WHERE email = $1 LIMIT 1`, [buyerEmail])
         : { rows: [] };
       const buMatch = evalEmail
-        ? await client.query(`SELECT id, full_name, email FROM employees WHERE email = $1 AND is_active = TRUE LIMIT 1`, [evalEmail])
+        ? await client.query(`SELECT emp_no AS id, name AS full_name FROM "Master_Data_GCP" WHERE email = $1 LIMIT 1`, [evalEmail])
         : { rows: [] };
 
       if (buyerEmail && gcpMatch.rows.length === 0) {
@@ -213,7 +213,7 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
       for (const t of taskRows) {
         if (!t.email) continue;
         const taskResult = await client.query(`
-          INSERT INTO evaluation_tasks
+          INSERT INTO "SPES_evaluation_tasks"
             (batch_id, session_id, supplier_id, assigned_employee_id, assigned_email, assigned_name, role, due_date, status)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending') RETURNING id
         `, [batchId, sessionId, supplier.id, t.empId, t.email, t.empName, t.role, dueDate]);
@@ -238,7 +238,7 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
 
     // Update batch status
     await client.query(`
-      UPDATE supplier_upload_batches SET status = 'done', row_count = $1 WHERE id = $2
+      UPDATE "SPES_supplier_upload_batches" SET status = 'done', row_count = $1 WHERE id = $2
     `, [summary.processed, batchId]);
 
     await client.query('COMMIT');
@@ -246,7 +246,7 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
     // Send invitation emails after commit (fire-and-forget)
     for (const task of invitationTasks) {
       sendInvitationEmail(task, task.supplier)
-        .then(() => pool.query(`UPDATE evaluation_tasks SET invitation_sent_at = NOW() WHERE id = $1`, [task.id]))
+        .then(() => pool.query(`UPDATE "SPES_evaluation_tasks" SET invitation_sent_at = NOW() WHERE id = $1`, [task.id]))
         .catch((e: any) => console.warn('[admin upload] invitation email error:', e.message));
     }
 
@@ -255,7 +255,7 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
   } catch (err: any) {
     await client.query('ROLLBACK');
     if (typeof batchId !== 'undefined') {
-      await pool.query(`UPDATE supplier_upload_batches SET status='error', error_msg=$1 WHERE id=$2`,
+      await pool.query(`UPDATE "SPES_supplier_upload_batches" SET status='error', error_msg=$1 WHERE id=$2`,
         [err.message, batchId]).catch(() => {});
     }
     console.error('POST /api/admin/upload/pre-post error:', err);
@@ -291,12 +291,12 @@ async function uploadPeriodic(req: RequestWithFile, res: Response) {
     await client.query('BEGIN');
 
     const uploaderResult = await client.query(
-      `SELECT id FROM employees WHERE employee_id = $1`, [req.user!.empId]
+      `SELECT emp_no AS id FROM "Master_Data_GCP" WHERE UPPER(emp_no) = UPPER($1)`, [req.user!.empId]
     );
     const uploaderId = uploaderResult.rows[0]?.id || null;
 
     const batchResult = await client.query(`
-      INSERT INTO supplier_upload_batches (uploaded_by, batch_type, filename, row_count, status)
+      INSERT INTO "SPES_supplier_upload_batches" (uploaded_by, batch_type, filename, row_count, status)
       VALUES ($1, $2, $3, $4, 'processing') RETURNING id
     `, [uploaderId, evalType, req.file.originalname, rows.length]);
     batchId = batchResult.rows[0].id;
@@ -327,7 +327,7 @@ async function uploadPeriodic(req: RequestWithFile, res: Response) {
 
       // Find existing supplier by tax_id or name
       const supResult = await client.query(`
-        SELECT id, vendor_code, supplier_name FROM suppliers
+        SELECT id, vendor_code, supplier_name FROM "SPES_suppliers"
          WHERE (tax_id = $1 OR supplier_name ILIKE $2) AND is_active = TRUE
          LIMIT 1
       `, [taxId || '', supplierName]);
@@ -342,7 +342,7 @@ async function uploadPeriodic(req: RequestWithFile, res: Response) {
       // Optionally update buyer/evaluator info
       if (buyerEmail || evalEmail) {
         await client.query(`
-          UPDATE suppliers SET
+          UPDATE "SPES_suppliers" SET
             buyer_name = COALESCE($1, buyer_name),
             buyer_email = COALESCE($2, buyer_email),
             evaluator_name = COALESCE($3, evaluator_name),
@@ -354,7 +354,7 @@ async function uploadPeriodic(req: RequestWithFile, res: Response) {
       // Skip if this supplier already has an unfinished round for this exact
       // eval_type+period — see same check in /upload/pre-post for why.
       const existingOpen = await client.query(`
-        SELECT id FROM evaluation_sessions
+        SELECT id FROM "SPES_evaluation_sessions"
          WHERE supplier_id = $1 AND eval_type = $2 AND period = $3 AND status != 'completed'
          LIMIT 1
       `, [supplier.id, evalType, period]);
@@ -365,16 +365,16 @@ async function uploadPeriodic(req: RequestWithFile, res: Response) {
       }
 
       const sessionResult = await client.query(`
-        INSERT INTO evaluation_sessions (supplier_id, eval_type, period, status, initiated_by)
+        INSERT INTO "SPES_evaluation_sessions" (supplier_id, eval_type, period, status, initiated_by)
         VALUES ($1, $2, $3, 'pending', $4) RETURNING id
       `, [supplier.id, evalType, period, uploaderId]);
       const sessionId = sessionResult.rows[0].id;
 
       const gcpMatch = buyerEmail
-        ? await client.query(`SELECT id, full_name FROM employees WHERE email = $1 AND is_active = TRUE LIMIT 1`, [buyerEmail])
+        ? await client.query(`SELECT emp_no AS id, name AS full_name FROM "Master_Data_GCP" WHERE email = $1 LIMIT 1`, [buyerEmail])
         : { rows: [] };
       const buMatch = evalEmail
-        ? await client.query(`SELECT id, full_name FROM employees WHERE email = $1 AND is_active = TRUE LIMIT 1`, [evalEmail])
+        ? await client.query(`SELECT emp_no AS id, name AS full_name FROM "Master_Data_GCP" WHERE email = $1 LIMIT 1`, [evalEmail])
         : { rows: [] };
 
       if (buyerEmail && gcpMatch.rows.length === 0) summary.warnings.push(`ไม่พบ Buyer email "${buyerEmail}"`);
@@ -391,7 +391,7 @@ async function uploadPeriodic(req: RequestWithFile, res: Response) {
       for (const t of taskRows) {
         if (!t.email) continue;
         const taskResult = await client.query(`
-          INSERT INTO evaluation_tasks
+          INSERT INTO "SPES_evaluation_tasks"
             (batch_id, session_id, supplier_id, assigned_employee_id, assigned_email, assigned_name, role, due_date, status)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending') RETURNING id
         `, [batchId, sessionId, supplier.id, t.empId, t.email, t.empName, t.role, dueDate]);
@@ -410,14 +410,14 @@ async function uploadPeriodic(req: RequestWithFile, res: Response) {
     }
 
     await client.query(`
-      UPDATE supplier_upload_batches SET status = 'done', row_count = $1 WHERE id = $2
+      UPDATE "SPES_supplier_upload_batches" SET status = 'done', row_count = $1 WHERE id = $2
     `, [summary.processed, batchId]);
 
     await client.query('COMMIT');
 
     for (const task of invitationTasks) {
       sendInvitationEmail(task, task.supplier)
-        .then(() => pool.query(`UPDATE evaluation_tasks SET invitation_sent_at = NOW() WHERE id = $1`, [task.id]))
+        .then(() => pool.query(`UPDATE "SPES_evaluation_tasks" SET invitation_sent_at = NOW() WHERE id = $1`, [task.id]))
         .catch((e: any) => console.warn('[admin upload periodic] invitation email error:', e.message));
     }
 
@@ -426,7 +426,7 @@ async function uploadPeriodic(req: RequestWithFile, res: Response) {
   } catch (err: any) {
     await client.query('ROLLBACK');
     if (typeof batchId !== 'undefined') {
-      await pool.query(`UPDATE supplier_upload_batches SET status='error', error_msg=$1 WHERE id=$2`,
+      await pool.query(`UPDATE "SPES_supplier_upload_batches" SET status='error', error_msg=$1 WHERE id=$2`,
         [err.message, batchId]).catch(() => {});
     }
     console.error('POST /api/admin/upload/periodic error:', err);
@@ -460,12 +460,12 @@ async function createAdHocEvaluation(req: Request, res: Response) {
   try {
     await client.query('BEGIN');
 
-    const uploaderResult = await client.query(`SELECT id FROM employees WHERE employee_id = $1`, [req.user!.empId]);
+    const uploaderResult = await client.query(`SELECT emp_no AS id FROM "Master_Data_GCP" WHERE UPPER(emp_no) = UPPER($1)`, [req.user!.empId]);
     const uploaderId = uploaderResult.rows[0]?.id || null;
 
     const supResult = await client.query(`
       SELECT id, vendor_code, supplier_name, buyer_name, buyer_email, evaluator_name, evaluator_email
-        FROM suppliers WHERE vendor_code = $1 AND is_active = TRUE
+        FROM "SPES_suppliers" WHERE vendor_code = $1 AND is_active = TRUE
     `, [String(vendorCode).trim()]);
     if (supResult.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -486,16 +486,16 @@ async function createAdHocEvaluation(req: Request, res: Response) {
     const period  = `Ad-hoc ${new Date().toISOString()}`;
 
     const sessionResult = await client.query(`
-      INSERT INTO evaluation_sessions (supplier_id, eval_type, period, status, initiated_by, ad_hoc_reason)
+      INSERT INTO "SPES_evaluation_sessions" (supplier_id, eval_type, period, status, initiated_by, ad_hoc_reason)
       VALUES ($1, 'ad_hoc', $2, 'pending', $3, $4) RETURNING id
     `, [supplier.id, period, uploaderId, String(reason).trim()]);
     const sessionId = sessionResult.rows[0].id;
 
     const gcpMatch = supplier.buyer_email
-      ? await client.query(`SELECT id, full_name FROM employees WHERE email = $1 AND is_active = TRUE LIMIT 1`, [supplier.buyer_email])
+      ? await client.query(`SELECT emp_no AS id, name AS full_name FROM "Master_Data_GCP" WHERE email = $1 LIMIT 1`, [supplier.buyer_email])
       : { rows: [] };
     const buMatch = supplier.evaluator_email
-      ? await client.query(`SELECT id, full_name FROM employees WHERE email = $1 AND is_active = TRUE LIMIT 1`, [supplier.evaluator_email])
+      ? await client.query(`SELECT emp_no AS id, name AS full_name FROM "Master_Data_GCP" WHERE email = $1 LIMIT 1`, [supplier.evaluator_email])
       : { rows: [] };
 
     const taskRows = [
@@ -507,7 +507,7 @@ async function createAdHocEvaluation(req: Request, res: Response) {
     for (const t of taskRows) {
       if (!t.email) continue;
       const taskResult = await client.query(`
-        INSERT INTO evaluation_tasks
+        INSERT INTO "SPES_evaluation_tasks"
           (session_id, supplier_id, assigned_employee_id, assigned_email, assigned_name, role, due_date, status)
         VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending') RETURNING id
       `, [sessionId, supplier.id, t.empId, t.email, t.empName, t.role, dueDate]);
@@ -528,7 +528,7 @@ async function createAdHocEvaluation(req: Request, res: Response) {
     // instead of waiting on the daily cron.
     for (const task of invitationTasks) {
       sendInvitationEmail(task, task.supplier)
-        .then(() => pool.query(`UPDATE evaluation_tasks SET invitation_sent_at = NOW() WHERE id = $1`, [task.id]))
+        .then(() => pool.query(`UPDATE "SPES_evaluation_tasks" SET invitation_sent_at = NOW() WHERE id = $1`, [task.id]))
         .catch((e: any) => console.warn('[admin ad-hoc] invitation email error:', e.message));
     }
 
@@ -567,9 +567,9 @@ async function listTasks(req: Request, res: Response) {
         es.id                  AS "sessionId",
         es.eval_type           AS "evalType",
         es.status              AS "sessionStatus"
-      FROM evaluation_tasks et
-      JOIN suppliers s           ON s.id  = et.supplier_id
-      JOIN evaluation_sessions es ON es.id = et.session_id
+      FROM "SPES_evaluation_tasks" et
+      JOIN "SPES_suppliers" s           ON s.id  = et.supplier_id
+      JOIN "SPES_evaluation_sessions" es ON es.id = et.session_id
       WHERE ($1::text IS NULL OR et.status = $1)
         AND ($2::text IS NULL OR et.role = $2)
         AND ($3::text IS NULL OR s.vendor_code = $3)
@@ -588,8 +588,8 @@ async function remindTask(req: Request, res: Response) {
   try {
     const taskResult = await pool.query(`
       SELECT et.*, s.supplier_name, s.vendor_code
-        FROM evaluation_tasks et
-        JOIN suppliers s ON s.id = et.supplier_id
+        FROM "SPES_evaluation_tasks" et
+        JOIN "SPES_suppliers" s ON s.id = et.supplier_id
        WHERE et.id = $1
     `, [req.params.id]);
 
@@ -602,7 +602,7 @@ async function remindTask(req: Request, res: Response) {
     }
 
     await sendReminderEmail(task, { supplier_name: task.supplier_name, vendor_code: task.vendor_code });
-    await pool.query(`UPDATE evaluation_tasks SET reminder_sent_at = NOW() WHERE id = $1`, [req.params.id]);
+    await pool.query(`UPDATE "SPES_evaluation_tasks" SET reminder_sent_at = NOW() WHERE id = $1`, [req.params.id]);
 
     res.json({ message: 'ส่ง reminder สำเร็จ', email: task.assigned_email });
   } catch (err: any) {
@@ -624,7 +624,7 @@ async function updateTask(req: Request, res: Response) {
   const { assignedName, assignedEmail, dueDate } = req.body;
 
   try {
-    const current = await pool.query(`SELECT * FROM evaluation_tasks WHERE id = $1`, [req.params.id]);
+    const current = await pool.query(`SELECT * FROM "SPES_evaluation_tasks" WHERE id = $1`, [req.params.id]);
     if (current.rows.length === 0) {
       return res.status(404).json({ message: 'ไม่พบ task' });
     }
@@ -642,7 +642,7 @@ async function updateTask(req: Request, res: Response) {
 
     if (emailChanged) {
       const empMatch = await pool.query(
-        `SELECT id, full_name FROM employees WHERE email = $1 AND is_active = TRUE LIMIT 1`,
+        `SELECT emp_no AS id, name AS full_name FROM "Master_Data_GCP" WHERE email = $1 LIMIT 1`,
         [finalEmail]
       );
       if (empMatch.rows.length > 0) {
@@ -658,7 +658,7 @@ async function updateTask(req: Request, res: Response) {
       // so the session can never collect both a USER and a GCP evaluation
       // and will sit invisible to Supervisor forever.
       const collision = await pool.query(`
-        SELECT role FROM evaluation_tasks
+        SELECT role FROM "SPES_evaluation_tasks"
          WHERE session_id = $1 AND id != $2 AND role != $3
            AND (assigned_email = $4 OR ($5::uuid IS NOT NULL AND assigned_employee_id = $5))
       `, [task.session_id, task.id, task.role, finalEmail, assignedEmployeeId]);
@@ -670,7 +670,7 @@ async function updateTask(req: Request, res: Response) {
     }
 
     const result = await pool.query(`
-      UPDATE evaluation_tasks SET
+      UPDATE "SPES_evaluation_tasks" SET
         assigned_name        = $1,
         assigned_email        = $2,
         assigned_employee_id  = $3,
@@ -711,7 +711,7 @@ async function deleteSession(req: Request, res: Response) {
     await client.query('BEGIN');
 
     const sessionResult = await client.query(
-      `SELECT status FROM evaluation_sessions WHERE id = $1`,
+      `SELECT status FROM "SPES_evaluation_sessions" WHERE id = $1`,
       [req.params.sessionId]
     );
     if (sessionResult.rows.length === 0) {
@@ -728,11 +728,11 @@ async function deleteSession(req: Request, res: Response) {
     // already had an invitation/reminder sent (true for nearly every real
     // task) would otherwise fail with a foreign-key violation. The log rows
     // are meaningless once their task is gone anyway, so drop them first.
-    await client.query(`DELETE FROM email_logs WHERE task_id IN (SELECT id FROM evaluation_tasks WHERE session_id = $1)`, [req.params.sessionId]);
-    await client.query(`DELETE FROM evaluation_tasks WHERE session_id = $1`, [req.params.sessionId]);
-    await client.query(`DELETE FROM supervisor_reviews WHERE session_id = $1`, [req.params.sessionId]);
-    await client.query(`DELETE FROM evaluations WHERE session_id = $1`, [req.params.sessionId]);
-    await client.query(`DELETE FROM evaluation_sessions WHERE id = $1`, [req.params.sessionId]);
+    await client.query(`DELETE FROM "SPES_email_logs" WHERE task_id IN (SELECT id FROM "SPES_evaluation_tasks" WHERE session_id = $1)`, [req.params.sessionId]);
+    await client.query(`DELETE FROM "SPES_evaluation_tasks" WHERE session_id = $1`, [req.params.sessionId]);
+    await client.query(`DELETE FROM "SPES_supervisor_reviews" WHERE session_id = $1`, [req.params.sessionId]);
+    await client.query(`DELETE FROM "SPES_evaluations" WHERE session_id = $1`, [req.params.sessionId]);
+    await client.query(`DELETE FROM "SPES_evaluation_sessions" WHERE id = $1`, [req.params.sessionId]);
 
     await client.query('COMMIT');
     console.log(`[admin] ลบรายการประเมิน session ${req.params.sessionId} โดย ${req.user!.empId}`);
@@ -755,8 +755,8 @@ async function remindAllTasks(req: Request, res: Response) {
   try {
     const taskResult = await pool.query(`
       SELECT et.*, s.supplier_name, s.vendor_code
-        FROM evaluation_tasks et
-        JOIN suppliers s ON s.id = et.supplier_id
+        FROM "SPES_evaluation_tasks" et
+        JOIN "SPES_suppliers" s ON s.id = et.supplier_id
        WHERE et.status != 'completed' AND et.assigned_email IS NOT NULL
          AND ($1::uuid[] IS NULL OR et.id = ANY($1::uuid[]))
     `, [Array.isArray(taskIds) && taskIds.length > 0 ? taskIds : null]);
@@ -765,7 +765,7 @@ async function remindAllTasks(req: Request, res: Response) {
     for (const task of taskResult.rows) {
       try {
         await sendReminderEmail(task, { supplier_name: task.supplier_name, vendor_code: task.vendor_code });
-        await pool.query(`UPDATE evaluation_tasks SET reminder_sent_at = NOW() WHERE id = $1`, [task.id]);
+        await pool.query(`UPDATE "SPES_evaluation_tasks" SET reminder_sent_at = NOW() WHERE id = $1`, [task.id]);
         sent++;
       } catch (e: any) {
         failed++;
@@ -799,17 +799,17 @@ async function bulkDeleteSessions(req: Request, res: Response) {
     try {
       await client.query('BEGIN');
       const sessionResult = await client.query(
-        `SELECT status FROM evaluation_sessions WHERE id = $1`, [sessionId]
+        `SELECT status FROM "SPES_evaluation_sessions" WHERE id = $1`, [sessionId]
       );
       if (sessionResult.rows.length === 0 || !['pending', 'in_progress'].includes(sessionResult.rows[0].status)) {
         await client.query('ROLLBACK');
         skipped.push(sessionId);
         continue;
       }
-      await client.query(`DELETE FROM evaluation_tasks WHERE session_id = $1`, [sessionId]);
-      await client.query(`DELETE FROM supervisor_reviews WHERE session_id = $1`, [sessionId]);
-      await client.query(`DELETE FROM evaluations WHERE session_id = $1`, [sessionId]);
-      await client.query(`DELETE FROM evaluation_sessions WHERE id = $1`, [sessionId]);
+      await client.query(`DELETE FROM "SPES_evaluation_tasks" WHERE session_id = $1`, [sessionId]);
+      await client.query(`DELETE FROM "SPES_supervisor_reviews" WHERE session_id = $1`, [sessionId]);
+      await client.query(`DELETE FROM "SPES_evaluations" WHERE session_id = $1`, [sessionId]);
+      await client.query(`DELETE FROM "SPES_evaluation_sessions" WHERE id = $1`, [sessionId]);
       await client.query('COMMIT');
       deleted.push(sessionId);
     } catch (err: any) {
@@ -834,8 +834,8 @@ async function listBatches(req: Request, res: Response) {
         b.row_count AS "rowCount", b.status,
         b.error_msg AS "errorMsg", b.created_at AS "createdAt",
         emp.full_name AS "uploadedBy"
-      FROM supplier_upload_batches b
-      LEFT JOIN employees emp ON emp.id = b.uploaded_by
+      FROM "SPES_supplier_upload_batches" b
+      LEFT JOIN "Master_Data_GCP" emp ON emp.emp_no = b.uploaded_by
       ORDER BY b.created_at DESC
       LIMIT 100
     `);
@@ -856,20 +856,21 @@ async function listServiceEvaluations(req: Request, res: Response) {
       SELECT
         se.id,
         sessionSup.supplier_name AS "supplierName",
-        target.employee_id AS "targetEmpCode", target.full_name AS "targetFullName", target.role AS "targetRole",
-        CASE WHEN se.direction LIKE 'supplier_%' THEN sup.supplier_name ELSE evalEmp.full_name END AS "evaluatorName",
-        CASE WHEN se.direction LIKE 'supplier_%' THEN sup.vendor_code ELSE evalEmp.employee_id END AS "evaluatorCode",
+        target.emp_no AS "targetEmpCode", target.name AS "targetFullName", COALESCE(r_target.role, 'USER') AS "targetRole",
+        CASE WHEN se.direction LIKE 'supplier_%' THEN sup.supplier_name ELSE evalEmp.name END AS "evaluatorName",
+        CASE WHEN se.direction LIKE 'supplier_%' THEN sup.vendor_code ELSE evalEmp.emp_no END AS "evaluatorCode",
         CASE WHEN se.direction LIKE 'supplier_%' THEN 'Supplier' ELSE 'User' END AS "evaluatorRoleLabel",
         es.period,
         se.submitted_at AS "submittedAt",
         se.total_score AS "totalScore",
         se.grade
-      FROM service_evaluations se
-      JOIN employees target ON target.id = se.target_employee_id
-      JOIN evaluation_sessions es ON es.id = se.session_id
-      JOIN suppliers sessionSup ON sessionSup.id = es.supplier_id
-      LEFT JOIN suppliers sup ON sup.id = se.evaluator_supplier_id
-      LEFT JOIN employees evalEmp ON evalEmp.id = se.evaluator_employee_id
+      FROM "SPES_service_evaluations" se
+      JOIN "Master_Data_GCP" target ON target.emp_no = se.target_employee_id
+      LEFT JOIN "SPES_Roles" r_target ON r_target.emp_no = target.emp_no
+      JOIN "SPES_evaluation_sessions" es ON es.id = se.session_id
+      JOIN "SPES_suppliers" sessionSup ON sessionSup.id = es.supplier_id
+      LEFT JOIN "SPES_suppliers" sup ON sup.id = se.evaluator_supplier_id
+      LEFT JOIN "Master_Data_GCP" evalEmp ON evalEmp.emp_no = se.evaluator_employee_id
       ORDER BY se.submitted_at DESC
     `);
     res.json(result.rows);
@@ -894,7 +895,7 @@ async function listSuppliersAdmin(req: Request, res: Response) {
              buyer_name AS "buyerName", buyer_email AS "buyerEmail",
              evaluator_name AS "evaluatorName", evaluator_email AS "evaluatorEmail",
              contact_email AS "contactEmail", is_active AS "isActive"
-        FROM suppliers
+        FROM "SPES_suppliers"
        ORDER BY supplier_name
     `);
     // NUMERIC columns come back as strings from pg — parse once here so the

@@ -1,15 +1,15 @@
 'use strict';
 import type { Request, Response, NextFunction } from 'express';
 import type { PoolClient } from 'pg';
-const express      = require('express'); // express เป็น framework ที่ทำให้ node.js รับ http request ได้ง่าย
-const helmet       = require('helmet'); // ตั้ง security headers มาตรฐาน (CSP, HSTS, X-Frame-Options ฯลฯ) และปิด X-Powered-By
-const cors         = require('cors'); // เช็คว่าโดเมนที่เรียกเข้ามา ได้รับอนุญาตให้ดึงข้อมูลจาก API ของเราไหม
+const express = require('express'); // express เป็น framework ที่ทำให้ node.js รับ http request ได้ง่าย
+const helmet = require('helmet'); // ตั้ง security headers มาตรฐาน (CSP, HSTS, X-Frame-Options ฯลฯ) และปิด X-Powered-By
+const cors = require('cors'); // เช็คว่าโดเมนที่เรียกเข้ามา ได้รับอนุญาตให้ดึงข้อมูลจาก API ของเราไหม
 const cookieParser = require('cookie-parser');
-const path         = require('path');
+const path = require('path');
 
 const pool = require('./db'); // ./db already calls dotenv.config() — no need to call it again here
 
-const app  = express(); //สร้าง Express Application — app คือ object หลักที่เราจะ config ทุกอย่างลงไป
+const app = express(); //สร้าง Express Application — app คือ object หลักที่เราจะ config ทุกอย่างลงไป
 const PORT = process.env.PORT || 5000;
 const isProd = process.env.NODE_ENV === 'production';
 
@@ -64,13 +64,13 @@ app.use(requireCustomHeader);
 app.use((req: Request, res: Response, next: NextFunction) => { // เพิ่ม middleware ที่จะรันกับทุก request — รับ parameter 3 ตัวเสมอ: req (request), res (response), next (ฟังก์ชันที่บอกให้ไปต่อ)
   const start = Date.now(); // จดเวลาที่ request เข้ามา (millisecond) — ใช้คำนวณว่า request ใช้เวลานานแค่ไหน
   res.on('finish', () => {
-    const ms      = Date.now() - start;
-    const status  = res.statusCode;
-    const emoji   = status >= 500 ? '❌' : status >= 400 ? '⚠️ ' : '✅';
-    const line    = `${emoji} ${req.method.padEnd(6)} ${req.originalUrl.padEnd(45)} ${status}  (${ms}ms)`; //เลือก emoji ตาม status — 500+ คือ server error (❌), 400+ คือ client error (⚠️), อื่นๆ คือสำเร็จ (✅) — เขียนแบบ ternary ซ้อนกัน
-    if (status >= 500)      console.error(line);
+    const ms = Date.now() - start;
+    const status = res.statusCode;
+    const emoji = status >= 500 ? '❌' : status >= 400 ? '⚠️ ' : '✅';
+    const line = `${emoji} ${req.method.padEnd(6)} ${req.originalUrl.padEnd(45)} ${status}  (${ms}ms)`; //เลือก emoji ตาม status — 500+ คือ server error (❌), 400+ คือ client error (⚠️), อื่นๆ คือสำเร็จ (✅) — เขียนแบบ ternary ซ้อนกัน
+    if (status >= 500) console.error(line);
     else if (status >= 400) console.warn(line);
-    else                    console.log(line);
+    else console.log(line);
   });
   next();
 });
@@ -89,8 +89,6 @@ app.get("/", (req: Request, res: Response) => {
 // password with unlimited attempts through that endpoint.
 const { rateLimit } = require('express-rate-limit');
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: 'พยายามเข้าสู่ระบบบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่' },
@@ -117,16 +115,16 @@ const apiLimiter = rateLimit({
 });
 app.use('/api', apiLimiter);
 
-app.use('/api/auth',        require('./routes/public/auth'));          // public
+app.use('/api/auth', require('./routes/public/auth'));          // public
 app.use('/api/evaluations', requireAuth, require('./routes/shared/evaluations'));
-app.use('/api/uploads',     requireAuth, require('./routes/shared/uploads'));
-app.use('/api/employees',   requireAuth, require('./routes/shared/employees'));
-app.use('/api/suppliers',   requireAuth, require('./routes/shared/suppliers'));
-app.use('/api/criteria',    requireAuth, require('./routes/shared/criteria'));
-app.use('/api/sessions',    requireAuth, require('./routes/supervisor/sessions'));
-app.use('/api/admin',       requireAuth, require('./routes/admin/admin'));
-app.use('/api/admin',       requireAuth, require('./routes/admin/emailSettings'));
-app.use('/api/supervisor',  requireAuth, require('./routes/supervisor/supervisor'));
+app.use('/api/uploads', requireAuth, require('./routes/shared/uploads'));
+app.use('/api/employees', requireAuth, require('./routes/shared/employees'));
+app.use('/api/suppliers', requireAuth, require('./routes/shared/suppliers'));
+app.use('/api/criteria', requireAuth, require('./routes/shared/criteria'));
+app.use('/api/sessions', requireAuth, require('./routes/supervisor/sessions'));
+app.use('/api/admin', requireAuth, require('./routes/admin/admin'));
+app.use('/api/admin', requireAuth, require('./routes/admin/emailSettings'));
+app.use('/api/supervisor', requireAuth, require('./routes/supervisor/supervisor'));
 // Suppliers have no login in this system — reached only via a one-time
 // emailed token, see database/CROSS_EVALUATION_SPEC.md.
 app.use('/api/public/supplier-eval', require('./routes/public/publicSupplierEval'));
@@ -153,7 +151,7 @@ pool.connect()
     // boundaries) and nothing else in the app ever writes these rows, so
     // this UPSERT is the only thing keeping them right.
     await client.query(`
-      INSERT INTO grade_thresholds (grade, min_score, max_score, label_th, label_en, color_hex)
+      INSERT INTO "SPES_grade_thresholds" (grade, min_score, max_score, label_th, label_en, color_hex)
       VALUES
         ('A', 90,    100,   'ผ่านการรับรอง',    'Approved',             '#1b5e20'),
         ('B', 80,    89.99, 'ผ่านเงื่อนไข',     'Conditional',          '#1565c0'),
@@ -173,7 +171,7 @@ pool.connect()
     // ESG sub-groups (Environment/Social/Governance) from the Parameter page
     // instead of those 3 groups being permanently hardcoded in constants.js.
     await client.query(`
-      ALTER TABLE evaluation_main_criteria ADD COLUMN IF NOT EXISTS group_labels JSONB;
+      ALTER TABLE "SPES_evaluation_main_criteria" ADD COLUMN IF NOT EXISTS group_labels JSONB;
     `).catch((err: any) => console.warn('group_labels column migration warning:', err.message));
 
     // ── DEAD-CODE REMOVAL NOTE (2026-07-08) ──────────────────────
@@ -206,27 +204,8 @@ pool.connect()
       .then(() => console.log('✅ email_templates / email_settings seeded with default copy'))
       .catch((err: any) => console.warn('email template seed warning:', err.message));
 
-    // Create default ADMIN account if none exists. The bootstrap password
-    // is randomly generated (not a fixed, guessable default like the old
-    // 'Admin@1234') — there's now no replacement self-service flow to
-    // change it (register/forgot-password were removed), so whoever reads
-    // this log line should change it from an ADMIN-side flow once one
-    // exists, or treat this account as already provisioned correctly.
-    const bcrypt = require('bcrypt');
-    const adminExists = await client.query(
-      `SELECT employee_id FROM employees WHERE role = 'ADMIN' LIMIT 1`
-    );
-    if (adminExists.rows.length === 0) {
-      const tempPassword = require('crypto').randomBytes(9).toString('base64').replace(/[+/=]/g, '');
-      const hash = await bcrypt.hash(tempPassword, 10);
-      await client.query(
-        `INSERT INTO employees (employee_id, full_name, email, role, password_hash, is_active)
-         VALUES ('ADMIN-001', 'System Administrator', 'admin@system.local', 'ADMIN', $1, TRUE)
-         ON CONFLICT (employee_id) DO NOTHING`,
-        [hash]
-      );
-      console.log(`✅ Admin account created  →  ID: ADMIN-001  |  Password: ${tempPassword}  (save this now — it is not recoverable, there is no self-service reset)`);
-    }
+    // Create default ADMIN account if none exists.
+    // (Removed: Auth is now handled via EHR API and Master_Data_GCP / SPES_Roles)
 
     client.release();
     console.log('✅ PostgreSQL connected');

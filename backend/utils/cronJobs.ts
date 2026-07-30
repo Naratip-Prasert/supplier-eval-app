@@ -1,4 +1,5 @@
 'use strict';
+export {};
 const cron = require('node-cron');
 const pool = require('../db');
 const {
@@ -32,8 +33,8 @@ async function sendReminderEmails() {
       SELECT et.id, et.assigned_email, et.assigned_name, et.due_date,
              et.role, et.session_id,
              s.supplier_name, s.vendor_code
-        FROM evaluation_tasks et
-        JOIN suppliers s ON s.id = et.supplier_id
+        FROM "SPES_evaluation_tasks" et
+        JOIN "SPES_suppliers" s ON s.id = et.supplier_id
        WHERE et.status = 'pending'
          AND et.reminder_sent_at IS NULL
          AND et.due_date >= CURRENT_DATE
@@ -43,7 +44,7 @@ async function sendReminderEmails() {
     for (const task of result.rows) {
       try {
         await sendReminderEmail(task, { supplier_name: task.supplier_name, vendor_code: task.vendor_code });
-        await pool.query(`UPDATE evaluation_tasks SET reminder_sent_at = NOW() WHERE id = $1`, [task.id]);
+        await pool.query(`UPDATE "SPES_evaluation_tasks" SET reminder_sent_at = NOW() WHERE id = $1`, [task.id]);
         console.log(`[cron] reminder sent → ${task.assigned_email} for ${task.supplier_name}`);
       } catch (e: any) {
         console.warn(`[cron] reminder failed for task ${task.id}:`, e.message);
@@ -67,9 +68,9 @@ async function sendOverdueEmails() {
              et.role, et.session_id,
              s.supplier_name, s.vendor_code,
              es.eval_type
-        FROM evaluation_tasks et
-        JOIN suppliers s ON s.id = et.supplier_id
-        JOIN evaluation_sessions es ON es.id = et.session_id
+        FROM "SPES_evaluation_tasks" et
+        JOIN "SPES_suppliers" s ON s.id = et.supplier_id
+        JOIN "SPES_evaluation_sessions" es ON es.id = et.session_id
        WHERE et.status = 'pending'
          AND et.overdue_sent_at IS NULL
          AND et.due_date <= CURRENT_DATE - make_interval(days => $1::int)
@@ -81,15 +82,16 @@ async function sendOverdueEmails() {
     // aren't assigned per-supplier in this schema, so every active
     // Supervisor gets escalation emails.
     const supervisors = await pool.query(`
-      SELECT id, full_name, email FROM employees
-       WHERE role = 'SUPERVISOR' AND is_active = TRUE AND email IS NOT NULL
+      SELECT e.emp_no AS id, e.name AS full_name, e.email FROM "Master_Data_GCP" e
+       JOIN "SPES_Roles" r ON r.emp_no = e.emp_no
+       WHERE r.role = 'SUPERVISOR' AND e.email IS NOT NULL
     `);
 
     for (const task of result.rows) {
       try {
         await sendOverdueEmail(task, { supplier_name: task.supplier_name, vendor_code: task.vendor_code });
         await pool.query(`
-          UPDATE evaluation_tasks SET overdue_sent_at = NOW(), status = 'overdue' WHERE id = $1
+          UPDATE "SPES_evaluation_tasks" SET overdue_sent_at = NOW(), status = 'overdue' WHERE id = $1
         `, [task.id]);
         console.log(`[cron] overdue sent → ${task.assigned_email} for ${task.supplier_name}`);
       } catch (e: any) {
@@ -123,8 +125,8 @@ async function sendThankyouEmails() {
       SELECT et.id, et.assigned_email, et.assigned_name, et.due_date,
              et.session_id,
              s.supplier_name, s.vendor_code
-        FROM evaluation_tasks et
-        JOIN suppliers s ON s.id = et.supplier_id
+        FROM "SPES_evaluation_tasks" et
+        JOIN "SPES_suppliers" s ON s.id = et.supplier_id
        WHERE et.status = 'completed'
          AND et.thankyou_sent_at IS NULL
     `);
@@ -132,7 +134,7 @@ async function sendThankyouEmails() {
     for (const task of result.rows) {
       try {
         await sendThankyouEmail(task, { supplier_name: task.supplier_name, vendor_code: task.vendor_code });
-        await pool.query(`UPDATE evaluation_tasks SET thankyou_sent_at = NOW() WHERE id = $1`, [task.id]);
+        await pool.query(`UPDATE "SPES_evaluation_tasks" SET thankyou_sent_at = NOW() WHERE id = $1`, [task.id]);
         console.log(`[cron] thankyou sent → ${task.assigned_email} for ${task.supplier_name}`);
       } catch (e: any) {
         console.warn(`[cron] thankyou failed for task ${task.id}:`, e.message);
@@ -156,9 +158,9 @@ async function notifySupervisors() {
              es.id AS "sessionId", es.eval_type AS "evalType",
              es.final_score AS "finalScore",
              s.supplier_name, s.vendor_code
-        FROM supervisor_reviews sr
-        JOIN evaluation_sessions es ON es.id = sr.session_id
-        JOIN suppliers s ON s.id = es.supplier_id
+        FROM "SPES_supervisor_reviews" sr
+        JOIN "SPES_evaluation_sessions" es ON es.id = sr.session_id
+        JOIN "SPES_suppliers" s ON s.id = es.supplier_id
        WHERE sr.status = 'pending'
          AND sr.notified_at IS NULL
     `);
@@ -167,8 +169,9 @@ async function notifySupervisors() {
 
     // Get all supervisors
     const supervisors = await pool.query(`
-      SELECT id, full_name, email FROM employees
-       WHERE role = 'SUPERVISOR' AND is_active = TRUE AND email IS NOT NULL
+      SELECT e.emp_no AS id, e.name AS full_name, e.email FROM "Master_Data_GCP" e
+       JOIN "SPES_Roles" r ON r.emp_no = e.emp_no
+       WHERE r.role = 'SUPERVISOR' AND e.email IS NOT NULL
     `);
 
     for (const review of result.rows) {
@@ -191,7 +194,7 @@ async function notifySupervisors() {
         }
       }
       if (anySent) {
-        await pool.query(`UPDATE supervisor_reviews SET notified_at = NOW() WHERE id = $1`, [review.reviewId]);
+        await pool.query(`UPDATE "SPES_supervisor_reviews" SET notified_at = NOW() WHERE id = $1`, [review.reviewId]);
       }
     }
   } catch (e: any) {
@@ -208,9 +211,9 @@ async function sendPostEvalInvitations() {
       SELECT et.id, et.assigned_email, et.assigned_name, et.due_date, et.role,
              s.supplier_name, s.vendor_code,
              es.eval_type
-        FROM evaluation_tasks et
-        JOIN suppliers s            ON s.id  = et.supplier_id
-        JOIN evaluation_sessions es ON es.id = et.session_id
+        FROM "SPES_evaluation_tasks" et
+        JOIN "SPES_suppliers" s            ON s.id  = et.supplier_id
+        JOIN "SPES_evaluation_sessions" es ON es.id = et.session_id
        WHERE et.status = 'pending'
          AND et.invitation_sent_at IS NULL
          AND es.eval_type = 'post_eval'
@@ -225,7 +228,7 @@ async function sendPostEvalInvitations() {
           { ...task, eval_type_label: 'Post Evaluation (90 วัน)' },
           { supplier_name: task.supplier_name, vendor_code: task.vendor_code }
         );
-        await pool.query(`UPDATE evaluation_tasks SET invitation_sent_at = NOW() WHERE id = $1`, [task.id]);
+        await pool.query(`UPDATE "SPES_evaluation_tasks" SET invitation_sent_at = NOW() WHERE id = $1`, [task.id]);
         console.log(`[cron] post_eval invitation sent → ${task.assigned_email}`);
       } catch (e: any) {
         console.warn(`[cron] post_eval invitation failed for task ${task.id}:`, e.message);
@@ -249,9 +252,9 @@ async function sendPreEvalInvitations() {
     const result = await pool.query(`
       SELECT et.id, et.assigned_email, et.assigned_name, et.due_date, et.role,
              s.supplier_name, s.vendor_code
-        FROM evaluation_tasks et
-        JOIN suppliers s            ON s.id  = et.supplier_id
-        JOIN evaluation_sessions es ON es.id = et.session_id
+        FROM "SPES_evaluation_tasks" et
+        JOIN "SPES_suppliers" s            ON s.id  = et.supplier_id
+        JOIN "SPES_evaluation_sessions" es ON es.id = et.session_id
        WHERE et.status = 'pending'
          AND et.invitation_sent_at IS NULL
          AND es.eval_type = 'pre_eval'
@@ -264,7 +267,7 @@ async function sendPreEvalInvitations() {
           { ...task, eval_type_label: 'Pre-Evaluation (Supplier ใหม่)' },
           { supplier_name: task.supplier_name, vendor_code: task.vendor_code }
         );
-        await pool.query(`UPDATE evaluation_tasks SET invitation_sent_at = NOW() WHERE id = $1`, [task.id]);
+        await pool.query(`UPDATE "SPES_evaluation_tasks" SET invitation_sent_at = NOW() WHERE id = $1`, [task.id]);
         console.log(`[cron] pre_eval invitation (retry) sent → ${task.assigned_email}`);
       } catch (e: any) {
         console.warn(`[cron] pre_eval invitation retry failed for task ${task.id}:`, e.message);

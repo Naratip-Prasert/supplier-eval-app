@@ -18,10 +18,10 @@ async function listSuppliers(req: Request, res: Response) {
       isAdmin
         ? `SELECT vendor_code AS "vendorCode", supplier_name AS "supplierName",
                   product_type AS "productType", is_active AS "isActive"
-             FROM suppliers ORDER BY supplier_name`
+             FROM "SPES_suppliers" ORDER BY supplier_name`
         : `SELECT vendor_code AS "vendorCode", supplier_name AS "supplierName",
                   product_type AS "productType"
-             FROM suppliers WHERE is_active = TRUE ORDER BY supplier_name`
+             FROM "SPES_suppliers" WHERE is_active = TRUE ORDER BY supplier_name`
     );
     res.json(result.rows);
   } catch (err: any) {
@@ -43,7 +43,7 @@ async function validateSupplier(req: Request, res: Response) {
   try {
     const result = await pool.query(
       `SELECT vendor_code AS "vendorCode", supplier_name AS "supplierName", product_type AS "productType"
-         FROM suppliers
+         FROM "SPES_suppliers"
         WHERE vendor_code   = $1
           AND supplier_name = $2
           AND is_active     = TRUE`,
@@ -76,7 +76,7 @@ async function createSupplier(req: Request, res: Response) {
   }
   try {
     const result = await pool.query(
-      `INSERT INTO suppliers (vendor_code, supplier_name, product_type, is_active)
+      `INSERT INTO "SPES_suppliers" (vendor_code, supplier_name, product_type, is_active)
        VALUES ($1, $2, $3, TRUE)
        RETURNING vendor_code AS "vendorCode", supplier_name AS "supplierName", product_type AS "productType"`,
       [vendorCode.trim().toUpperCase(), supplierName.trim(), productType || 'goods']
@@ -98,7 +98,7 @@ async function getSupplier(req: Request, res: Response) {
       `SELECT vendor_code    AS "vendorCode",
               supplier_name  AS "supplierName",
               product_type   AS "productType"
-         FROM suppliers
+         FROM "SPES_suppliers"
         WHERE vendor_code = $1 AND is_active = TRUE`,
       [(req.params.vendorCode as string).trim()]
     );
@@ -127,7 +127,7 @@ async function updateSupplier(req: Request, res: Response) {
   }
   try {
     const result = await pool.query(
-      `UPDATE suppliers
+      `UPDATE "SPES_suppliers"
           SET supplier_name = COALESCE($1, supplier_name),
               product_type  = COALESCE($2, product_type),
               is_active     = COALESCE($3, is_active)
@@ -163,11 +163,13 @@ async function checkPermission(req: Request, res: Response) {
     // Fetch employee and supplier in parallel
     const [empResult, supResult] = await Promise.all([
       pool.query(
-        `SELECT id, role FROM employees WHERE UPPER(employee_id) = UPPER($1) AND is_active = TRUE`,
+        `SELECT e.emp_no AS id, COALESCE(r.role, 'USER') AS role FROM "Master_Data_GCP" e
+         LEFT JOIN "SPES_Roles" r ON e.emp_no = r.emp_no
+         WHERE UPPER(e.emp_no) = UPPER($1)`,
         [employeeId.trim()]
       ),
       pool.query(
-        `SELECT id FROM suppliers WHERE vendor_code = $1 AND is_active = TRUE`,
+        `SELECT id FROM "SPES_suppliers" WHERE vendor_code = $1 AND is_active = TRUE`,
         [vendorCode.trim()]
       ),
     ]);
@@ -189,7 +191,7 @@ async function checkPermission(req: Request, res: Response) {
 
     // USER: check permissions table
     const permResult = await pool.query(
-      `SELECT 1 FROM employee_supplier_permissions
+      `SELECT 1 FROM "SPES_employee_supplier_permissions"
         WHERE employee_id = $1 AND supplier_id = $2`,
       [employee.id, supplier.id] ///
     );

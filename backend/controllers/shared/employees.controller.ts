@@ -12,19 +12,17 @@ async function listEmployees(req: Request, res: Response) {
   try {
     const result = await pool.query(
       `SELECT
-         e.employee_id    AS "employeeId",
-         e.full_name      AS "fullName",
+         e.emp_no         AS "employeeId",
+         e.name           AS "fullName",
          e.email,
-         e.role,
-         e.is_active      AS "isActive",
-         d.name_th        AS "department",
-         j.name_th        AS "jobTitle",
-         e.created_at     AS "createdAt",
-         e.profile_picture AS "profilePicture"
-       FROM employees e
-       LEFT JOIN departments d ON d.id = e.department_id
-       LEFT JOIN job_titles  j ON j.id = e.job_title_id
-       ORDER BY e.created_at DESC`
+         COALESCE(r.role, 'GCP') AS role,
+         TRUE             AS "isActive",
+         e.team           AS "department",
+         e.position       AS "jobTitle",
+         NULL             AS "createdAt",
+         NULL             AS "profilePicture"
+       FROM "Master_Data_GCP" e
+       LEFT JOIN "SPES_Roles" r ON r.emp_no = e.emp_no`
     );
     res.json(result.rows);
   } catch (err: any) {
@@ -37,17 +35,16 @@ async function listEmployees(req: Request, res: Response) {
 async function getMe(req: Request, res: Response) {
   try {
     const result = await pool.query(
-      `SELECT e.employee_id    AS "empId",
-              e.full_name      AS "fullName",
+      `SELECT e.emp_no         AS "empId",
+              e.name           AS "fullName",
               e.email,
-              e.role,
-              e.profile_picture AS "profilePicture",
-              d.name_th        AS "department",
-              j.name_th        AS "jobTitle"
-         FROM employees e
-         LEFT JOIN departments d ON d.id = e.department_id
-         LEFT JOIN job_titles  j ON j.id = e.job_title_id
-        WHERE e.employee_id = $1 AND e.is_active = TRUE`,
+              COALESCE(r.role, 'GCP') AS role,
+              NULL             AS "profilePicture",
+              e.team           AS "department",
+              e.position       AS "jobTitle"
+         FROM "Master_Data_GCP" e
+         LEFT JOIN "SPES_Roles" r ON r.emp_no = e.emp_no
+        WHERE e.emp_no = $1`,
       [req.user!.empId]
     );
     if (result.rows.length === 0) return res.status(404).json({ message: 'ไม่พบผู้ใช้' });
@@ -71,25 +68,26 @@ async function updateMe(req: Request, res: Response) {
 
   const client = await pool.connect();
   try {
-    await client.query(
-      `UPDATE employees
-          SET profile_picture = $1,
-              updated_at      = NOW()
-        WHERE employee_id = $2`,
-      [profilePicture || null, req.user!.empId]
-    );
+    // profile_picture updating is disabled because Master_Data_GCP has no profile_picture column.
+    // We mock it for now.
+    // await client.query(
+    //   `UPDATE "Master_Data_GCP"
+    //       SET profile_picture = $1,
+    //           updated_at      = NOW()
+    //     WHERE emp_no = $2`,
+    //   [profilePicture || null, req.user!.empId]
+    // );
 
     const updated = await client.query(
-      `SELECT e.employee_id AS "empId",
-              e.full_name   AS "fullName",
+      `SELECT e.emp_no      AS "empId",
+              e.name        AS "fullName",
               e.email,
-              e.role,
-              d.name_th     AS "department",
-              j.name_th     AS "jobTitle"
-         FROM employees e
-         LEFT JOIN departments d ON d.id = e.department_id
-         LEFT JOIN job_titles  j ON j.id = e.job_title_id
-        WHERE e.employee_id = $1`,
+              COALESCE(r.role, 'GCP') AS role,
+              e.team        AS "department",
+              e.position    AS "jobTitle"
+         FROM "Master_Data_GCP" e
+         LEFT JOIN "SPES_Roles" r ON r.emp_no = e.emp_no
+        WHERE e.emp_no = $1`,
       [req.user!.empId]
     );
 
@@ -116,17 +114,16 @@ async function getEmployee(req: Request, res: Response) {
   try {
     const result = await pool.query(
       `SELECT
-         e.employee_id  AS "employeeId",
-         e.full_name    AS "fullName",
-         e.role,
-         d.name_th      AS "department",
-         d.code         AS "departmentCode",
-         j.name_th      AS "jobTitle",
-         j.code         AS "jobTitleCode"
-       FROM employees e
-       LEFT JOIN departments d ON d.id = e.department_id
-       LEFT JOIN job_titles  j ON j.id = e.job_title_id
-       WHERE e.employee_id = $1 AND e.is_active = TRUE`,
+         e.emp_no       AS "employeeId",
+         e.name         AS "fullName",
+         COALESCE(r.role, 'GCP') AS role,
+         e.team         AS "department",
+         NULL           AS "departmentCode",
+         e.position     AS "jobTitle",
+         NULL           AS "jobTitleCode"
+       FROM "Master_Data_GCP" e
+       LEFT JOIN "SPES_Roles" r ON r.emp_no = e.emp_no
+       WHERE e.emp_no = $1`,
       [(req.params.employeeId as string).trim()]
     );
     if (result.rows.length === 0) {
@@ -151,20 +148,17 @@ async function updateEmployee(req: Request, res: Response) {
     return res.status(400).json({ message: 'ไม่มีข้อมูลที่จะอัปเดต' });
   }
   try {
-    const result = await pool.query(
-      `UPDATE employees
-          SET role       = COALESCE($1, role),
-              is_active  = COALESCE($2, is_active),
-              updated_at = NOW()
-        WHERE employee_id = $3
-        RETURNING employee_id`,
-      [
-        role     !== undefined ? role : null,
-        isActive !== undefined ? isActive : null,
-        req.params.employeeId,
-      ]
-    );
-    if (result.rows.length === 0) return res.status(404).json({ message: 'ไม่พบพนักงาน' });
+    // updateEmployee changes role. Role is stored in SPES_Roles.
+    if (role !== undefined) {
+      const result = await pool.query(
+        `INSERT INTO "SPES_Roles" (emp_no, role)
+         VALUES ($1, $2)
+         ON CONFLICT (emp_no) DO UPDATE SET role = EXCLUDED.role
+         RETURNING emp_no`,
+        [req.params.employeeId, role]
+      );
+    }
+    // is_active is no longer managed via database since Master_Data_GCP implies active.
     res.json({ message: 'อัปเดตสำเร็จ' });
   } catch (err: any) {
     console.error('PATCH /api/employees/:employeeId error:', err);

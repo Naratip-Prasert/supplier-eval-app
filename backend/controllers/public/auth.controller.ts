@@ -25,28 +25,108 @@ async function login(req: Request, res: Response) {
 
   try {
     const id = identifier.trim();
-    const result = await pool.query(
-      `SELECT e.employee_id, e.full_name, e.role, e.email, e.password_hash,
-              d.name_th AS department, j.name_th AS job_title
-         FROM employees e
-         LEFT JOIN departments d ON d.id = e.department_id
-         LEFT JOIN job_titles  j ON j.id = e.job_title_id
-        WHERE (UPPER(e.employee_id) = UPPER($1) OR e.email = LOWER($1))
-          AND e.is_active = TRUE`,
+    
+    // 1. Check EHR first
+    const ehrValid = await verifyViaEhr(id, password);
+    let valid = ehrValid;
+
+    // 2. Lookup employee in DBs
+    let foundEmp = null;
+    let computedRole = 'USER';
+
+    const gcpResult = await pool.query(
+      `SELECT emp_no, name, email, team, position FROM "Master_Data_GCP" WHERE UPPER(emp_no) = UPPER($1) OR LOWER(email) = LOWER($1)`,
       [id]
     );
 
-    const emp = result.rows[0];
-    if (!emp) {
-      console.warn(`[auth] login failed: ไม่พบบัญชี "${identifier}"`);
+    if (gcpResult.rows.length > 0) {
+      foundEmp = gcpResult.rows[0];
+      computedRole = 'GCP';
+    } else {
+      const userResult = await pool.query(
+        `SELECT emp_no, name, email, team, position FROM "Master_Data_User" WHERE UPPER(emp_no) = UPPER($1) OR LOWER(email) = LOWER($1)`,
+        [id]
+      );
+      if (userResult.rows.length > 0) {
+        foundEmp = userResult.rows[0];
+        computedRole = 'USER';
+      }
+    }
+
+    // Overwrite role if in SPES_Roles
+    if (foundEmp) {
+      const roleResult = await pool.query(`SELECT role FROM "SPES_Roles" WHERE UPPER(emp_no) = UPPER($1)`, [foundEmp.emp_no]);
+      if (roleResult.rows.length > 0) {
+        computedRole = roleResult.rows[0].role;
+      }
+    }
+
+    // Try local fallback if EHR failed (check old employees table just for password_hash)
+    if (!valid) {
+      const fallbackResult = await pool.query(`SELECT password_hash FROM employees WHERE UPPER(employee_id) = UPPER($1) OR LOWER(email) = LOWER($1)`, [id]);
+      if (fallbackResult.rows.length > 0 && fallbackResult.rows[0].password_hash) {
+        valid = await bcrypt.compare(password, fallbackResult.rows[0].password_hash);
+      }
+    }
+
+    if (!valid) {
+      console.warn(`[auth] login failed: password ผิด หรือไม่พบผู้ใช้ "${id}"`);
       return res.status(401).json({ message: 'รหัสพนักงาน/Email หรือรหัสผ่านไม่ถูกต้อง' });
     }
 
-    const valid = await verifyCredentials(emp.employee_id, password, emp.password_hash);
-    if (!valid) {
-      console.warn(`[auth] login failed: password ผิด สำหรับ "${identifier}"`);
-      return res.status(401).json({ message: 'รหัสพนักงาน/Email หรือรหัสผ่านไม่ถูกต้อง' });
+    // 3. Auto-provision user if they do not exist
+    if (!foundEmp) {
+      let fullName = id;
+      let email = null;
+      let position = null;
+      let team = null;
+      let cobu = null;
+
+      try {
+        const profileRes = await fetch(`https://ehr.bjc.co.th/API/PUR/api/EmployeeProfile/${id}`);
+        if (profileRes.ok) {
+          const profileData: any = await profileRes.json();
+          if (profileData && profileData.employeeLocalName) {
+            fullName = profileData.employeeLocalName;
+            email = profileData.email || null;
+            position = profileData.positionTitleENG || profileData.positionTitleTHA || null;
+            team = profileData.departmentDescription || null;
+            cobu = profileData.coBuDescription || null;
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[auth] Failed to fetch profile for ${id}:`, err.message);
+      }
+
+      try {
+        await pool.query(
+          `INSERT INTO "Master_Data_User" (emp_no, name, email, position, team, cobu_name)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [id.toUpperCase(), fullName, email, position, team, cobu]
+        );
+        foundEmp = {
+          emp_no: id.toUpperCase(),
+          name: fullName,
+          email: email,
+          position: position,
+          team: team
+        };
+        computedRole = 'USER';
+        console.log(`[auth] Auto-provisioned new employee record for ${id} in Master_Data_User`);
+      } catch (err: any) {
+        console.error('[auth] Auto-provision error:', err);
+        return res.status(500).json({ message: 'เกิดข้อผิดพลาดในการสร้างบัญชีผู้ใช้' });
+      }
     }
+
+    const emp = {
+      employee_id: foundEmp.emp_no,
+      full_name: foundEmp.name,
+      role: computedRole,
+      email: foundEmp.email,
+      department: foundEmp.team,
+      job_title: foundEmp.position
+    };
 
     const payload = {
       empId:      emp.employee_id,

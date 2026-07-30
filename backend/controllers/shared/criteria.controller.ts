@@ -35,7 +35,7 @@ async function getCriteria(req: Request, res: Response) {
         pool.query(
           `SELECT id, code, name_th AS "nameTh", name_en AS "nameEn",
                   total_weight AS "totalWeight", display_order AS "displayOrder"
-             FROM evaluation_main_criteria
+             FROM "SPES_evaluation_main_criteria"
             WHERE code LIKE $1 AND (is_active = TRUE OR is_active IS NULL)
             ORDER BY display_order, code`,
           [FLAT_SETS[et]]
@@ -48,14 +48,14 @@ async function getCriteria(req: Request, res: Response) {
                   display_order AS "displayOrder",
                   is_active AS "isActive",
                   level_values AS "levelValues"
-             FROM evaluation_sub_criteria
+             FROM "SPES_evaluation_sub_criteria"
             WHERE criteria_set = $1 AND is_active = TRUE
             ORDER BY display_order, code`,
           [et]
         ),
         pool.query(
           `SELECT criterion_id AS "criterionId", level, description
-             FROM score_level_descriptions
+             FROM "SPES_score_level_descriptions"
             ORDER BY criterion_id, level`
         ),
       ]);
@@ -66,7 +66,7 @@ async function getCriteria(req: Request, res: Response) {
           ? pool.query(
               `SELECT id, code, name_th AS "nameTh", name_en AS "nameEn",
                       total_weight AS "totalWeight", display_order AS "displayOrder"
-                 FROM evaluation_main_criteria
+                 FROM "SPES_evaluation_main_criteria"
                 WHERE code LIKE $1 AND (is_active = TRUE OR is_active IS NULL)
                 ORDER BY substring(code from '${funcCodePrefix}(\\d+)')::integer, code`,
               [`${funcCodePrefix}%`]
@@ -74,7 +74,7 @@ async function getCriteria(req: Request, res: Response) {
           : pool.query(
               `SELECT id, code, name_th AS "nameTh", name_en AS "nameEn",
                       total_weight AS "totalWeight", display_order AS "displayOrder"
-                 FROM evaluation_main_criteria
+                 FROM "SPES_evaluation_main_criteria"
                 WHERE code = $1 AND (is_active = TRUE OR is_active IS NULL)`,
               [`${funcCodePrefix}${et.replace(/^m/i, '')}`]
             ),
@@ -87,7 +87,7 @@ async function getCriteria(req: Request, res: Response) {
                       display_order AS "displayOrder",
                       is_active AS "isActive",
                       level_values AS "levelValues"
-                 FROM evaluation_sub_criteria
+                 FROM "SPES_evaluation_sub_criteria"
                 WHERE criteria_set ~ $1
                 ORDER BY substring(criteria_set from '^${funcSetPrefix}(\\d+)')::integer, display_order`,
               [`^${funcSetPrefix}[0-9]+$`]
@@ -100,14 +100,14 @@ async function getCriteria(req: Request, res: Response) {
                       display_order AS "displayOrder",
                       is_active AS "isActive",
                       level_values AS "levelValues"
-                 FROM evaluation_sub_criteria
+                 FROM "SPES_evaluation_sub_criteria"
                 WHERE criteria_set = $1
                 ORDER BY display_order`,
               [`${funcSetPrefix}${et.replace(/^m/i, '').toLowerCase()}`]
             ),
         pool.query(
           `SELECT criterion_id AS "criterionId", level, description
-             FROM score_level_descriptions
+             FROM "SPES_score_level_descriptions"
             ORDER BY criterion_id, level`
         ),
       ]);
@@ -120,7 +120,7 @@ async function getCriteria(req: Request, res: Response) {
           `SELECT id, code, name_th AS "nameTh", name_en AS "nameEn",
                   total_weight AS "totalWeight", display_order AS "displayOrder",
                   group_weights AS "groupWeights", group_labels AS "groupLabels"
-             FROM evaluation_main_criteria
+             FROM "SPES_evaluation_main_criteria"
             WHERE code LIKE $1 AND (is_active = TRUE OR is_active IS NULL)
             ORDER BY display_order, code`,
           [criteriaSet === 'post_eval' ? 'POST-%' : 'PRE-%']
@@ -133,14 +133,14 @@ async function getCriteria(req: Request, res: Response) {
                   display_order AS "displayOrder",
                   is_active AS "isActive",
                   level_values AS "levelValues"
-             FROM evaluation_sub_criteria
+             FROM "SPES_evaluation_sub_criteria"
             WHERE criteria_set = $1
             ORDER BY display_order, code`,
           [criteriaSet]
         ),
         pool.query(
           `SELECT criterion_id AS "criterionId", level, description
-             FROM score_level_descriptions
+             FROM "SPES_score_level_descriptions"
             ORDER BY criterion_id, level`
         ),
       ]);
@@ -197,11 +197,11 @@ async function deleteCategory(req: Request, res: Response) {
   try {
     await client.query('BEGIN');
     await client.query(
-      `UPDATE evaluation_sub_criteria SET is_active = FALSE WHERE category_id = $1`,
+      `UPDATE "SPES_evaluation_sub_criteria" SET is_active = FALSE WHERE category_id = $1`,
       [id]
     );
     const result = await client.query(
-      `UPDATE evaluation_main_criteria SET is_active = FALSE WHERE id = $1 RETURNING id`,
+      `UPDATE "SPES_evaluation_main_criteria" SET is_active = FALSE WHERE id = $1 RETURNING id`,
       [id]
     );
     if (result.rowCount === 0) { await client.query('ROLLBACK'); return res.status(404).json({ message: 'ไม่พบข้อมูล' }); }
@@ -248,7 +248,7 @@ async function updateCategory(req: Request, res: Response) {
     // can't tell those apart, so each gets its own "did the caller send
     // this field at all" flag param instead.
     const result = await pool.query(
-      `UPDATE evaluation_main_criteria
+      `UPDATE "SPES_evaluation_main_criteria"
           SET name_th       = COALESCE($1, name_th),
               total_weight  = COALESCE($2, total_weight),
               group_weights = CASE WHEN $3 THEN $4::jsonb ELSE group_weights END,
@@ -293,7 +293,7 @@ async function createCategory(req: Request, res: Response) {
       // Reactivate an inactive FUNC-{PRE|POST}-M{n} if one exists, otherwise create next sequential
       const inactiveRes = await client.query(
         `SELECT id, code, display_order AS "displayOrder"
-           FROM evaluation_main_criteria
+           FROM "SPES_evaluation_main_criteria"
           WHERE code LIKE $1 AND is_active = FALSE
           ORDER BY substring(code from '${funcPrefix}(\\d+)')::integer
           LIMIT 1`,
@@ -307,7 +307,7 @@ async function createCategory(req: Request, res: Response) {
         // them silently would mismatch the "items: []" this endpoint always
         // reports for a "new" category. Admin re-adds items explicitly.
         await client.query(
-          `UPDATE evaluation_main_criteria SET is_active=TRUE, name_th=$1, total_weight=$2 WHERE id=$3`,
+          `UPDATE "SPES_evaluation_main_criteria" SET is_active=TRUE, name_th=$1, total_weight=$2 WHERE id=$3`,
           [nameTh.trim(), Number(totalWeight) || 0, row.id]
         );
         await client.query('COMMIT');
@@ -315,7 +315,7 @@ async function createCategory(req: Request, res: Response) {
       }
       // No inactive row — generate next sequential code
       const { rows } = await client.query(
-        `SELECT code FROM evaluation_main_criteria WHERE code LIKE $1 ORDER BY code`,
+        `SELECT code FROM "SPES_evaluation_main_criteria" WHERE code LIKE $1 ORDER BY code`,
         [`${funcPrefix}%`]
       );
       const nums = rows.map((r: any) => { const m = r.code.match(new RegExp(`^${funcPrefix}(\\d+)$`, 'i')); return m ? parseInt(m[1], 10) : 0; }).filter(Boolean);
@@ -326,7 +326,7 @@ async function createCategory(req: Request, res: Response) {
       // Reactivate first inactive category with this prefix if one exists
       const inactiveRes = await client.query(
         `SELECT id, code, display_order AS "displayOrder"
-           FROM evaluation_main_criteria
+           FROM "SPES_evaluation_main_criteria"
           WHERE code LIKE $1 AND is_active = FALSE
           ORDER BY display_order
           LIMIT 1`,
@@ -340,7 +340,7 @@ async function createCategory(req: Request, res: Response) {
         // them silently would mismatch the "items: []" this endpoint always
         // reports for a "new" category. Admin re-adds items explicitly.
         await client.query(
-          `UPDATE evaluation_main_criteria SET is_active=TRUE, name_th=$1, total_weight=$2 WHERE id=$3`,
+          `UPDATE "SPES_evaluation_main_criteria" SET is_active=TRUE, name_th=$1, total_weight=$2 WHERE id=$3`,
           [nameTh.trim(), Number(totalWeight) || 0, row.id]
         );
         await client.query('COMMIT');
@@ -350,7 +350,7 @@ async function createCategory(req: Request, res: Response) {
       let n = 1;
       while (true) {
         code = `${prefix}${n}`;
-        const { rowCount } = await client.query('SELECT 1 FROM evaluation_main_criteria WHERE code=$1', [code]);
+        const { rowCount } = await client.query('SELECT 1 FROM "SPES_evaluation_main_criteria" WHERE code=$1', [code]);
         if (rowCount === 0) break;
         n++;
       }
@@ -364,13 +364,13 @@ async function createCategory(req: Request, res: Response) {
       // Find ESG's current display_order, shift ESG up, slot new CORE in its place.
       const esgCode = prefix.startsWith('PRE') ? 'PRE-ESG' : 'POST-ESG';
       const esgRes = await client.query(
-        `SELECT display_order FROM evaluation_main_criteria WHERE code = $1`,
+        `SELECT display_order FROM "SPES_evaluation_main_criteria" WHERE code = $1`,
         [esgCode]
       );
       if (esgRes.rows.length > 0) {
         const esgOrder = esgRes.rows[0].display_order;
         await client.query(
-          `UPDATE evaluation_main_criteria SET display_order = display_order + 1 WHERE code = $1`,
+          `UPDATE "SPES_evaluation_main_criteria" SET display_order = display_order + 1 WHERE code = $1`,
           [esgCode]
         );
         nextOrder = esgOrder;
@@ -378,7 +378,7 @@ async function createCategory(req: Request, res: Response) {
         // No ESG found — fall back to MAX+1 across the family
         const orderLikePat = prefix.startsWith('PRE') ? 'PRE-%' : 'POST-%';
         const orderRes = await client.query(
-          `SELECT COALESCE(MAX(display_order),0)+1 AS next FROM evaluation_main_criteria WHERE code LIKE $1`,
+          `SELECT COALESCE(MAX(display_order),0)+1 AS next FROM "SPES_evaluation_main_criteria" WHERE code LIKE $1`,
           [orderLikePat]
         );
         nextOrder = parseInt(orderRes.rows[0].next);
@@ -389,13 +389,13 @@ async function createCategory(req: Request, res: Response) {
         : prefix.startsWith('POST') ? 'POST-%'
         : `${prefix}%`;
       const orderRes = await client.query(
-        `SELECT COALESCE(MAX(display_order),0)+1 AS next FROM evaluation_main_criteria WHERE code LIKE $1`,
+        `SELECT COALESCE(MAX(display_order),0)+1 AS next FROM "SPES_evaluation_main_criteria" WHERE code LIKE $1`,
         [orderLikePat]
       );
       nextOrder = parseInt(orderRes.rows[0].next);
     }
     const result = await client.query(
-      `INSERT INTO evaluation_main_criteria (code, name_th, total_weight, display_order, is_active)
+      `INSERT INTO "SPES_evaluation_main_criteria" (code, name_th, total_weight, display_order, is_active)
        VALUES ($1,$2,$3,$4,TRUE)
        RETURNING id, code, name_th AS "nameTh", total_weight AS "totalWeight", display_order AS "displayOrder"`,
       [code, nameTh.trim(), Number(totalWeight) || 0, nextOrder]
@@ -428,7 +428,7 @@ async function createItem(req: Request, res: Response) {
     // then invisible everywhere, since GET /api/criteria filters categories
     // by is_active before ever looking at their items.
     const categoryRes = await client.query(
-      `SELECT is_active FROM evaluation_main_criteria WHERE id = $1`,
+      `SELECT is_active FROM "SPES_evaluation_main_criteria" WHERE id = $1`,
       [categoryId]
     );
     if (categoryRes.rows.length === 0) {
@@ -446,7 +446,7 @@ async function createItem(req: Request, res: Response) {
     // should only ever create genuinely new rows; reactivating an old item
     // is a deliberate PATCH the admin does after seeing it exists.
     const collisionRes = await client.query(
-      `SELECT id, is_active FROM evaluation_sub_criteria WHERE criteria_set = $1 AND code = $2`,
+      `SELECT id, is_active FROM "SPES_evaluation_sub_criteria" WHERE criteria_set = $1 AND code = $2`,
       [criteriaSet, newCode]
     );
     if (collisionRes.rows.length > 0) {
@@ -470,7 +470,7 @@ async function createItem(req: Request, res: Response) {
     // shares the group (brand-new group/module — same as previous behavior).
     const groupKey = newCode.replace(/\.\d+$/, '');
     const siblingsRes = await client.query(
-      `SELECT display_order AS "displayOrder" FROM evaluation_sub_criteria
+      `SELECT display_order AS "displayOrder" FROM "SPES_evaluation_sub_criteria"
         WHERE category_id = $1 AND is_active = TRUE AND code ~ ('^' || $2 || '\\.[0-9]+$')
         ORDER BY display_order DESC LIMIT 1`,
       [categoryId, groupKey]
@@ -479,19 +479,19 @@ async function createItem(req: Request, res: Response) {
     if (siblingsRes.rows.length > 0) {
       nextOrder = siblingsRes.rows[0].displayOrder + 1;
       await client.query(
-        `UPDATE evaluation_sub_criteria SET display_order = display_order + 1
+        `UPDATE "SPES_evaluation_sub_criteria" SET display_order = display_order + 1
           WHERE category_id = $1 AND display_order >= $2`,
         [categoryId, nextOrder]
       );
     } else {
       const orderRes = await client.query(
-        'SELECT COALESCE(MAX(display_order), 0) + 1 AS next FROM evaluation_sub_criteria WHERE category_id = $1',
+        'SELECT COALESCE(MAX(display_order), 0) + 1 AS next FROM "SPES_evaluation_sub_criteria" WHERE category_id = $1',
         [categoryId]
       );
       nextOrder = orderRes.rows[0].next;
     }
     const insertRes = await client.query(
-      `INSERT INTO evaluation_sub_criteria
+      `INSERT INTO "SPES_evaluation_sub_criteria"
          (category_id, code, name_th, default_weight, display_order, is_active, criteria_set)
        VALUES ($1, $2, $3, $4, $5, true, $6)
        ON CONFLICT (criteria_set, code) DO NOTHING
@@ -508,10 +508,10 @@ async function createItem(req: Request, res: Response) {
     const defaultLevels = Array.isArray(levels) && levels.length > 0
       ? levels
       : ['', '', '', '', ''];
-    await client.query('DELETE FROM score_level_descriptions WHERE criterion_id = $1', [newId]);
+    await client.query('DELETE FROM "SPES_score_level_descriptions" WHERE criterion_id = $1', [newId]);
     for (let i = 0; i < defaultLevels.length; i++) {
       await client.query(
-        'INSERT INTO score_level_descriptions (criterion_id, level, description) VALUES ($1, $2, $3)',
+        'INSERT INTO "SPES_score_level_descriptions" (criterion_id, level, description) VALUES ($1, $2, $3)',
         [newId, i + 1, defaultLevels[i]]
       );
     }
@@ -531,7 +531,7 @@ async function deleteItem(req: Request, res: Response) {
   const { id } = req.params;
   try {
     const result = await pool.query(
-      'UPDATE evaluation_sub_criteria SET is_active = FALSE WHERE id = $1 RETURNING id',
+      'UPDATE "SPES_evaluation_sub_criteria" SET is_active = FALSE WHERE id = $1 RETURNING id',
       [id]
     );
     if (result.rowCount === 0) return res.status(404).json({ message: 'ไม่พบข้อมูล' });
@@ -575,7 +575,7 @@ async function updateItem(req: Request, res: Response) {
     // back to the default 1-5 scale), distinct from "not sent" — same
     // flag-param reasoning as group_weights/group_labels above.
     const result = await pool.query(
-      `UPDATE evaluation_sub_criteria
+      `UPDATE "SPES_evaluation_sub_criteria"
           SET name_th        = COALESCE($1, name_th),
               detail_th      = COALESCE($2, detail_th),
               default_weight = COALESCE($3, default_weight),
@@ -615,14 +615,14 @@ async function updateItemLevels(req: Request, res: Response) {
     await client.query('BEGIN');
     if (levelValues !== undefined) {
       await client.query(
-        'UPDATE evaluation_sub_criteria SET level_values = $1 WHERE id = $2',
+        'UPDATE "SPES_evaluation_sub_criteria" SET level_values = $1 WHERE id = $2',
         [levelValues === null ? null : JSON.stringify(levelValues), id]
       );
     }
-    await client.query('DELETE FROM score_level_descriptions WHERE criterion_id = $1', [id]);
+    await client.query('DELETE FROM "SPES_score_level_descriptions" WHERE criterion_id = $1', [id]);
     for (let i = 0; i < levels.length; i++) {
       await client.query(
-        'INSERT INTO score_level_descriptions (criterion_id, level, description) VALUES ($1, $2, $3)',
+        'INSERT INTO "SPES_score_level_descriptions" (criterion_id, level, description) VALUES ($1, $2, $3)',
         [id, i + 1, levels[i]]
       );
     }
@@ -649,7 +649,7 @@ async function reorder(req: Request, res: Response) {
     await client.query('BEGIN');
     for (const { id, displayOrder } of order) {
       await client.query(
-        'UPDATE evaluation_main_criteria SET display_order = $1 WHERE id = $2',
+        'UPDATE "SPES_evaluation_main_criteria" SET display_order = $1 WHERE id = $2',
         [displayOrder, id]
       );
     }
@@ -688,7 +688,7 @@ async function seed(req: Request, res: Response) {
       let catId;
       if (reset) {
         const catRes = await client.query(
-          `INSERT INTO evaluation_main_criteria (code, name_th, total_weight, display_order)
+          `INSERT INTO "SPES_evaluation_main_criteria" (code, name_th, total_weight, display_order)
            VALUES ($1, $2, $3, $4)
            ON CONFLICT (code) DO UPDATE
              SET name_th=$2, total_weight=$3, display_order=$4
@@ -698,7 +698,7 @@ async function seed(req: Request, res: Response) {
         catId = catRes.rows[0].id;
       } else {
         const catRes = await client.query(
-          `INSERT INTO evaluation_main_criteria (code, name_th, total_weight, display_order)
+          `INSERT INTO "SPES_evaluation_main_criteria" (code, name_th, total_weight, display_order)
            VALUES ($1, $2, $3, $4)
            ON CONFLICT (code) DO NOTHING
            RETURNING id`,
@@ -706,7 +706,7 @@ async function seed(req: Request, res: Response) {
         );
         catId = catRes.rows[0]
           ? catRes.rows[0].id
-          : (await client.query('SELECT id FROM evaluation_main_criteria WHERE code=$1', [section.code])).rows[0].id;
+          : (await client.query('SELECT id FROM "SPES_evaluation_main_criteria" WHERE code=$1', [section.code])).rows[0].id;
       }
 
       for (let i = 0; i < (section.items ?? []).length; i++) {
@@ -718,7 +718,7 @@ async function seed(req: Request, res: Response) {
         let critId;
         if (reset) {
           const critRes = await client.query(
-            `INSERT INTO evaluation_sub_criteria
+            `INSERT INTO "SPES_evaluation_sub_criteria"
                (category_id, code, name_th, default_weight, display_order, is_active, criteria_set, level_values)
              VALUES ($1, $2, $3, $4, $5, true, $6, $7)
              ON CONFLICT (criteria_set, code) DO UPDATE
@@ -733,7 +733,7 @@ async function seed(req: Request, res: Response) {
           newCritIds.push(critId); // reset: replace levels for all
         } else {
           const critRes = await client.query(
-            `INSERT INTO evaluation_sub_criteria
+            `INSERT INTO "SPES_evaluation_sub_criteria"
                (category_id, code, name_th, default_weight, display_order, is_active, criteria_set, level_values)
              VALUES ($1, $2, $3, $4, $5, true, $6, $7)
              ON CONFLICT (criteria_set, code) DO NOTHING
@@ -756,13 +756,13 @@ async function seed(req: Request, res: Response) {
 
     if (reset && newCritIds.length > 0) {
       await client.query(
-        'DELETE FROM score_level_descriptions WHERE criterion_id = ANY($1::uuid[])',
+        'DELETE FROM "SPES_score_level_descriptions" WHERE criterion_id = ANY($1::uuid[])',
         [newCritIds]
       );
     }
     if (lvCritIds.length > 0) {
       await client.query(
-        `INSERT INTO score_level_descriptions (criterion_id, level, description)
+        `INSERT INTO "SPES_score_level_descriptions" (criterion_id, level, description)
          SELECT * FROM UNNEST($1::uuid[], $2::int[], $3::text[])
          ON CONFLICT (criterion_id, level) DO NOTHING`,
         [lvCritIds, lvLevels, lvDescs]

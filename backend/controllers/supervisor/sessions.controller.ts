@@ -31,14 +31,14 @@ async function listSessions(req: Request, res: Response) {
          es.final_grade     AS "finalGrade",
          es.created_at      AS "createdAt",
          es.completed_at    AS "completedAt",
-         initiator.employee_id AS "initiatedBy",
+         initiator.emp_no   AS "initiatedBy",
          COALESCE(
-           (SELECT sr.review_due FROM supervisor_reviews sr WHERE sr.session_id = es.id ORDER BY sr.created_at DESC LIMIT 1),
-           (SELECT MAX(et.due_date) FROM evaluation_tasks et WHERE et.session_id = es.id)
+           (SELECT sr.review_due FROM "SPES_supervisor_reviews" sr WHERE sr.session_id = es.id ORDER BY sr.created_at DESC LIMIT 1),
+           (SELECT MAX(et.due_date) FROM "SPES_evaluation_tasks" et WHERE et.session_id = es.id)
          ) AS "dueDate"
-       FROM evaluation_sessions es
-       JOIN suppliers s ON s.id = es.supplier_id
-       LEFT JOIN employees initiator ON initiator.id = es.initiated_by
+       FROM "SPES_evaluation_sessions" es
+       JOIN "SPES_suppliers" s ON s.id = es.supplier_id
+       LEFT JOIN "Master_Data_GCP" initiator ON initiator.emp_no = es.initiated_by
        WHERE ($1::text IS NULL OR s.vendor_code = $1)
          AND ($2::text IS NULL OR es.status = $2)
        ORDER BY es.created_at DESC`,
@@ -60,11 +60,11 @@ async function listSessions(req: Request, res: Response) {
          ev.grade,
          ev.status,
          ev.submitted_at  AS "submittedAt",
-         emp.employee_id  AS "employeeId",
-         emp.full_name    AS "fullName",
-         emp.profile_picture AS "profilePicture"
-       FROM evaluations ev
-       JOIN employees emp ON emp.id = ev.employee_id
+         emp.emp_no       AS "employeeId",
+         emp.name         AS "fullName",
+         NULL             AS "profilePicture"
+       FROM "SPES_evaluations" ev
+       JOIN "Master_Data_GCP" emp ON emp.emp_no = ev.employee_id
        WHERE ev.session_id = ANY($1)`,
       [sessionIds]
     );
@@ -106,11 +106,11 @@ async function getSession(req: Request, res: Response) {
          es.created_at      AS "createdAt",
          es.completed_at    AS "completedAt",
          COALESCE(
-           (SELECT sr.review_due FROM supervisor_reviews sr WHERE sr.session_id = es.id ORDER BY sr.created_at DESC LIMIT 1),
-           (SELECT MAX(et.due_date) FROM evaluation_tasks et WHERE et.session_id = es.id)
+           (SELECT sr.review_due FROM "SPES_supervisor_reviews" sr WHERE sr.session_id = es.id ORDER BY sr.created_at DESC LIMIT 1),
+           (SELECT MAX(et.due_date) FROM "SPES_evaluation_tasks" et WHERE et.session_id = es.id)
          ) AS "dueDate"
-       FROM evaluation_sessions es
-       JOIN suppliers s ON s.id = es.supplier_id
+       FROM "SPES_evaluation_sessions" es
+       JOIN "SPES_suppliers" s ON s.id = es.supplier_id
        WHERE es.id = $1`,
       [req.params.id]
     );
@@ -129,15 +129,13 @@ async function getSession(req: Request, res: Response) {
          ev.grade,
          ev.status,
          ev.submitted_at AS "submittedAt",
-         emp.employee_id AS "employeeId",
-         emp.full_name   AS "fullName",
-         emp.profile_picture AS "profilePicture",
-         d.name_th       AS "department",
-         j.name_th       AS "jobTitle"
-       FROM evaluations ev
-       JOIN employees        emp ON emp.id = ev.employee_id
-       LEFT JOIN departments d   ON d.id   = emp.department_id
-       LEFT JOIN job_titles  j   ON j.id   = emp.job_title_id
+         emp.emp_no      AS "employeeId",
+         emp.name        AS "fullName",
+         NULL            AS "profilePicture",
+         emp.team        AS "department",
+         emp.position    AS "jobTitle"
+       FROM "SPES_evaluations" ev
+       JOIN "Master_Data_GCP" emp ON emp.emp_no = ev.employee_id
        WHERE ev.session_id = $1
        ORDER BY ev.role`,
       [session.sessionId]
@@ -156,9 +154,9 @@ async function getSession(req: Request, res: Response) {
          evs.score,
          evs.note,
          evs.weighted_score   AS "weightedScore"
-       FROM evaluation_scores evs
-       JOIN evaluation_sub_criteria   ec  ON ec.id  = evs.criterion_id
-       JOIN evaluation_main_criteria cat ON cat.id = ec.category_id
+       FROM "SPES_evaluation_scores" evs
+       JOIN "SPES_evaluation_sub_criteria"   ec  ON ec.id  = evs.criterion_id
+       JOIN "SPES_evaluation_main_criteria" cat ON cat.id = ec.category_id
        WHERE evs.evaluation_id = ANY($1)
        ORDER BY evs.evaluation_id, ec.display_order`,
       [evalIds]
