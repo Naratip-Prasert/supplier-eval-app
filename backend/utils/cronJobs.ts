@@ -1,5 +1,5 @@
 'use strict';
-export {};
+export { };
 const cron = require('node-cron');
 const pool = require('../db');
 const {
@@ -82,7 +82,7 @@ async function sendOverdueEmails() {
     // aren't assigned per-supplier in this schema, so every active
     // Supervisor gets escalation emails.
     const supervisors = await pool.query(`
-      SELECT e.emp_no AS id, e.name AS full_name, e.email FROM "Master_Data_GCP" e
+      SELECT e.emp_no AS id, e.name AS full_name, e.email FROM "Master_Data_All" e
        JOIN "SPES_Roles" r ON r.emp_no = e.emp_no
        WHERE r.role = 'SUPERVISOR' AND e.email IS NOT NULL
     `);
@@ -169,7 +169,7 @@ async function notifySupervisors() {
 
     // Get all supervisors
     const supervisors = await pool.query(`
-      SELECT e.emp_no AS id, e.name AS full_name, e.email FROM "Master_Data_GCP" e
+      SELECT e.emp_no AS id, e.name AS full_name, e.email FROM "Master_Data_All" e
        JOIN "SPES_Roles" r ON r.emp_no = e.emp_no
        WHERE r.role = 'SUPERVISOR' AND e.email IS NOT NULL
     `);
@@ -293,3 +293,122 @@ function startCronJobsFull() {
 }
 
 module.exports = { startCronJobs: startCronJobsFull };
+
+// ── Sync Master Data ──────────────────────────────────────────
+async function syncMasterDataGCP() {
+  console.log('[cron] Starting syncMasterDataGCP...');
+  const client = await pool.connect();
+  try {
+    const res = await fetch('https://ehr.bjc.co.th/API/PUR/api/EmployeeProfile/bjc-bcp-active-with-contact');
+    if (!res.ok) throw new Error(`API returned ${res.status}`);
+    const data = await res.json();
+
+    await client.query('BEGIN');
+
+    // 1. Mark everyone as inactive initially for this run
+    await client.query(`UPDATE "Master_Data_GCP" SET status = 'inactive'`);
+
+    let inserted = 0;
+    let updated = 0;
+
+    // 2. Upsert each person from API and mark them as active
+    for (const emp of data) {
+      if (!emp.employeeNo) continue;
+      const empNo = String(emp.employeeNo).toUpperCase();
+      const name = emp.employeeLocalName || emp.employeeName;
+      const email = emp.email || null;
+      const position = emp.positionTitleENG || emp.positionTitleTHA || null;
+      const team = emp.departmentDescription || null;
+      const cobu = emp.coBuDescription || null;
+
+      const check = await client.query(`SELECT emp_no FROM "Master_Data_GCP" WHERE UPPER(emp_no) = $1`, [empNo]);
+
+      if (check.rows.length > 0) {
+        await client.query(`
+          UPDATE "Master_Data_GCP" 
+             SET name = $1, email = $2, position = $3, team = $4, cobu_name = $5, status = 'active'
+           WHERE UPPER(emp_no) = $6
+        `, [name, email, position, team, cobu, empNo]);
+        updated++;
+      } else {
+        await client.query(`
+          INSERT INTO "Master_Data_GCP" (emp_no, name, email, position, team, cobu_name, status)
+          VALUES ($1, $2, $3, $4, $5, $6, 'active')
+        `, [empNo, name, email, position, team, cobu]);
+        inserted++;
+      }
+    }
+
+    const activeCountRes = await client.query(`SELECT COUNT(*) FROM "Master_Data_GCP" WHERE status = 'active'`);
+    const inactiveCountRes = await client.query(`SELECT COUNT(*) FROM "Master_Data_GCP" WHERE status = 'inactive'`);
+
+    await client.query('COMMIT');
+    console.log(`[cron] syncMasterDataGCP finished: ${inserted} inserted, ${updated} updated. Total active: ${activeCountRes.rows[0].count}, Inactive: ${inactiveCountRes.rows[0].count}`);
+  } catch (e: any) {
+    await client.query('ROLLBACK');
+    console.error('[cron] syncMasterDataGCP error:', e.message);
+  } finally {
+    client.release();
+  }
+}
+
+async function syncMasterDataUser() {
+  console.log('[cron] Starting syncMasterDataUser...');
+  const client = await pool.connect();
+  try {
+    const result = await client.query(`SELECT emp_no FROM "Master_Data_User"`);
+    let active = 0, inactive = 0;
+
+    for (const row of result.rows) {
+      const empNo = row.emp_no;
+      try {
+        const profileRes = await fetch(`https://ehr.bjc.co.th/API/PUR/api/EmployeeProfile/${empNo}`);
+        if (profileRes.ok) {
+          const profileData: any = await profileRes.json();
+          if (profileData && profileData.employeeLocalName) {
+            // Still active, update details
+            const name = profileData.employeeLocalName;
+            const email = profileData.email || null;
+            const position = profileData.positionTitleENG || profileData.positionTitleTHA || null;
+            const team = profileData.departmentDescription || null;
+            const cobu = profileData.coBuDescription || null;
+
+            await client.query(`
+              UPDATE "Master_Data_User" 
+                 SET name = $1, email = $2, position = $3, team = $4, cobu_name = $5, status = 'active'
+               WHERE emp_no = $6
+            `, [name, email, position, team, cobu, empNo]);
+            active++;
+            continue; // move to next person
+          }
+        }
+
+        // If API fails or returns invalid data, mark as inactive
+        await client.query(`UPDATE "Master_Data_User" SET status = 'inactive' WHERE emp_no = $1`, [empNo]);
+        inactive++;
+      } catch (err: any) {
+        // If network error, probably don't mark inactive, just skip to be safe
+        console.warn(`[cron] syncMasterDataUser error for ${empNo}:`, err.message);
+      }
+    }
+    console.log(`[cron] syncMasterDataUser finished: ${active} verified active, ${inactive} marked inactive.`);
+  } catch (e: any) {
+    console.error('[cron] syncMasterDataUser error:', e.message);
+  } finally {
+    client.release();
+  }
+}
+
+// Re-override startCronJobsFull to include master data sync
+const _origStart = startCronJobsFull;
+function startCronJobsWithSync() {
+  _origStart();
+  // Schedule Master Data sync to run every night at 2:00 AM
+  cron.schedule('0 2 * * *', async () => {
+    await syncMasterDataGCP();
+    await syncMasterDataUser();
+  }, { timezone: 'Asia/Bangkok' });
+  console.log('✅ Master Data Sync cron jobs started (daily 02:00 Bangkok)');
+}
+
+module.exports = { startCronJobs: startCronJobsWithSync, syncMasterDataGCP, syncMasterDataUser };

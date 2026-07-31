@@ -70,7 +70,7 @@ async function queue(req: Request, res: Response) {
         NULL            AS "profilePicture",
         emp.team        AS "department"
       FROM "SPES_evaluations" ev
-      JOIN "Master_Data_GCP" emp ON emp.emp_no = ev.employee_id
+      JOIN "Master_Data_All" emp ON emp.emp_no = ev.employee_id
       WHERE ev.session_id = ANY($1)
       ORDER BY ev.role
     `, [sessionIds]);
@@ -127,7 +127,7 @@ async function history(req: Request, res: Response) {
       FROM "SPES_evaluation_sessions" es
       JOIN "SPES_suppliers" s ON s.id = es.supplier_id
       LEFT JOIN "SPES_supervisor_reviews" sr ON sr.session_id = es.id
-      LEFT JOIN "Master_Data_GCP" sup_emp ON sup_emp.emp_no = sr.supervisor_id
+      LEFT JOIN "Master_Data_All" sup_emp ON sup_emp.emp_no = sr.supervisor_id
       WHERE es.status IN ('completed', 'returned')
       ORDER BY sr.reviewed_at DESC NULLS LAST
       LIMIT 100
@@ -197,7 +197,7 @@ async function approve(req: Request, res: Response) {
     // instead of silently writing supervisor_id = NULL and losing the
     // audit trail of who approved this session.
     const supervisorResult = await client.query(
-      `SELECT emp_no AS id FROM "Master_Data_GCP" WHERE UPPER(emp_no) = UPPER($1) LIMIT 1`,
+      `SELECT emp_no AS id FROM "Master_Data_All" WHERE UPPER(emp_no) = UPPER($1) LIMIT 1`,
       [req.user!.empId]
     );
     if (supervisorResult.rows.length === 0) {
@@ -300,7 +300,7 @@ async function returnSession(req: Request, res: Response) {
     // Resolve the acting supervisor's row id up front — see same check in
     // the approve handler for why.
     const supervisorResult = await client.query(
-      `SELECT emp_no AS id FROM "Master_Data_GCP" WHERE UPPER(emp_no) = UPPER($1) LIMIT 1`,
+      `SELECT emp_no AS id FROM "Master_Data_All" WHERE UPPER(emp_no) = UPPER($1) LIMIT 1`,
       [req.user!.empId]
     );
     if (supervisorResult.rows.length === 0) {
@@ -384,7 +384,7 @@ async function updateReviewNotes(req: Request, res: Response) {
     const reviewResult = await pool.query(`
       SELECT sr.id, emp.emp_no AS "supervisorEmpId"
         FROM "SPES_supervisor_reviews" sr
-        LEFT JOIN "Master_Data_GCP" emp ON emp.emp_no = sr.supervisor_id
+        LEFT JOIN "Master_Data_All" emp ON emp.emp_no = sr.supervisor_id
        WHERE sr.id = $1 AND sr.status IN ('approved', 'returned')
     `, [reviewId]);
 

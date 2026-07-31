@@ -163,7 +163,7 @@ async function checkPermission(req: Request, res: Response) {
     // Fetch employee and supplier in parallel
     const [empResult, supResult] = await Promise.all([
       pool.query(
-        `SELECT e.emp_no AS id, COALESCE(r.role, 'USER') AS role FROM "Master_Data_GCP" e
+        `SELECT e.emp_no AS id, COALESCE(r.role, 'USER') AS role FROM "Master_Data_All" e
          LEFT JOIN "SPES_Roles" r ON e.emp_no = r.emp_no
          WHERE UPPER(e.emp_no) = UPPER($1)`,
         [employeeId.trim()]

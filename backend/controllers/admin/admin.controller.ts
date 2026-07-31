@@ -89,7 +89,7 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
 
     // Get uploader employee id
     const uploaderResult = await client.query(
-      `SELECT emp_no AS id FROM "Master_Data_GCP" WHERE UPPER(emp_no) = UPPER($1)`, [req.user!.empId]
+      `SELECT emp_no AS id FROM "Master_Data_All" WHERE UPPER(emp_no) = UPPER($1)`, [req.user!.empId]
     );
     const uploaderId = uploaderResult.rows[0]?.id || null;
 
@@ -185,10 +185,12 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
 
       // Match buyer (GCP) and evaluator (USER) by email
       const gcpMatch = buyerEmail
-        ? await client.query(`SELECT emp_no AS id, name AS full_name FROM "Master_Data_GCP" WHERE email = $1 LIMIT 1`, [buyerEmail])
+        ? await client.query(`            SELECT emp_no AS id, name AS full_name FROM "Master_Data_All" WHERE LOWER(email) = LOWER($1)
+            LIMIT 1`, [buyerEmail])
         : { rows: [] };
       const buMatch = evalEmail
-        ? await client.query(`SELECT emp_no AS id, name AS full_name FROM "Master_Data_GCP" WHERE email = $1 LIMIT 1`, [evalEmail])
+        ? await client.query(`            SELECT emp_no AS id, name AS full_name FROM "Master_Data_All" WHERE LOWER(email) = LOWER($1)
+            LIMIT 1`, [evalEmail])
         : { rows: [] };
 
       if (buyerEmail && gcpMatch.rows.length === 0) {
@@ -291,7 +293,7 @@ async function uploadPeriodic(req: RequestWithFile, res: Response) {
     await client.query('BEGIN');
 
     const uploaderResult = await client.query(
-      `SELECT emp_no AS id FROM "Master_Data_GCP" WHERE UPPER(emp_no) = UPPER($1)`, [req.user!.empId]
+      `SELECT emp_no AS id FROM "Master_Data_All" WHERE UPPER(emp_no) = UPPER($1)`, [req.user!.empId]
     );
     const uploaderId = uploaderResult.rows[0]?.id || null;
 
@@ -371,10 +373,12 @@ async function uploadPeriodic(req: RequestWithFile, res: Response) {
       const sessionId = sessionResult.rows[0].id;
 
       const gcpMatch = buyerEmail
-        ? await client.query(`SELECT emp_no AS id, name AS full_name FROM "Master_Data_GCP" WHERE email = $1 LIMIT 1`, [buyerEmail])
+        ? await client.query(`            SELECT emp_no AS id, name AS full_name FROM "Master_Data_All" WHERE LOWER(email) = LOWER($1)
+            LIMIT 1`, [buyerEmail])
         : { rows: [] };
       const buMatch = evalEmail
-        ? await client.query(`SELECT emp_no AS id, name AS full_name FROM "Master_Data_GCP" WHERE email = $1 LIMIT 1`, [evalEmail])
+        ? await client.query(`            SELECT emp_no AS id, name AS full_name FROM "Master_Data_All" WHERE LOWER(email) = LOWER($1)
+            LIMIT 1`, [evalEmail])
         : { rows: [] };
 
       if (buyerEmail && gcpMatch.rows.length === 0) summary.warnings.push(`ไม่พบ Buyer email "${buyerEmail}"`);
@@ -460,7 +464,7 @@ async function createAdHocEvaluation(req: Request, res: Response) {
   try {
     await client.query('BEGIN');
 
-    const uploaderResult = await client.query(`SELECT emp_no AS id FROM "Master_Data_GCP" WHERE UPPER(emp_no) = UPPER($1)`, [req.user!.empId]);
+    const uploaderResult = await client.query(`SELECT emp_no AS id FROM "Master_Data_All" WHERE UPPER(emp_no) = UPPER($1)`, [req.user!.empId]);
     const uploaderId = uploaderResult.rows[0]?.id || null;
 
     const supResult = await client.query(`
@@ -492,10 +496,12 @@ async function createAdHocEvaluation(req: Request, res: Response) {
     const sessionId = sessionResult.rows[0].id;
 
     const gcpMatch = supplier.buyer_email
-      ? await client.query(`SELECT emp_no AS id, name AS full_name FROM "Master_Data_GCP" WHERE email = $1 LIMIT 1`, [supplier.buyer_email])
+      ? await client.query(`            SELECT emp_no AS id, name AS full_name FROM "Master_Data_All" WHERE LOWER(email) = LOWER($1)
+            LIMIT 1`, [supplier.buyer_email])
       : { rows: [] };
     const buMatch = supplier.evaluator_email
-      ? await client.query(`SELECT emp_no AS id, name AS full_name FROM "Master_Data_GCP" WHERE email = $1 LIMIT 1`, [supplier.evaluator_email])
+      ? await client.query(`            SELECT emp_no AS id, name AS full_name FROM "Master_Data_All" WHERE LOWER(email) = LOWER($1)
+            LIMIT 1`, [supplier.evaluator_email])
       : { rows: [] };
 
     const taskRows = [
@@ -642,7 +648,8 @@ async function updateTask(req: Request, res: Response) {
 
     if (emailChanged) {
       const empMatch = await pool.query(
-        `SELECT emp_no AS id, name AS full_name FROM "Master_Data_GCP" WHERE email = $1 LIMIT 1`,
+        `            SELECT emp_no AS id, name AS full_name FROM "Master_Data_All" WHERE LOWER(email) = LOWER($1)
+            LIMIT 1`,
         [finalEmail]
       );
       if (empMatch.rows.length > 0) {
@@ -660,7 +667,7 @@ async function updateTask(req: Request, res: Response) {
       const collision = await pool.query(`
         SELECT role FROM "SPES_evaluation_tasks"
          WHERE session_id = $1 AND id != $2 AND role != $3
-           AND (assigned_email = $4 OR ($5::uuid IS NOT NULL AND assigned_employee_id = $5))
+           AND (LOWER(assigned_email) = LOWER($4) OR ($5::text IS NOT NULL AND UPPER(assigned_employee_id) = UPPER($5)))
       `, [task.session_id, task.id, task.role, finalEmail, assignedEmployeeId]);
       if (collision.rows.length > 0) {
         return res.status(400).json({
@@ -719,7 +726,7 @@ async function deleteSession(req: Request, res: Response) {
       return res.status(404).json({ message: 'ไม่พบรายการประเมินนี้' });
     }
     const { status } = sessionResult.rows[0];
-    if (!['pending', 'in_progress'].includes(status)) {
+    if (!['pending', 'in_progress', 'returned'].includes(status)) {
       await client.query('ROLLBACK');
       return res.status(400).json({ message: 'ไม่สามารถลบรายการที่เข้าสู่การอนุมัติหรือเสร็จสิ้นแล้วได้' });
     }
@@ -801,7 +808,7 @@ async function bulkDeleteSessions(req: Request, res: Response) {
       const sessionResult = await client.query(
         `SELECT status FROM "SPES_evaluation_sessions" WHERE id = $1`, [sessionId]
       );
-      if (sessionResult.rows.length === 0 || !['pending', 'in_progress'].includes(sessionResult.rows[0].status)) {
+      if (sessionResult.rows.length === 0 || !['pending', 'in_progress', 'returned'].includes(sessionResult.rows[0].status)) {
         await client.query('ROLLBACK');
         skipped.push(sessionId);
         continue;
@@ -835,7 +842,7 @@ async function listBatches(req: Request, res: Response) {
         b.error_msg AS "errorMsg", b.created_at AS "createdAt",
         emp.full_name AS "uploadedBy"
       FROM "SPES_supplier_upload_batches" b
-      LEFT JOIN "Master_Data_GCP" emp ON emp.emp_no = b.uploaded_by
+      LEFT JOIN "Master_Data_All" emp ON emp.emp_no = b.uploaded_by
       ORDER BY b.created_at DESC
       LIMIT 100
     `);
@@ -856,21 +863,23 @@ async function listServiceEvaluations(req: Request, res: Response) {
       SELECT
         se.id,
         sessionSup.supplier_name AS "supplierName",
-        target.emp_no AS "targetEmpCode", target.name AS "targetFullName", COALESCE(r_target.role, 'USER') AS "targetRole",
+        target.emp_no AS "targetEmpCode", target.name AS "targetFullName", 
+        COALESCE(r_target.role, CASE WHEN gcp.emp_no IS NOT NULL THEN 'GCP' ELSE 'USER' END) AS "targetRole",
         CASE WHEN se.direction LIKE 'supplier_%' THEN sup.supplier_name ELSE evalEmp.name END AS "evaluatorName",
         CASE WHEN se.direction LIKE 'supplier_%' THEN sup.vendor_code ELSE evalEmp.emp_no END AS "evaluatorCode",
-        CASE WHEN se.direction LIKE 'supplier_%' THEN 'Supplier' ELSE 'User' END AS "evaluatorRoleLabel",
+        CASE WHEN se.direction LIKE 'supplier_%' THEN 'Supplier' ELSE 'USER' END AS "evaluatorRoleLabel",
         es.period,
         se.submitted_at AS "submittedAt",
         se.total_score AS "totalScore",
         se.grade
       FROM "SPES_service_evaluations" se
-      JOIN "Master_Data_GCP" target ON target.emp_no = se.target_employee_id
-      LEFT JOIN "SPES_Roles" r_target ON r_target.emp_no = target.emp_no
+      JOIN "Master_Data_All" target ON target.emp_no = se.target_employee_id
+      LEFT JOIN "Master_Data_GCP" gcp ON UPPER(gcp.emp_no) = UPPER(target.emp_no)
+      LEFT JOIN "SPES_Roles" r_target ON UPPER(r_target.emp_no) = UPPER(target.emp_no)
       JOIN "SPES_evaluation_sessions" es ON es.id = se.session_id
       JOIN "SPES_suppliers" sessionSup ON sessionSup.id = es.supplier_id
       LEFT JOIN "SPES_suppliers" sup ON sup.id = se.evaluator_supplier_id
-      LEFT JOIN "Master_Data_GCP" evalEmp ON evalEmp.emp_no = se.evaluator_employee_id
+      LEFT JOIN "Master_Data_All" evalEmp ON evalEmp.emp_no = se.evaluator_employee_id
       ORDER BY se.submitted_at DESC
     `);
     res.json(result.rows);

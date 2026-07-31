@@ -74,7 +74,7 @@ async function seedSet(
     0
   );
   const { rows: existing } = await client.query(
-    'SELECT COUNT(*)::int AS n FROM evaluation_sub_criteria WHERE criteria_set = $1',
+    'SELECT COUNT(*)::int AS n FROM "SPES_evaluation_sub_criteria" WHERE criteria_set = $1',
     [criteriaSet]
   );
   if (existing[0].n >= expectedItemCount) return;
@@ -99,7 +99,7 @@ async function seedSet(
     const sectionTitle = section.section.replace(/^\d+\.\s*/, '');
     const displayOrder = codePrefix.startsWith('FUNC-') ? 1 : sectionIndex;
     const catResult = await client.query(
-      `INSERT INTO evaluation_main_criteria (code, name_th, name_en, total_weight, display_order, is_active)
+      `INSERT INTO "SPES_evaluation_main_criteria" (code, name_th, name_en, total_weight, display_order, is_active)
        VALUES ($1, $2, NULL, $3, $4, TRUE)
        ON CONFLICT (code) DO UPDATE SET is_active = TRUE
        RETURNING id`,
@@ -113,7 +113,7 @@ async function seedSet(
       itemOrder += 1;
 
       const critResult = await client.query(
-        `INSERT INTO evaluation_sub_criteria
+        `INSERT INTO "SPES_evaluation_sub_criteria"
            (category_id, code, name_th, name_en, detail_th, default_weight, display_order, is_active, criteria_set)
          VALUES ($1, $2, $3, NULL, $7, $4, $5, TRUE, $6)
          ON CONFLICT (criteria_set, code) DO NOTHING
@@ -124,7 +124,7 @@ async function seedSet(
       const resolvedCrit = critResult.rows[0]
         ? critResult
         : await client.query(
-            'SELECT id FROM evaluation_sub_criteria WHERE criteria_set = $1 AND code = $2',
+            'SELECT id FROM "SPES_evaluation_sub_criteria" WHERE criteria_set = $1 AND code = $2',
             [criteriaSet, item.no]
           );
       const criterionId = resolvedCrit.rows[0].id;
@@ -133,7 +133,7 @@ async function seedSet(
       const levelValues = item.levelValues || levels.map((_, i) => i + 1);
       for (let i = 0; i < levels.length; i++) {
         await client.query(
-          `INSERT INTO score_level_descriptions (criterion_id, level, description)
+          `INSERT INTO "SPES_score_level_descriptions" (criterion_id, level, description)
            VALUES ($1, $2, $3)
            ON CONFLICT (criterion_id, level) DO NOTHING`,
           [criterionId, levelValues[i], levels[i]]

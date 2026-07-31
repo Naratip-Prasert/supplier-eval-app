@@ -38,7 +38,7 @@ async function listSessions(req: Request, res: Response) {
          ) AS "dueDate"
        FROM "SPES_evaluation_sessions" es
        JOIN "SPES_suppliers" s ON s.id = es.supplier_id
-       LEFT JOIN "Master_Data_GCP" initiator ON initiator.emp_no = es.initiated_by
+       LEFT JOIN "Master_Data_All" initiator ON initiator.emp_no = es.initiated_by
        WHERE ($1::text IS NULL OR s.vendor_code = $1)
          AND ($2::text IS NULL OR es.status = $2)
        ORDER BY es.created_at DESC`,
@@ -64,7 +64,7 @@ async function listSessions(req: Request, res: Response) {
          emp.name         AS "fullName",
          NULL             AS "profilePicture"
        FROM "SPES_evaluations" ev
-       JOIN "Master_Data_GCP" emp ON emp.emp_no = ev.employee_id
+       JOIN "Master_Data_All" emp ON emp.emp_no = ev.employee_id
        WHERE ev.session_id = ANY($1)`,
       [sessionIds]
     );
@@ -135,7 +135,7 @@ async function getSession(req: Request, res: Response) {
          emp.team        AS "department",
          emp.position    AS "jobTitle"
        FROM "SPES_evaluations" ev
-       JOIN "Master_Data_GCP" emp ON emp.emp_no = ev.employee_id
+       JOIN "Master_Data_All" emp ON emp.emp_no = ev.employee_id
        WHERE ev.session_id = $1
        ORDER BY ev.role`,
       [session.sessionId]

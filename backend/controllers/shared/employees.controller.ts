@@ -21,7 +21,7 @@ async function listEmployees(req: Request, res: Response) {
          e.position       AS "jobTitle",
          NULL             AS "createdAt",
          NULL             AS "profilePicture"
-       FROM "Master_Data_GCP" e
+       FROM "Master_Data_All" e
        LEFT JOIN "SPES_Roles" r ON r.emp_no = e.emp_no`
     );
     res.json(result.rows);
@@ -42,7 +42,7 @@ async function getMe(req: Request, res: Response) {
               NULL             AS "profilePicture",
               e.team           AS "department",
               e.position       AS "jobTitle"
-         FROM "Master_Data_GCP" e
+         FROM "Master_Data_All" e
          LEFT JOIN "SPES_Roles" r ON r.emp_no = e.emp_no
         WHERE e.emp_no = $1`,
       [req.user!.empId]
@@ -71,7 +71,7 @@ async function updateMe(req: Request, res: Response) {
     // profile_picture updating is disabled because Master_Data_GCP has no profile_picture column.
     // We mock it for now.
     // await client.query(
-    //   `UPDATE "Master_Data_GCP"
+    //   `UPDATE "Master_Data_All"
     //       SET profile_picture = $1,
     //           updated_at      = NOW()
     //     WHERE emp_no = $2`,
@@ -85,7 +85,7 @@ async function updateMe(req: Request, res: Response) {
               COALESCE(r.role, 'GCP') AS role,
               e.team        AS "department",
               e.position    AS "jobTitle"
-         FROM "Master_Data_GCP" e
+         FROM "Master_Data_All" e
          LEFT JOIN "SPES_Roles" r ON r.emp_no = e.emp_no
         WHERE e.emp_no = $1`,
       [req.user!.empId]
@@ -121,7 +121,7 @@ async function getEmployee(req: Request, res: Response) {
          NULL           AS "departmentCode",
          e.position     AS "jobTitle",
          NULL           AS "jobTitleCode"
-       FROM "Master_Data_GCP" e
+       FROM "Master_Data_All" e
        LEFT JOIN "SPES_Roles" r ON r.emp_no = e.emp_no
        WHERE e.emp_no = $1`,
       [(req.params.employeeId as string).trim()]

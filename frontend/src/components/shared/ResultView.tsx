@@ -306,6 +306,7 @@ export default function ResultView({ formData, result, user, profilePic, onBack,
           scores:      mergedScores,
           moduleCode:        result.moduleCode ?? null,
           customModuleItems: result.customItems ?? null,
+          disqualified:      result.disqualified || false,
         }),
       });
       if (!res.ok) {

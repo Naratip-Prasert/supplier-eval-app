@@ -79,7 +79,13 @@ async function createEvaluation(req: Request, res: Response) {
   if (missing.length > 0) {
     return res.status(400).json({ message: 'กรุณากรอกข้อมูลให้ครบถ้วน', missing });
   }
-  if (typeof scores !== 'object' || Object.keys(scores).length === 0) {
+
+  const disqualified = req.body.disqualified === true;
+  
+  console.log(`[DEBUG] /api/evaluations POST - user: ${employeeId}, disqualified: ${disqualified}, scores length:`, scores ? Object.keys(scores).length : 0);
+
+  if (!disqualified && (typeof scores !== 'object' || Object.keys(scores).length === 0)) {
+    console.warn(`[DEBUG] Rejecting because scores is empty or invalid:`, scores);
     return res.status(400).json({ message: 'ไม่มีข้อมูลคะแนน', field: 'scores' });
   }
 
@@ -89,7 +95,7 @@ async function createEvaluation(req: Request, res: Response) {
 
     // 1. Validate employee
     const empResult = await client.query(
-      `SELECT e.emp_no AS id, COALESCE(r.role, 'USER') AS role FROM "Master_Data_GCP" e LEFT JOIN "SPES_Roles" r ON r.emp_no = e.emp_no WHERE UPPER(e.emp_no) = UPPER($1)`,
+      `SELECT e.emp_no AS id, COALESCE(r.role, 'USER') AS role FROM "Master_Data_All" e LEFT JOIN "SPES_Roles" r ON r.emp_no = e.emp_no WHERE UPPER(e.emp_no) = UPPER($1)`,
       [employeeId]
     );
     if (empResult.rows.length === 0) {
@@ -154,7 +160,7 @@ async function createEvaluation(req: Request, res: Response) {
         `SELECT role FROM "SPES_evaluation_tasks"
           WHERE session_id = $1
             AND (assigned_employee_id = $2
-                 OR assigned_email = (SELECT email FROM "Master_Data_GCP" WHERE emp_no = $2 LIMIT 1))
+                 OR LOWER(assigned_email) = LOWER((SELECT email FROM "Master_Data_All" WHERE emp_no = $2 LIMIT 1)))
           LIMIT 1`,
         [sessionId, employee.id]
       );
@@ -284,7 +290,7 @@ async function createEvaluation(req: Request, res: Response) {
          SET status = 'completed'
        WHERE session_id = $1
          AND (assigned_employee_id = $2
-              OR assigned_email = (SELECT email FROM "Master_Data_GCP" WHERE emp_no = $2 LIMIT 1))
+              OR LOWER(assigned_email) = LOWER((SELECT email FROM "Master_Data_All" WHERE emp_no = $2 LIMIT 1)))
          AND status != 'completed'
        RETURNING id, assigned_email, assigned_name, due_date, thankyou_sent_at
     `, [sessionId, employee.id]).catch(() => ({ rows: [] }));
@@ -372,7 +378,7 @@ async function createEvaluation(req: Request, res: Response) {
 
       // Notify all active supervisors
       const supervisors = await pool.query(`
-        SELECT e.email, e.name AS full_name FROM "Master_Data_GCP" e
+        SELECT e.email, e.name AS full_name FROM "Master_Data_All" e
          JOIN "SPES_Roles" r ON r.emp_no = e.emp_no
          WHERE r.role = 'SUPERVISOR' AND e.email IS NOT NULL
       `);
@@ -458,7 +464,7 @@ async function listAllEvaluations(req: Request, res: Response) {
        FROM "SPES_evaluations" ev
        JOIN "SPES_evaluation_sessions" es  ON es.id  = ev.session_id
        JOIN "SPES_suppliers"           s   ON s.id   = es.supplier_id
-       JOIN "Master_Data_GCP"          emp ON emp.emp_no = ev.employee_id
+       JOIN "Master_Data_All"          emp ON emp.emp_no = ev.employee_id
        ORDER BY ev.submitted_at DESC
        LIMIT 500`
     );
@@ -490,7 +496,7 @@ async function listMyEvaluations(req: Request, res: Response) {
        FROM "SPES_evaluations" ev
        JOIN "SPES_evaluation_sessions" es ON es.id = ev.session_id
        JOIN "SPES_suppliers"           s  ON s.id  = es.supplier_id
-       JOIN "Master_Data_GCP"          emp ON emp.emp_no = ev.employee_id
+       JOIN "Master_Data_All"          emp ON emp.emp_no = ev.employee_id
        WHERE UPPER(emp.emp_no) = UPPER($1)
        ORDER BY ev.submitted_at DESC
        LIMIT 100`,
@@ -538,7 +544,7 @@ async function myTasks(req: Request, res: Response) {
       JOIN "SPES_suppliers" s             ON s.id = et.supplier_id
       WHERE (
         UPPER(et.assigned_employee_id) = UPPER($1)
-        OR et.assigned_email = $2
+        OR LOWER(et.assigned_email) = LOWER($2)
       )
         AND et.status != 'completed'
         AND es.status IN ('pending', 'in_progress', 'returned')
@@ -585,7 +591,7 @@ async function myTimeline(req: Request, res: Response) {
       JOIN "SPES_suppliers" s             ON s.id = et.supplier_id
       WHERE (
         UPPER(et.assigned_employee_id) = UPPER($1)
-        OR et.assigned_email = $2
+        OR LOWER(et.assigned_email) = LOWER($2)
       )
       ORDER BY es.created_at DESC
       LIMIT 50
@@ -658,7 +664,7 @@ async function getById(req: Request, res: Response) {
          es.final_grade   AS "finalGrade",
          ev.raw_scores    AS "rawScores"
        FROM "SPES_evaluations" ev
-       JOIN "Master_Data_GCP" emp ON emp.emp_no = ev.employee_id
+       JOIN "Master_Data_All" emp ON emp.emp_no = ev.employee_id
        JOIN "SPES_evaluation_sessions" es  ON es.id  = ev.session_id
        JOIN "SPES_suppliers"          s   ON s.id    = es.supplier_id
        WHERE ev.id = $1`,

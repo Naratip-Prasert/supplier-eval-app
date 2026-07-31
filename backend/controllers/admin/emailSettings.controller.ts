@@ -39,7 +39,7 @@ async function updateEmailTemplate(req: Request, res: Response) {
   }
 
   const employeeResult = await pool.query(
-    `SELECT emp_no AS id FROM "Master_Data_GCP" WHERE UPPER(emp_no) = UPPER($1)`, [req.user!.empId]
+    `SELECT emp_no AS id FROM "Master_Data_All" WHERE UPPER(emp_no) = UPPER($1)`, [req.user!.empId]
   );
   const updatedBy = employeeResult.rows[0]?.id || null;
 

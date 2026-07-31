@@ -40,7 +40,7 @@ async function getToken(req: Request, res: Response) {
       pool.query(
         `SELECT ev.role, e.emp_no AS "employeeId", e.name AS "fullName"
            FROM "SPES_evaluations" ev
-           JOIN "Master_Data_GCP" e ON e.emp_no = ev.employee_id
+           JOIN "Master_Data_All" e ON e.emp_no = ev.employee_id
           WHERE ev.session_id = $1 AND ev.role IN ('USER', 'GCP') AND ev.status = 'saved'`,
         [row.sessionId]
       ),

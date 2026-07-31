@@ -57,9 +57,9 @@ async function fetchAdminUploadContext(): Promise<string> {
     const result = await pool.query(`
       SELECT b.filename, b.batch_type AS "batchType", b.row_count AS "rowCount",
              b.status, b.error_msg AS "errorMsg", b.created_at AS "createdAt",
-             emp.full_name AS "uploadedBy"
-        FROM supplier_upload_batches b
-        LEFT JOIN employees emp ON emp.id = b.uploaded_by
+             emp.name AS "uploadedBy"
+        FROM "SPES_supplier_upload_batches" b
+        LEFT JOIN "Master_Data_All" emp ON emp.emp_no = b.uploaded_by
        ORDER BY b.created_at DESC
        LIMIT $1
     `, [ADMIN_BATCH_HISTORY_LIMIT]);

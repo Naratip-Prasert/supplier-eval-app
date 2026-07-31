@@ -16,20 +16,20 @@ async function pending(req: Request, res: Response) {
   try {
     const result = await pool.query(
       `SELECT es.id AS "sessionId", s.supplier_name AS "supplierName",
-              gcpEmp.id AS "targetEmployeeId", gcpEmp.full_name AS "targetFullName"
-         FROM evaluations userEval
-         JOIN evaluation_sessions es ON es.id = userEval.session_id
-         JOIN suppliers s ON s.id = es.supplier_id
-         JOIN employees me ON me.id = userEval.employee_id
-         JOIN evaluations gcpEval ON gcpEval.session_id = es.id AND gcpEval.role = 'GCP' AND gcpEval.status = 'saved'
-         JOIN employees gcpEmp ON gcpEmp.id = gcpEval.employee_id
+              gcpEmp.emp_no AS "targetEmployeeId", gcpEmp.name AS "targetFullName"
+         FROM "SPES_evaluations" userEval
+         JOIN "SPES_evaluation_sessions" es ON es.id = userEval.session_id
+         JOIN "SPES_suppliers" s ON s.id = es.supplier_id
+         JOIN "Master_Data_All" me ON me.emp_no = userEval.employee_id
+         JOIN "SPES_evaluations" gcpEval ON gcpEval.session_id = es.id AND gcpEval.role = 'GCP' AND gcpEval.status = 'saved'
+         JOIN "Master_Data_All" gcpEmp ON gcpEmp.emp_no = gcpEval.employee_id
         WHERE userEval.role = 'USER' AND userEval.status = 'saved'
-          AND UPPER(me.employee_id) = UPPER($1)
+          AND UPPER(me.emp_no) = UPPER($1)
           AND es.status = 'completed'
           AND NOT EXISTS (
-            SELECT 1 FROM service_evaluations se
+            SELECT 1 FROM "SPES_service_evaluations" se
              WHERE se.session_id = es.id AND se.direction = 'user_to_gcp'
-               AND se.evaluator_employee_id = me.id
+               AND se.evaluator_employee_id = me.emp_no
           )
         ORDER BY es.completed_at DESC`,
       [req.user!.empId]
@@ -47,14 +47,14 @@ async function myFeedback(req: Request, res: Response) {
     const result = await pool.query(
       `SELECT se.id, se.direction, se.total_score AS "totalScore", se.grade,
               se.submitted_at AS "submittedAt", s.supplier_name AS "supplierName",
-              COALESCE(sup.supplier_name, evaluator.full_name) AS "evaluatorLabel"
-         FROM service_evaluations se
-         JOIN evaluation_sessions es ON es.id = se.session_id
-         JOIN suppliers s ON s.id = es.supplier_id
-         JOIN employees me ON me.id = se.target_employee_id
-         LEFT JOIN suppliers sup ON sup.id = se.evaluator_supplier_id
-         LEFT JOIN employees evaluator ON evaluator.id = se.evaluator_employee_id
-        WHERE UPPER(me.employee_id) = UPPER($1)
+              COALESCE(sup.supplier_name, evaluator.name) AS "evaluatorLabel"
+         FROM "SPES_service_evaluations" se
+         JOIN "SPES_evaluation_sessions" es ON es.id = se.session_id
+         JOIN "SPES_suppliers" s ON s.id = es.supplier_id
+         JOIN "Master_Data_All" me ON me.emp_no = se.target_employee_id
+         LEFT JOIN "SPES_suppliers" sup ON sup.id = se.evaluator_supplier_id
+         LEFT JOIN "Master_Data_All" evaluator ON evaluator.emp_no = se.evaluator_employee_id
+        WHERE UPPER(me.emp_no) = UPPER($1)
         ORDER BY se.submitted_at DESC`,
       [req.user!.empId]
     );
@@ -76,7 +76,7 @@ async function criteria(req: Request, res: Response) {
   try {
     const catRes = await pool.query(
       `SELECT id, name_th AS "nameTh", total_weight AS "totalWeight", display_order AS "displayOrder"
-         FROM evaluation_main_criteria
+         FROM "SPES_evaluation_main_criteria"
         WHERE code LIKE 'SVC%' AND is_active = TRUE
         ORDER BY display_order`
     );
@@ -84,15 +84,15 @@ async function criteria(req: Request, res: Response) {
       `SELECT s.id, s.category_id AS "categoryId", s.code, s.name_th AS "nameTh",
               s.default_weight AS "defaultWeight", s.display_order AS "displayOrder",
               s.level_values AS "levelValues"
-         FROM evaluation_sub_criteria s
-         JOIN evaluation_main_criteria m ON m.id = s.category_id
+         FROM "SPES_evaluation_sub_criteria" s
+         JOIN "SPES_evaluation_main_criteria" m ON m.id = s.category_id
         WHERE s.criteria_set = 'service' AND s.is_active = TRUE AND m.is_active = TRUE
         ORDER BY s.display_order`
     );
     const itemIds = itemRes.rows.map((r: any) => r.id);
     const levelRes = itemIds.length
       ? await pool.query(
-          `SELECT criterion_id AS "criterionId", level, description FROM score_level_descriptions
+          `SELECT criterion_id AS "criterionId", level, description FROM "SPES_score_level_descriptions"
             WHERE criterion_id = ANY($1::uuid[]) ORDER BY criterion_id, level`,
           [itemIds]
         )
@@ -133,13 +133,13 @@ async function submit(req: Request, res: Response) {
     // session's GCP evaluator — never trust these off the request body
     // alone, someone else's session/employee id could be substituted.
     const check = await client.query(
-      `SELECT es.id, me.id AS "myEmployeeId"
-         FROM evaluations userEval
-         JOIN evaluation_sessions es ON es.id = userEval.session_id
-         JOIN employees me ON me.id = userEval.employee_id
-         JOIN evaluations gcpEval ON gcpEval.session_id = es.id AND gcpEval.role = 'GCP' AND gcpEval.status = 'saved'
+      `SELECT es.id, me.emp_no AS "myEmployeeId"
+         FROM "SPES_evaluations" userEval
+         JOIN "SPES_evaluation_sessions" es ON es.id = userEval.session_id
+         JOIN "Master_Data_All" me ON me.emp_no = userEval.employee_id
+         JOIN "SPES_evaluations" gcpEval ON gcpEval.session_id = es.id AND gcpEval.role = 'GCP' AND gcpEval.status = 'saved'
         WHERE userEval.role = 'USER' AND userEval.status = 'saved'
-          AND UPPER(me.employee_id) = UPPER($1)
+          AND UPPER(me.emp_no) = UPPER($1)
           AND es.id = $2 AND es.status = 'completed'
           AND gcpEval.employee_id = $3`,
       [req.user!.empId, sessionId, targetEmployeeId]
@@ -151,7 +151,7 @@ async function submit(req: Request, res: Response) {
     const myEmployeeId = check.rows[0].myEmployeeId;
 
     const criteriaResult = await client.query(
-      `SELECT code, default_weight FROM evaluation_sub_criteria
+      `SELECT code, default_weight FROM "SPES_evaluation_sub_criteria"
         WHERE criteria_set = 'service' AND is_active = TRUE`
     );
     const criteriaMap: Record<string, { default_weight: number }> = {};
@@ -165,7 +165,7 @@ async function submit(req: Request, res: Response) {
     // its scoresInput as a criterion code and would otherwise try to score
     // this plain text.
     const insertRes = await client.query(
-      `INSERT INTO service_evaluations
+      `INSERT INTO "SPES_service_evaluations"
          (session_id, direction, evaluator_employee_id, target_employee_id, total_score, grade, raw_scores)
        VALUES ($1, 'user_to_gcp', $2, $3, $4, $5, $6)
        ON CONFLICT (session_id, direction, target_employee_id) DO NOTHING
