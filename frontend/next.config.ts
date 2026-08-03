@@ -8,6 +8,7 @@ const nextConfig: NextConfig = {
   // frontend/ the same way Vite's server.fs.allow did for the old app.
   outputFileTracingRoot: path.join(__dirname, ".."),
 
+  allowedDevOrigins: ['192.168.61.130'],
   // Proxy /api/* and /uploads/* through this app's own domain to the Render
   // backend (same NEXT_PUBLIC_API_URL already configured in Vercel — no new
   // env var needed). This makes the auth cookie same-origin from the

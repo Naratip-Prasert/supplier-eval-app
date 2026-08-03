@@ -30,7 +30,7 @@ const allowedOrigins = (process.env.FRONTEND_URL || '')
 
 app.use(cors({ // app.use(...) คือการเพิ่ม middleware - บอก express ว่าใช้ cor middleware กับทุก req
   origin: (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {  //กำหนด function ตรวจสอบ origin
-    const isDevLocalhost = !isProd && !!origin && /^http:\/\/localhost:\d+$/.test(origin);
+    const isDevLocalhost = !isProd && !!origin && /^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+):\d+$/.test(origin);
     if (!origin || isDevLocalhost || allowedOrigins.includes(origin)) cb(null, true);
     else cb(new Error('Not allowed by CORS'));
   },
