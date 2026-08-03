@@ -483,21 +483,6 @@ function SuppliersTab() {
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-        <button
-          onClick={() => setIsCreatingSupplier(true)}
-          style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff", color: "#1b5e20", border: "1.5px solid #1b5e20", borderRadius: 8, padding: "10px 20px", cursor: "pointer", fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 14, marginLeft: "auto" }}
-        >
-          <Plus size={16} />
-          เพิ่ม Supplier
-        </button>
-        <button
-          onClick={() => setIsUploadingSupplier(true)}
-          style={{ display: "flex", alignItems: "center", gap: 8, background: "#1b5e20", color: "#fff", border: "none", borderRadius: 8, padding: "10px 20px", cursor: "pointer", fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 14 }}
-        >
-          <Upload size={16} /> อัพโหลด CSV / Excel
-        </button>
-      </div>
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
         <div style={{ position: "relative", width: 320, flexShrink: 0 }}>
           <Search size={15} style={{ position: "absolute", left: 12, top: 11, color: "#aaa" }} />
@@ -702,6 +687,7 @@ function EmployeesTab({ employees, onRefresh, authUser }: { employees: Employee[
   const [saving,     setSaving]     = useState<string | null>(null);
   const [msg,        setMsg]        = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [grantTarget, setGrantTarget] = useState<Employee | null>(null); // employee row pending ADMIN grant
+  const [revokeTarget, setRevokeTarget] = useState<Employee | null>(null); // employee row pending ADMIN revoke
 
   const filtered = employees.filter(e => {
     const q = search.toLowerCase();
@@ -839,7 +825,21 @@ function EmployeesTab({ employees, onRefresh, authUser }: { employees: Employee[
                 </td>
                 <td style={{ padding: "11px 14px" }}>
                   {emp.role === "ADMIN" ? (
-                    <span style={{ fontSize: 11, color: "#aaa" }}>เป็น ADMIN แล้ว</span>
+                    emp.employeeId === authUser?.empId ? (
+                      <span style={{ fontSize: 11, color: "#aaa" }}>ตัวคุณเอง</span>
+                    ) : (
+                      <button
+                        onClick={() => setRevokeTarget(emp)}
+                        disabled={saving === emp.employeeId}
+                        style={{
+                          fontSize: 11, fontWeight: 700, fontFamily: "Sarabun, sans-serif",
+                          padding: "5px 12px", borderRadius: 6, cursor: "pointer",
+                          border: "1px solid #e0e0e0", background: "#f5f5f5", color: "#555",
+                        }}
+                      >
+                        ลบสิทธิ์ ADMIN
+                      </button>
+                    )
                   ) : (
                     <button
                       onClick={() => setGrantTarget(emp)}
@@ -864,11 +864,26 @@ function EmployeesTab({ employees, onRefresh, authUser }: { employees: Employee[
         <VerifyAdminModal
           authUser={authUser}
           targetName={grantTarget.fullName}
+          action="grant"
           onCancel={() => setGrantTarget(null)}
           onVerified={async () => {
             const employeeId = grantTarget.employeeId;
             setGrantTarget(null);
             await patchEmployee(employeeId, { role: "ADMIN" });
+          }}
+        />
+      )}
+
+      {revokeTarget && (
+        <VerifyAdminModal
+          authUser={authUser}
+          targetName={revokeTarget.fullName}
+          action="revoke"
+          onCancel={() => setRevokeTarget(null)}
+          onVerified={async () => {
+            const employeeId = revokeTarget.employeeId;
+            setRevokeTarget(null);
+            await patchEmployee(employeeId, { role: "DELETE" });
           }}
         />
       )}
@@ -879,8 +894,8 @@ function EmployeesTab({ employees, onRefresh, authUser }: { employees: Employee[
 // ── Verify-self modal — re-enter own employeeId + password before
 // granting another employee ADMIN, so the action can't be done by
 // someone who walked up to an already-logged-in session.
-function VerifyAdminModal({ authUser, targetName, onCancel, onVerified }: {
-  authUser: AuthUser | null; targetName: string; onCancel: () => void; onVerified: () => void;
+function VerifyAdminModal({ authUser, targetName, action, onCancel, onVerified }: {
+  authUser: AuthUser | null; targetName: string; action: "grant" | "revoke"; onCancel: () => void; onVerified: () => void;
 }) {
   const [employeeId, setEmployeeId] = useState(authUser?.empId ?? "");
   const [password,   setPassword]   = useState("");
@@ -915,12 +930,15 @@ function VerifyAdminModal({ authUser, targetName, onCancel, onVerified }: {
       <div onClick={onCancel} style={{ position: "fixed", inset: 0, zIndex: 9998, background: "rgba(0,0,0,0.48)" }} />
       <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
         <div style={{ background: "#fff", borderRadius: 14, width: "min(420px, 100%)", boxShadow: "0 24px 64px rgba(0,0,0,0.28)", overflow: "hidden" }}>
-          <div style={{ background: "#6a1b9a", padding: "14px 20px", color: "#fff", fontWeight: 700, fontSize: 15, fontFamily: "Sarabun, sans-serif" }}>
-            ยืนยันตัวตนก่อนเพิ่มสิทธิ์ ADMIN
+          <div style={{ background: action === "grant" ? "#6a1b9a" : "#c62828", padding: "14px 20px", color: "#fff", fontWeight: 700, fontSize: 15, fontFamily: "Sarabun, sans-serif" }}>
+            {action === "grant" ? "ยืนยันตัวตนก่อนเพิ่มสิทธิ์ ADMIN" : "ยืนยันตัวตนก่อนปลดสิทธิ์ ADMIN"}
           </div>
           <div style={{ padding: "20px 24px 8px", fontFamily: "Sarabun, sans-serif" }}>
             <p style={{ margin: "0 0 16px", fontSize: 13, color: "#555" }}>
-              กำลังตั้งให้ <strong>{targetName}</strong> เป็น ADMIN — กรุณายืนยันตัวตนของคุณเองก่อน
+              {action === "grant" 
+                ? <>กำลังตั้งให้ <strong>{targetName}</strong> เป็น ADMIN — กรุณายืนยันตัวตนของคุณเองก่อน</>
+                : <>กำลังปลดสิทธิ์ ADMIN ของ <strong>{targetName}</strong> — กรุณายืนยันตัวตนของคุณเองก่อน</>
+              }
             </p>
             <label style={{ fontSize: 12, fontWeight: 600, color: "#666", display: "block", marginBottom: 4 }}>รหัสพนักงานของคุณ</label>
             <input
@@ -948,9 +966,9 @@ function VerifyAdminModal({ authUser, targetName, onCancel, onVerified }: {
             <button
               onClick={handleConfirm}
               disabled={verifying}
-              style={{ background: "#6a1b9a", color: "#fff", border: "none", borderRadius: 8, padding: "9px 24px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Sarabun, sans-serif", opacity: verifying ? 0.7 : 1 }}
+              style={{ background: action === "grant" ? "#6a1b9a" : "#c62828", color: "#fff", border: "none", borderRadius: 8, padding: "9px 24px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Sarabun, sans-serif", opacity: verifying ? 0.7 : 1 }}
             >
-              {verifying ? "กำลังยืนยัน…" : "ยืนยันและเพิ่มสิทธิ์"}
+              {verifying ? "กำลังยืนยัน…" : (action === "grant" ? "ยืนยันและเพิ่มสิทธิ์" : "ยืนยันและปลดสิทธิ์")}
             </button>
           </div>
         </div>

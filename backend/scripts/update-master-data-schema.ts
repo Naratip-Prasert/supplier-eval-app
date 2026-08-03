@@ -1,14 +1,14 @@
-export {};
+export { };
 const pool = require('../db');
 
 async function updateSchema() {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    
+
     console.log('Adding status column to Master_Data_GCP...');
     await client.query(`ALTER TABLE "Master_Data_GCP" ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active';`);
-    
+
     console.log('Adding status column to Master_Data_User...');
     await client.query(`ALTER TABLE "Master_Data_User" ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active';`);
 

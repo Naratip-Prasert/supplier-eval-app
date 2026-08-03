@@ -1,11 +1,11 @@
-export {};
+export { };
 const pool = require('../db');
 
 async function createView() {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    
+
     console.log('Creating Master_Data_All view...');
     await client.query(`
       CREATE OR REPLACE VIEW "Master_Data_All" AS

@@ -15,7 +15,7 @@ async function listEmployees(req: Request, res: Response) {
          e.emp_no         AS "employeeId",
          e.name           AS "fullName",
          e.email,
-         COALESCE(r.role, 'GCP') AS role,
+         COALESCE(r.role, e.default_role) AS role,
          TRUE             AS "isActive",
          e.team           AS "department",
          e.position       AS "jobTitle",
@@ -38,7 +38,7 @@ async function getMe(req: Request, res: Response) {
       `SELECT e.emp_no         AS "empId",
               e.name           AS "fullName",
               e.email,
-              COALESCE(r.role, 'GCP') AS role,
+              COALESCE(r.role, e.default_role) AS role,
               NULL             AS "profilePicture",
               e.team           AS "department",
               e.position       AS "jobTitle"
@@ -82,7 +82,7 @@ async function updateMe(req: Request, res: Response) {
       `SELECT e.emp_no      AS "empId",
               e.name        AS "fullName",
               e.email,
-              COALESCE(r.role, 'GCP') AS role,
+              COALESCE(r.role, e.default_role) AS role,
               e.team        AS "department",
               e.position    AS "jobTitle"
          FROM "Master_Data_All" e
@@ -116,7 +116,7 @@ async function getEmployee(req: Request, res: Response) {
       `SELECT
          e.emp_no       AS "employeeId",
          e.name         AS "fullName",
-         COALESCE(r.role, 'GCP') AS role,
+         COALESCE(r.role, e.default_role) AS role,
          e.team         AS "department",
          NULL           AS "departmentCode",
          e.position     AS "jobTitle",
@@ -140,7 +140,7 @@ async function getEmployee(req: Request, res: Response) {
 // Body: { role?, isActive? }
 async function updateEmployee(req: Request, res: Response) {
   const { role, isActive } = req.body;
-  const validRoles = ['USER', 'GCP', 'ADMIN', 'SUPERVISOR'];
+  const validRoles = ['USER', 'GCP', 'ADMIN', 'SUPERVISOR', 'DELETE'];
   if (role !== undefined && !validRoles.includes(role)) {
     return res.status(400).json({ message: 'role ไม่ถูกต้อง' });
   }
@@ -149,7 +149,9 @@ async function updateEmployee(req: Request, res: Response) {
   }
   try {
     // updateEmployee changes role. Role is stored in SPES_Roles.
-    if (role !== undefined) {
+    if (role === 'DELETE') {
+      await pool.query(`DELETE FROM "SPES_Roles" WHERE emp_no = $1`, [req.params.employeeId]);
+    } else if (role !== undefined) {
       const result = await pool.query(
         `INSERT INTO "SPES_Roles" (emp_no, role)
          VALUES ($1, $2)
