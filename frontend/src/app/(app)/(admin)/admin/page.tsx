@@ -15,6 +15,8 @@ import { authFetch } from "@/utils/api";
 import TasksPanel from "@/components/admin/TasksPanel";
 import AdminCriteriaEditor from "@/components/admin/AdminCriteriaEditor";
 import EmailSettingsEditor from "@/components/admin/EmailSettingsEditor";
+import EditSupplierModal from "@/components/admin/EditSupplierModal";
+import SupplierUploadModal from "@/components/admin/SupplierUploadModal";
 import { DateFilterBar, DEFAULT_DATE_FILTER, matchesDateFilter, type DateFilter } from "@/utils/shared/dateFilter";
 import { SESSION_STATUS_LABELS, SESSION_STATUS_COLORS, getDisplayStatus } from "@/utils/shared/statusLabels";
 import { TimelineStepper } from "@/components/shared/TimelineStepper";
@@ -22,7 +24,7 @@ import { FilterChips, toggleInSet } from "@/components/shared/FilterChips";
 import { SortableTh, nextSort, type SortState } from "@/components/shared/SortableTh";
 import {
   Users, ClipboardList, Upload, Building2,
-  ArrowLeft, Search, RefreshCw, X,
+  ArrowLeft, Search, RefreshCw, X, Pencil, Plus,
   AlertCircle, SlidersHorizontal, Star, Mail, type LucideIcon,
 } from "lucide-react";
 import { ROLE_THEME, GRADE_COLOR } from "@/styles/theme";
@@ -437,12 +439,19 @@ function SuppliersTab() {
   const [minValue, setMinValue] = useState("");
   const [maxValue, setMaxValue] = useState("");
   const [page, setPage] = useState(1);
+  const [editingSupplier, setEditingSupplier] = useState<SupplierRow | null>(null);
+  const [isCreatingSupplier, setIsCreatingSupplier] = useState(false);
+  const [isUploadingSupplier, setIsUploadingSupplier] = useState(false);
 
-  useEffect(() => {
+  const fetchSuppliers = () => {
     authFetch("/api/admin/suppliers")
       .then(r => r.json())
       .then(d => setRows(Array.isArray(d) ? d : []))
       .catch(() => setRows([]));
+  };
+
+  useEffect(() => {
+    fetchSuppliers();
   }, []);
 
   // Any filter change should snap back to page 1 — otherwise a narrower
@@ -474,6 +483,21 @@ function SuppliersTab() {
 
   return (
     <div>
+      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+        <button
+          onClick={() => setIsCreatingSupplier(true)}
+          style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff", color: "#1b5e20", border: "1.5px solid #1b5e20", borderRadius: 8, padding: "10px 20px", cursor: "pointer", fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 14, marginLeft: "auto" }}
+        >
+          <Plus size={16} />
+          เพิ่ม Supplier
+        </button>
+        <button
+          onClick={() => setIsUploadingSupplier(true)}
+          style={{ display: "flex", alignItems: "center", gap: 8, background: "#1b5e20", color: "#fff", border: "none", borderRadius: 8, padding: "10px 20px", cursor: "pointer", fontFamily: "Sarabun, sans-serif", fontWeight: 700, fontSize: 14 }}
+        >
+          <Upload size={16} /> อัพโหลด CSV / Excel
+        </button>
+      </div>
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
         <div style={{ position: "relative", width: 320, flexShrink: 0 }}>
           <Search size={15} style={{ position: "absolute", left: 12, top: 11, color: "#aaa" }} />
@@ -563,6 +587,7 @@ function SuppliersTab() {
                 <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap" }}>Buyer</th>
                 <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap" }}>Evaluator</th>
                 <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap" }}>สถานะ</th>
+                <th style={{ padding: "10px 16px", width: 40 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -598,6 +623,21 @@ function SuppliersTab() {
                       {r.isActive ? "ใช้งานอยู่" : "ปิดใช้งาน"}
                     </span>
                   </td>
+                  <td style={{ padding: "10px 16px", textAlign: "right" }}>
+                    <button
+                      onClick={() => setEditingSupplier(r)}
+                      style={{
+                        background: "none", border: "none", cursor: "pointer",
+                        color: "#666", display: "flex", alignItems: "center", justifyContent: "center",
+                        padding: 6, borderRadius: 6,
+                      }}
+                      title="แก้ไขข้อมูล"
+                      onMouseEnter={e => e.currentTarget.style.background = "#f0f0f0"}
+                      onMouseLeave={e => e.currentTarget.style.background = "none"}
+                    >
+                      <Pencil size={15} />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -613,6 +653,42 @@ function SuppliersTab() {
           pageSize={SUPPLIERS_PAGE_SIZE}
           onPrev={() => setPage(p => Math.max(1, p - 1))}
           onNext={() => setPage(p => Math.min(totalPages, p + 1))}
+        />
+      )}
+
+      {editingSupplier && (
+        <EditSupplierModal
+          supplier={editingSupplier}
+          isNew={false}
+          onClose={() => setEditingSupplier(null)}
+          onSaved={() => {
+            setEditingSupplier(null);
+            fetchSuppliers();
+          }}
+        />
+      )}
+
+      {isCreatingSupplier && (
+        <EditSupplierModal
+          supplier={{
+            vendorCode: "",
+            supplierName: "",
+            productType: "both",
+            isActive: true,
+          }}
+          isNew={true}
+          onClose={() => setIsCreatingSupplier(false)}
+          onSaved={() => {
+            setIsCreatingSupplier(false);
+            fetchSuppliers();
+          }}
+        />
+      )}
+
+      {isUploadingSupplier && (
+        <SupplierUploadModal
+          onClose={() => setIsUploadingSupplier(false)}
+          onSaved={() => fetchSuppliers()}
         />
       )}
     </div>

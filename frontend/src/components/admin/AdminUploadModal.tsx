@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, type CSSProperties } from "react";
-import { Upload, X, FileSpreadsheet, Calendar, CheckCircle, AlertTriangle, ChevronRight } from "lucide-react";
+import { Upload, X, FileSpreadsheet, Calendar, CheckCircle, AlertTriangle, ChevronRight, Download } from "lucide-react";
 import { authFetch } from "@/utils/api";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB, matches the UI's stated limit
@@ -131,6 +131,23 @@ export default function AdminUploadModal({ onClose }: { onClose: () => void }) {
     }
   }
 
+  async function downloadTemplate() {
+    try {
+      const XLSX = await import("xlsx");
+      const headers = [
+        "Vendor Code", "Supplier Name", "TAX_ID", "Product Type", 
+        "Category", "Function_Owner", "Job Value THB", "PTA Approve Date", 
+        "Buyer Name", "Buyer Email", "Evaluator Name", "Evaluator Email"
+      ];
+      const ws = XLSX.utils.aoa_to_sheet([headers]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Template");
+      XLSX.writeFile(wb, "Supplier_Eval_Template.xlsx");
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
   return (
     <div style={OVERLAY} onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div style={MODAL}>
@@ -202,6 +219,12 @@ export default function AdminUploadModal({ onClose }: { onClose: () => void }) {
                       {file ? file.name : "คลิกหรือลากไฟล์มาวาง"}
                     </div>
                     <div style={{ fontSize: 12, color: "#aaa" }}>.xlsx, .xls, .csv (สูงสุด 10 MB)</div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); downloadTemplate(); }}
+                      style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 6, background: "#fff", border: "1px solid #1b5e20", color: "#1b5e20", padding: "6px 12px", borderRadius: 6, fontSize: 12, cursor: "pointer", fontFamily: "Sarabun, sans-serif", fontWeight: 700 }}
+                    >
+                      <Download size={14} /> ดาวน์โหลดเทมเพลต
+                    </button>
                     <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }}
                       onChange={(e) => handleFileSelect(e.target.files?.[0])} />
                   </div>
