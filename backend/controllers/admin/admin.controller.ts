@@ -919,9 +919,172 @@ async function listSuppliersAdmin(req: Request, res: Response) {
     res.status(500).json({ message: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 }
+// ── PATCH /api/admin/suppliers/:vendorCode ─────────────────────
+async function updateSupplierAdmin(req: Request, res: Response) {
+  const { vendorCode } = req.params;
+  const {
+    supplierName, productType, taxId, category, functionOwner, jobValueThb,
+    ptaApproveDate, buyerName, buyerEmail, evaluatorName, evaluatorEmail,
+    isActive
+  } = req.body;
+
+  try {
+    const result = await pool.query(`
+      UPDATE "SPES_suppliers" SET
+        supplier_name = COALESCE($1, supplier_name),
+        product_type = COALESCE($2, product_type),
+        tax_id = COALESCE($3, tax_id),
+        category = COALESCE($4, category),
+        function_owner = COALESCE($5, function_owner),
+        job_value_thb = COALESCE($6, job_value_thb),
+        pta_approve_date = COALESCE($7, pta_approve_date),
+        buyer_name = COALESCE($8, buyer_name),
+        buyer_email = COALESCE($9, buyer_email),
+        evaluator_name = COALESCE($10, evaluator_name),
+        evaluator_email = COALESCE($11, evaluator_email),
+        is_active = COALESCE($12, is_active),
+        updated_at = NOW()
+      WHERE vendor_code = $13
+      RETURNING vendor_code
+    `, [
+      supplierName, productType, taxId, category, functionOwner, jobValueThb,
+      ptaApproveDate, buyerName, buyerEmail, evaluatorName, evaluatorEmail,
+      isActive, vendorCode
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'ไม่พบ Supplier' });
+    }
+
+    res.json({ message: 'อัปเดตข้อมูล Supplier สำเร็จ' });
+  } catch (err: any) {
+    console.error('PATCH /api/admin/suppliers/:vendorCode error:', err);
+    res.status(500).json({ message: 'อัปเดตข้อมูลไม่สำเร็จ' });
+  }
+}
+
+// ── POST /api/admin/suppliers ─────────────────────
+async function createSupplierAdmin(req: Request, res: Response) {
+  const {
+    vendorCode, supplierName, productType, taxId, category, functionOwner, jobValueThb,
+    ptaApproveDate, buyerName, buyerEmail, evaluatorName, evaluatorEmail,
+    isActive
+  } = req.body;
+
+  if (!vendorCode || !supplierName) {
+    return res.status(400).json({ message: 'กรุณาระบุ Vendor Code และ Supplier Name' });
+  }
+
+  try {
+    const result = await pool.query(`
+      INSERT INTO "SPES_suppliers" (
+        vendor_code, supplier_name, product_type, tax_id, category, function_owner,
+        job_value_thb, pta_approve_date, buyer_name, buyer_email, evaluator_name, evaluator_email,
+        is_active
+      ) VALUES (
+        $1, $2, COALESCE($3, 'both'), $4, $5, $6,
+        $7, $8, $9, $10, $11, $12,
+        COALESCE($13, true)
+      ) RETURNING vendor_code
+    `, [
+      vendorCode, supplierName, productType, taxId, category, functionOwner,
+      jobValueThb, ptaApproveDate, buyerName, buyerEmail, evaluatorName, evaluatorEmail,
+      isActive
+    ]);
+
+    res.status(201).json({ message: 'สร้าง Supplier สำเร็จ', vendorCode: result.rows[0].vendor_code });
+  } catch (err: any) {
+    console.error('POST /api/admin/suppliers error:', err);
+    if (err.code === '23505') {
+      return res.status(400).json({ message: 'Vendor Code นี้มีอยู่ในระบบแล้ว' });
+    }
+    res.status(500).json({ message: 'สร้างข้อมูลไม่สำเร็จ' });
+  }
+}
+
+// ── POST /api/admin/suppliers/upload ────────────────
+async function uploadSuppliers(req: RequestWithFile, res: Response) {
+  if (!req.file) return res.status(400).json({ message: 'กรุณาแนบไฟล์' });
+
+  let rows;
+  try {
+    rows = parseFile(req.file.buffer, req.file.originalname);
+  } catch (e: any) {
+    return res.status(400).json({ message: 'ไม่สามารถอ่านไฟล์ได้', error: e.message });
+  }
+
+  if (rows.length === 0) return res.status(400).json({ message: 'ไฟล์ไม่มีข้อมูล' });
+
+  const summary = { processed: 0, skipped: 0, warnings: [] as string[] };
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    for (const row of rows) {
+      // The columns should match the expected Excel template or common names
+      const taxId        = String(norm(row, 'TAX_ID') || norm(row, 'Tax ID') || '').trim();
+      const vendorCodeRaw = String(norm(row, 'Vendor Code') || norm(row, 'Vendor_Code') || '').trim();
+      const supplierName = String(norm(row, 'Supplier Name') || norm(row, 'Supplier_Name') || '').trim();
+      const productType  = String(norm(row, 'Product Type') || norm(row, 'Product_Type') || 'both').trim();
+      const category     = String(norm(row, 'Category') || '').trim();
+      const fnOwner      = String(norm(row, 'Function_Owner') || norm(row, 'Function Owner') || '').trim();
+      const jobValueRaw  = norm(row, 'Job Value THB') || norm(row, 'Job_Value_THB');
+      const jobValue     = jobValueRaw != null ? parseFloat(jobValueRaw) : null;
+      const ptaRaw       = norm(row, 'PTA Approve Date') || norm(row, 'PTA_Approve_Date');
+      const ptaDate      = toDate(ptaRaw);
+      const buyerName    = String(norm(row, 'Buyer Name') || norm(row, 'Buyer_Name') || '').trim();
+      const buyerEmail   = String(norm(row, 'Buyer Email') || norm(row, 'Buyer_Email') || '').trim().toLowerCase();
+      const evalName     = String(norm(row, 'Evaluator Name') || norm(row, 'Evaluator_Name') || '').trim();
+      const evalEmail    = String(norm(row, 'Evaluator Email') || norm(row, 'Evaluator_Email') || '').trim().toLowerCase();
+      
+      const vendorCode = vendorCodeRaw || taxId || supplierName.substring(0, 50);
+
+      if (!vendorCode || !supplierName) { 
+        summary.skipped++; 
+        if (!vendorCode && !supplierName) continue;
+        summary.warnings.push(`ข้ามแถวที่ไม่มี Vendor Code และ Supplier Name`);
+        continue; 
+      }
+
+      await client.query(`
+        INSERT INTO "SPES_suppliers" (vendor_code, supplier_name, product_type, tax_id, category,
+          function_owner, job_value_thb, pta_approve_date, buyer_name, buyer_email,
+          evaluator_name, evaluator_email, is_active)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, true)
+        ON CONFLICT (vendor_code) DO UPDATE SET
+          supplier_name   = EXCLUDED.supplier_name,
+          product_type    = EXCLUDED.product_type,
+          tax_id          = COALESCE(EXCLUDED.tax_id, "SPES_suppliers".tax_id),
+          category        = EXCLUDED.category,
+          function_owner  = EXCLUDED.function_owner,
+          job_value_thb   = EXCLUDED.job_value_thb,
+          pta_approve_date = COALESCE(EXCLUDED.pta_approve_date, "SPES_suppliers".pta_approve_date),
+          buyer_name      = EXCLUDED.buyer_name,
+          buyer_email     = EXCLUDED.buyer_email,
+          evaluator_name  = EXCLUDED.evaluator_name,
+          evaluator_email = EXCLUDED.evaluator_email,
+          updated_at      = NOW()
+      `, [vendorCode, supplierName, productType, taxId || null,
+          category || null, fnOwner || null, jobValue, ptaDate || null,
+          buyerName || null, buyerEmail || null, evalName || null, evalEmail || null]);
+
+      summary.processed++;
+    }
+
+    await client.query('COMMIT');
+    res.json({ message: 'อัพโหลดสำเร็จ', ...summary });
+  } catch (err: any) {
+    await client.query('ROLLBACK');
+    console.error('POST /api/admin/suppliers/upload error:', err);
+    res.status(500).json({ message: 'อัพโหลดไม่สำเร็จ', error: err.message });
+  } finally {
+    client.release();
+  }
+}
 
 module.exports = {
   uploadPrePost, uploadPeriodic, createAdHocEvaluation, listTasks, remindTask, updateTask,
   deleteSession, remindAllTasks, bulkDeleteSessions, listBatches, listServiceEvaluations,
-  listSuppliersAdmin,
+  listSuppliersAdmin, updateSupplierAdmin, createSupplierAdmin, uploadSuppliers,
 };

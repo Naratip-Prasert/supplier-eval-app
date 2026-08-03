@@ -14,7 +14,7 @@ const requireRole = require('../../middleware/requireRole');
 const {
   uploadPrePost, uploadPeriodic, createAdHocEvaluation, listTasks, remindTask, updateTask,
   deleteSession, remindAllTasks, bulkDeleteSessions, listBatches, listServiceEvaluations,
-  listSuppliersAdmin,
+  listSuppliersAdmin, updateSupplierAdmin, createSupplierAdmin, uploadSuppliers,
 } = require('../../controllers/admin/admin.controller');
 
 router.use(requireRole('ADMIN'));
@@ -41,5 +41,8 @@ router.post('/sessions/bulk-delete', bulkDeleteSessions);
 router.get('/batches', listBatches);
 router.get('/service-evaluations', listServiceEvaluations);
 router.get('/suppliers', listSuppliersAdmin);
+router.post('/suppliers', createSupplierAdmin);
+router.patch('/suppliers/:vendorCode', updateSupplierAdmin);
+router.post('/suppliers/upload', upload.single('file'), uploadSuppliers);
 
 module.exports = router;
