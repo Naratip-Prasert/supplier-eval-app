@@ -13,7 +13,7 @@ const OVERLAY: CSSProperties = {
   zIndex: 1000, fontFamily: "Sarabun, sans-serif",
 };
 const MODAL: CSSProperties = {
-  background: "#fff", borderRadius: 14, width: "100%", maxWidth: 560,
+  background: "#fff", borderRadius: 14, width: "100%", maxWidth: 800,
   maxHeight: "90vh", overflowY: "auto", boxShadow: "0 8px 40px rgba(0,0,0,0.18)",
   margin: 16,
 };
@@ -45,37 +45,49 @@ interface UploadResult {
   warnings?: string[];
 }
 
+interface ValidateResultRow {
+  vendorCode: string;
+  taxId: string;
+  supplierName: string;
+  buyerEmail: string;
+  evalEmail: string;
+  isValid: boolean;
+  errors: string[];
+}
+
 export default function AdminUploadModal({ onClose }: { onClose: () => void }) {
-  const [mode,       setMode]       = useState<"pre_post" | "periodic" | null>(null);
+  const [mode, setMode] = useState<"pre_post" | "periodic" | null>(null);
   const [periodicType, setPeriodicType] = useState("half_year");
-  const [file,       setFile]       = useState<File | null>(null);
-  const [preview,    setPreview]    = useState<any[][] | null>(null);
-  const [loading,    setLoading]    = useState(false);
-  const [result,     setResult]     = useState<UploadResult | null>(null);
-  const [dragOver,   setDragOver]   = useState(false);
-  const [fileError,  setFileError]  = useState<string | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<any[][] | null>(null);
+  const [validateResult, setValidateResult] = useState<{ rows: ValidateResultRow[], canUpload: boolean } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [result, setResult] = useState<UploadResult | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // กัน setState หลัง component unmount (เช่นปิด modal ระหว่าง upload ยังไม่เสร็จ)
-  // Reset to true on mount (not just declare it via useRef's initial value)
-  // — React 18 StrictMode double-invokes effects in dev (mount → cleanup →
-  // mount again), so the cleanup below fires once "for free" right after
-  // the first mount. Without this line, mountedRef.current is permanently
-  // false from that point on even though the component is genuinely
-  // mounted, silently skipping every setResult/setLoading call forever.
   const mountedRef = useRef(true);
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
 
+  useEffect(() => {
+    // Reset file if periodicType changes, so they have to re-validate
+    setFile(null);
+    setPreview(null);
+    setValidateResult(null);
+    setFileError(null);
+  }, [periodicType, mode]);
+
   function handleFileSelect(f: File | null | undefined) {
     if (!f) return;
     setResult(null);
     setPreview(null);
+    setValidateResult(null);
 
-    // Drag-and-drop bypasses the <input accept> filter entirely, so both
-    // checks need to happen here too, not just rely on the file picker.
     if (!ALLOWED_EXT.test(f.name)) {
       setFile(null);
       setFileError("รองรับเฉพาะไฟล์ .xlsx, .xls, .csv");
@@ -89,23 +101,64 @@ export default function AdminUploadModal({ onClose }: { onClose: () => void }) {
 
     setFileError(null);
     setFile(f);
-    // Preview: read first 5 rows — xlsx is dynamically imported here (not at
-    // module top level) so its ~1MB bundle only loads once a file is
-    // actually picked, not on every page that happens to render this modal.
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      try {
-        const XLSX = await import("xlsx");
-        const wb = XLSX.read(new Uint8Array(e.target!.result as ArrayBuffer), { type: "array" });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as any[][];
-        setPreview(rows.slice(0, 6));
-      } catch { setPreview(null); }
-    };
-    // ไฟล์อ่านไม่ได้จริงๆ (เสีย/สิทธิ์ถูกปฏิเสธ ฯลฯ) ต้องบอก error ให้เห็น
-    // ไม่งั้น modal จะค้างไม่มี preview แล้วก็ไม่มีข้อความอะไรบอกว่าทำไม
-    reader.onerror = () => setFileError("ไม่สามารถอ่านไฟล์ได้ ลองเลือกไฟล์ใหม่อีกครั้ง");
-    reader.readAsArrayBuffer(f);
+
+    if (mode === "periodic") {
+      setValidating(true);
+      const fd = new FormData();
+      fd.append("file", f);
+      fd.append("evalType", periodicType);
+
+      authFetch("/api/admin/upload/validate-periodic", { method: "POST", body: fd })
+        .then(res => res.json())
+        .then(data => {
+          if (!mountedRef.current) return;
+          if (data.error || (data.message && !data.rows)) {
+            setFileError(data.message || "ตรวจสอบไฟล์ไม่สำเร็จ");
+            setFile(null);
+          } else {
+            setValidateResult(data);
+          }
+        })
+        .catch(e => {
+          if (!mountedRef.current) return;
+          setFileError("ตรวจสอบไฟล์ไม่สำเร็จ: " + e.message);
+          setFile(null);
+        })
+        .finally(() => {
+          if (mountedRef.current) setValidating(false);
+        });
+      return;
+    }
+
+    if (mode === "pre_post") {
+      setValidating(true);
+      const fd = new FormData();
+      fd.append("file", f);
+      authFetch("/api/admin/upload/validate-pre-post", { method: "POST", body: fd })
+        .then(async (res) => {
+          const data = await res.json();
+          if (!mountedRef.current) return;
+          if (res.ok) {
+            setValidateResult({ rows: data.rows || [], canUpload: data.canUpload });
+            if (!data.canUpload) {
+              setFileError("พบข้อผิดพลาดในบางแถว (ดูรายละเอียดด้านล่าง)");
+              // don't clear file, let user see table
+            }
+          } else {
+            setFileError(data.message || "ตรวจสอบไฟล์ไม่สำเร็จ");
+            setFile(null);
+          }
+        })
+        .catch(e => {
+          if (!mountedRef.current) return;
+          setFileError("ตรวจสอบไฟล์ไม่สำเร็จ: " + e.message);
+          setFile(null);
+        })
+        .finally(() => {
+          if (mountedRef.current) setValidating(false);
+        });
+      return;
+    }
   }
 
   async function handleUpload() {
@@ -120,7 +173,7 @@ export default function AdminUploadModal({ onClose }: { onClose: () => void }) {
         : `/api/admin/upload/periodic`;
       if (mode === "periodic") fd.append("evalType", periodicType);
 
-      const res  = await authFetch(url, { method: "POST", body: fd });
+      const res = await authFetch(url, { method: "POST", body: fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Upload failed");
       if (mountedRef.current) setResult({ ok: true, ...data });
@@ -135,9 +188,9 @@ export default function AdminUploadModal({ onClose }: { onClose: () => void }) {
     try {
       const XLSX = await import("xlsx");
       const headers = [
-        "Vendor Code", "Supplier Name", "TAX_ID", "Product Type", 
-        "Category", "Function_Owner", "Job Value THB", "PTA Approve Date", 
-        "Buyer Name", "Buyer Email", "Evaluator Name", "Evaluator Email"
+        "Vendor Code", "Supplier Name", "TAX_ID", "Product Type",
+        "Category", "Function_Owner", "Job Value THB", "PTA Approve Date",
+        "Buyer Name", "Buyer Email", "Evaluator Name", "Evaluator Email", "Evaluator Employee No"
       ];
       const ws = XLSX.utils.aoa_to_sheet([headers]);
       const wb = XLSX.utils.book_new();
@@ -148,11 +201,13 @@ export default function AdminUploadModal({ onClose }: { onClose: () => void }) {
     }
   }
 
+  const thStyle: CSSProperties = { padding: "4px 8px", background: "#e8f5e9", border: "1px solid #ddd", whiteSpace: "nowrap" };
+  const tdStyle: CSSProperties = { padding: "3px 8px", border: "1px solid #eee", whiteSpace: "nowrap", maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis" };
+
   return (
     <div style={OVERLAY} onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div style={MODAL}>
-        {/* Header */}
-        <div style={{ background: "#1b5e20", borderRadius: "14px 14px 0 0", padding: "18px 24px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ background: "#1b5e20", padding: "18px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
           <span style={{ color: "#fff", fontWeight: 700, fontSize: 16 }}>จัดการงานประเมิน</span>
           <button onClick={onClose} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", display: "flex" }}>
             <X size={20} />
@@ -160,19 +215,18 @@ export default function AdminUploadModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div style={{ padding: 24 }}>
-          {/* Step 1: Choose mode */}
           {!result && (
             <>
               <p style={{ margin: "0 0 16px", fontSize: 14, color: "#555" }}>เลือกประเภทการจัดการประเมิน</p>
               <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
-                <div style={CARD(mode === "pre_post")} onClick={() => { setMode("pre_post"); setFile(null); setPreview(null); setFileError(null); }}>
+                <div style={CARD(mode === "pre_post")} onClick={() => setMode("pre_post")}>
                   <FileSpreadsheet size={28} color="#1b5e20" style={{ marginBottom: 8 }} />
                   <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Pre / Post Evaluation</div>
                   <div style={{ fontSize: 12, color: "#777", lineHeight: 1.5 }}>
                     Supplier ใหม่ (Pre) หรือหลัง PTA 90 วัน (Post)<br />Job Value &gt; 1,000,000 บาท
                   </div>
                 </div>
-                <div style={CARD(mode === "periodic")} onClick={() => { setMode("periodic"); setFile(null); setPreview(null); setFileError(null); }}>
+                <div style={CARD(mode === "periodic")} onClick={() => setMode("periodic")}>
                   <Calendar size={28} color="#1565c0" style={{ marginBottom: 8 }} />
                   <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Half-Year / Yearly</div>
                   <div style={{ fontSize: 12, color: "#777", lineHeight: 1.5 }}>
@@ -181,7 +235,6 @@ export default function AdminUploadModal({ onClose }: { onClose: () => void }) {
                 </div>
               </div>
 
-              {/* Periodic sub-type */}
               {mode === "periodic" && (
                 <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
                   {[{ v: "half_year", label: "Half-Year (มิถุนายน)" }, { v: "yearly", label: "Yearly (ธันวาคม)" }].map(opt => (
@@ -199,7 +252,6 @@ export default function AdminUploadModal({ onClose }: { onClose: () => void }) {
                 </div>
               )}
 
-              {/* File upload area */}
               {mode && (
                 <>
                   <div
@@ -239,49 +291,47 @@ export default function AdminUploadModal({ onClose }: { onClose: () => void }) {
                     </div>
                   )}
 
-                  {/* Preview table */}
-                  {preview && preview.length > 1 && (
-                    <div style={{ marginBottom: 16, overflowX: "auto" }}>
-                      <div style={{ fontSize: 12, color: "#777", marginBottom: 6 }}>ตัวอย่างข้อมูล (5 แถวแรก)</div>
+                  {validating && <div style={{ marginBottom: 16, color: "#555", fontSize: 13, textAlign: "center" }}>กำลังตรวจสอบไฟล์...</div>}
+
+                  {validateResult && validateResult.rows.length > 0 && (
+                    <div style={{ marginBottom: 16, overflow: "auto", maxHeight: 200 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: validateResult.canUpload ? "#2e7d32" : "#c62828", marginBottom: 6 }}>
+                        ผลการตรวจสอบ ({validateResult.canUpload ? "✅ พร้อมอัพโหลด" : "❌ พบข้อผิดพลาด กรุณาแก้ไขไฟล์แล้วอัพโหลดใหม่"})
+                      </div>
                       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
-                        <thead>
-                          <tr>{preview[0].map((h, i) => (
-                            <th key={i} style={{ padding: "4px 8px", background: "#e8f5e9", border: "1px solid #ddd", whiteSpace: "nowrap" }}>{h}</th>
-                          ))}</tr>
+                        <thead style={{ position: "sticky", top: 0, zIndex: 1 }}>
+                          <tr>
+                            <th style={thStyle}>Vendor Code</th>
+                            <th style={thStyle}>Supplier Name</th>
+                            <th style={thStyle}>TAX ID</th>
+                            <th style={thStyle}>Buyer</th>
+                            <th style={thStyle}>Evaluator</th>
+                            <th style={thStyle}>สถานะ</th>
+                          </tr>
                         </thead>
                         <tbody>
-                          {preview.slice(1).map((row, i) => (
-                            <tr key={i}>{row.map((cell, j) => (
-                              <td key={j} style={{ padding: "3px 8px", border: "1px solid #eee", whiteSpace: "nowrap", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }}>
-                                {cell != null ? String(cell) : ""}
+                          {validateResult.rows.map((r, i) => (
+                            <tr key={i} style={{ background: r.isValid ? "#fff" : "#ffebee" }}>
+                              <td style={tdStyle}>{r.vendorCode}</td>
+                              <td style={tdStyle}>{r.supplierName}</td>
+                              <td style={tdStyle}>{r.taxId}</td>
+                              <td style={tdStyle}>{r.buyerEmail}</td>
+                              <td style={tdStyle}>{r.evalEmail}</td>
+                              <td style={{ ...tdStyle, color: r.isValid ? "#2e7d32" : "#c62828", whiteSpace: "normal", minWidth: 200 }}>
+                                {r.isValid ? "ผ่าน" : r.errors.map((err, i) => <div key={i}>• {err}</div>)}
                               </td>
-                            ))}</tr>
+                            </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
                   )}
 
-                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-                    <button style={BTN_SECONDARY} onClick={onClose}>ยกเลิก</button>
-                    <button
-                      style={{ ...BTN_PRIMARY, opacity: (!file || loading) ? 0.6 : 1 }}
-                      disabled={!file || loading}
-                      onClick={handleUpload}
-                    >
-                      {loading ? "กำลังประมวลผล…" : (
-                        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <ChevronRight size={16} /> อัพโหลดและสร้างงานประเมิน
-                        </span>
-                      )}
-                    </button>
-                  </div>
                 </>
               )}
             </>
           )}
 
-          {/* Result */}
           {result && (
             <div style={{ textAlign: "center", padding: "8px 0" }}>
               {result.ok ? (
@@ -316,6 +366,26 @@ export default function AdminUploadModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
         </div>
+
+        {!result && mode && (
+          <div style={{ padding: "16px 24px", borderTop: "1px solid #eee", display: "flex", justifyContent: "flex-end", gap: 10, background: "#fafafa", flexShrink: 0 }}>
+            <button style={BTN_SECONDARY} onClick={onClose}>ยกเลิก</button>
+            <button
+              style={{
+                ...BTN_PRIMARY,
+                opacity: (!file || loading || validating || (!validateResult || !validateResult.canUpload)) ? 0.6 : 1
+              }}
+              disabled={!file || loading || validating || (!validateResult || !validateResult.canUpload)}
+              onClick={handleUpload}
+            >
+              {loading ? "กำลังประมวลผล…" : (
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <ChevronRight size={16} /> อัพโหลดและสร้างงานประเมิน
+                </span>
+              )}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

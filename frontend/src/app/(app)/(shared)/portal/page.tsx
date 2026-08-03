@@ -30,7 +30,7 @@ interface ModuleDef {
 }
 
 const MODULE_GROUPS: { key: "daily" | "system"; label: string }[] = [
-  { key: "daily",  label: "งานประจำวัน" },
+  { key: "daily", label: "งานประจำวัน" },
   { key: "system", label: "ภาพรวม / ระบบ" },
 ];
 
@@ -81,21 +81,21 @@ const MODULES: ModuleDef[] = [
     buttonLabel: "ให้คะแนน",
     group: "daily",
   },
-  {
-    key: "dashboard",
-    icon: BarChart2,
-    title: "Dashboard",
-    titleEn: "Analytics & Reports",
-    desc: "สรุปผลการประเมินภาพรวม เปรียบเทียบซัพพลายเออร์ และแนวโน้มคะแนน",
-    color: "#6a1b9a",
-    bg: "linear-gradient(135deg, #f3e5f5 0%, #fce4ec 100%)",
-    border: "#ce93d8",
-    accent: "#7b1fa2",
-    roles: ["USER", "GCP", "ADMIN"],
-    available: false,
-    buttonLabel: "เร็วๆ นี้",
-    group: "system",
-  },
+  // {
+  //   key: "dashboard",
+  //   icon: BarChart2,
+  //   title: "Dashboard",
+  //   titleEn: "Analytics & Reports",
+  //   desc: "สรุปผลการประเมินภาพรวม เปรียบเทียบซัพพลายเออร์ และแนวโน้มคะแนน",
+  //   color: "#6a1b9a",
+  //   bg: "linear-gradient(135deg, #f3e5f5 0%, #fce4ec 100%)",
+  //   border: "#ce93d8",
+  //   accent: "#7b1fa2",
+  //   roles: ["USER", "GCP", "ADMIN"],
+  //   available: false,
+  //   buttonLabel: "เร็วๆ นี้",
+  //   group: "system",
+  // },
   {
     key: "admin",
     icon: Shield,
@@ -129,19 +129,19 @@ const MODULES: ModuleDef[] = [
 ];
 
 const ROLE_BADGE: Record<string, { label: string; bg: string; color: string }> = {
-  USER:       { label: "USER — ผู้ใช้งานทั่วไป",        bg: "#e8f5e9", color: "#1b5e20" },
-  GCP:        { label: "GCP — เจ้าหน้าที่จัดซื้อ",      bg: "#e3f2fd", color: "#1565c0" },
-  ADMIN:      { label: "Admin — Administrator",       bg: "#fce4ec", color: "#880e4f" },
-  SUPERVISOR: { label: "Supervisor — ผู้อนุมัติ",       bg: "#f3e5f5", color: "#6a1b9a" },
+  USER: { label: "USER — ผู้ใช้งานทั่วไป", bg: "#e8f5e9", color: "#1b5e20" },
+  GCP: { label: "GCP — เจ้าหน้าที่จัดซื้อ", bg: "#e3f2fd", color: "#1565c0" },
+  ADMIN: { label: "Admin — Administrator", bg: "#fce4ec", color: "#880e4f" },
+  SUPERVISOR: { label: "Supervisor — ผู้อนุมัติ", bg: "#f3e5f5", color: "#6a1b9a" },
 };
 
 // Sidebar background per role — same hue family as that role's badge above,
 // so the sidebar itself hints at "which hat you're wearing" instead of a
 // neutral dark panel for everyone.
 const ROLE_SIDEBAR: Record<string, string> = {
-  USER:       "linear-gradient(180deg, #1b5e20 0%, #133d16 100%)",
-  GCP:        "linear-gradient(180deg, #0d47a1 0%, #0a2f6b 100%)",
-  ADMIN:      "linear-gradient(180deg, #ad1457 0%, #6d0e37 100%)",
+  USER: "linear-gradient(180deg, #1b5e20 0%, #133d16 100%)",
+  GCP: "linear-gradient(180deg, #0d47a1 0%, #0a2f6b 100%)",
+  ADMIN: "linear-gradient(180deg, #ad1457 0%, #6d0e37 100%)",
   SUPERVISOR: "linear-gradient(180deg, #6a1b9a 0%, #421263 100%)",
 };
 
@@ -175,8 +175,8 @@ interface ReturnedTask {
 export default function PortalPage() {
   const { user: authUser, profilePic, logout } = useAuth();
   const router = useRouter();
-  const role    = authUser?.role ?? "USER";
-  const badge   = ROLE_BADGE[role] ?? ROLE_BADGE.USER;
+  const role = authUser?.role ?? "USER";
+  const badge = ROLE_BADGE[role] ?? ROLE_BADGE.USER;
   const sidebarBg = ROLE_SIDEBAR[role] ?? ROLE_SIDEBAR.USER;
 
   const { showConfirm, ModalEl } = useModal();
@@ -193,7 +193,7 @@ export default function PortalPage() {
     authFetch("/api/evaluations/my-tasks")
       .then(r => r.ok ? r.json() : [])
       .then(data => setReturnedTasks(Array.isArray(data) ? data.filter((t: ReturnedTask) => t.sessionStatus === "returned") : []))
-      .catch(() => {});
+      .catch(() => { });
   }, [role]);
 
   // Cross-eval #4 (database/CROSS_EVALUATION_SPEC.md) — how many completed
@@ -204,7 +204,7 @@ export default function PortalPage() {
     authFetch("/api/service-evaluations/pending")
       .then(r => r.ok ? r.json() : [])
       .then(data => setPendingServiceEval(Array.isArray(data) ? data : []))
-      .catch(() => {});
+      .catch(() => { });
   }, [role]);
 
   const modules = MODULES
@@ -221,10 +221,10 @@ export default function PortalPage() {
 
   const handleModule = (mod: ModuleDef) => {
     if (!mod.available) return;
-    if (mod.key === "evaluate")    goEvaluate("active");
-    if (mod.key === "history")     router.push("/history");
-    if (mod.key === "admin")       router.push("/admin");
-    if (mod.key === "supervisor")  router.push("/supervisor");
+    if (mod.key === "evaluate") goEvaluate("active");
+    if (mod.key === "history") router.push("/history");
+    if (mod.key === "admin") router.push("/admin");
+    if (mod.key === "supervisor") router.push("/supervisor");
     if (mod.key === "serviceEval") router.push("/service-eval");
   };
 
@@ -344,120 +344,120 @@ export default function PortalPage() {
 
       {/* ── Main content ── */}
       <div style={{ flex: 1, minWidth: 0 }}>
-      <div style={{ maxWidth: 940, margin: "0 auto", padding: "32px 24px 48px" }}>
+        <div style={{ maxWidth: 940, margin: "0 auto", padding: "32px 24px 48px" }}>
 
-        {/* ── Action-needed zone — combines every "you must do something"
+          {/* ── Action-needed zone — combines every "you must do something"
              signal (returned tasks, pending Buyer ratings) into one place
              instead of a separate banner per condition, so a USER with
              both doesn't have to notice two differently-styled alerts. ── */}
-        {(returnedTasks.length > 0 || pendingServiceEval.length > 0) && (
-          <div style={{
-            background: "#fff3e0", border: "1.5px solid #ffcc80", borderRadius: 16,
-            marginBottom: 28, overflow: "hidden",
-          }}>
+          {(returnedTasks.length > 0 || pendingServiceEval.length > 0) && (
             <div style={{
-              fontSize: 12, fontWeight: 700, color: "#bf6c00", textTransform: "uppercase",
-              letterSpacing: 0.5, padding: "12px 20px 4px",
+              background: "#fff3e0", border: "1.5px solid #ffcc80", borderRadius: 16,
+              marginBottom: 28, overflow: "hidden",
             }}>
-              ต้องดำเนินการ
+              <div style={{
+                fontSize: 12, fontWeight: 700, color: "#bf6c00", textTransform: "uppercase",
+                letterSpacing: 0.5, padding: "12px 20px 4px",
+              }}>
+                ต้องดำเนินการ
+              </div>
+
+              {returnedTasks.length > 0 && (
+                <div
+                  onClick={() => goEvaluate("returned")}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 14, padding: "12px 20px",
+                    cursor: "pointer", borderTop: "1px solid rgba(191,108,0,0.14)",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.5)"}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                >
+                  <div style={{
+                    width: 36, height: 36, borderRadius: "50%", background: "#fb8c00", flexShrink: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    <AlertTriangle size={18} color="#fff" />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: "#e65100" }}>
+                      มีงานถูกส่งคืนจาก Supervisor {returnedTasks.length} รายการ — ต้องประเมินใหม่
+                    </div>
+                    <div style={{ fontSize: 12, color: "#bf6c00", marginTop: 2 }}>
+                      {returnedTasks.map(t => t.supplierName).join(", ")}
+                    </div>
+                  </div>
+                  <ArrowRight size={18} style={{ color: "#e65100", flexShrink: 0 }} />
+                </div>
+              )}
+
+              {pendingServiceEval.length > 0 && (
+                <div
+                  onClick={() => router.push("/service-eval")}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 14, padding: "12px 20px",
+                    cursor: "pointer", borderTop: returnedTasks.length > 0 ? "1px solid rgba(191,108,0,0.14)" : "none",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.5)"}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                >
+                  <div style={{
+                    width: 36, height: 36, borderRadius: "50%", background: "#ef6c00", flexShrink: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    <Star size={18} color="#fff" />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: "#e65100" }}>
+                      รอให้คะแนน Buyer {pendingServiceEval.length} รายการ
+                    </div>
+                    <div style={{ fontSize: 12, color: "#bf6c00", marginTop: 2 }}>
+                      จากงานประเมินที่ได้รับการอนุมัติแล้ว
+                    </div>
+                  </div>
+                  <ArrowRight size={18} style={{ color: "#e65100", flexShrink: 0 }} />
+                </div>
+              )}
             </div>
+          )}
 
-            {returnedTasks.length > 0 && (
-              <div
-                onClick={() => goEvaluate("returned")}
-                style={{
-                  display: "flex", alignItems: "center", gap: 14, padding: "12px 20px",
-                  cursor: "pointer", borderTop: "1px solid rgba(191,108,0,0.14)",
-                }}
-                onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.5)"}
-                onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-              >
-                <div style={{
-                  width: 36, height: 36, borderRadius: "50%", background: "#fb8c00", flexShrink: 0,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}>
-                  <AlertTriangle size={18} color="#fff" />
+          {/* ── Module cards, grouped by section ── */}
+          {MODULE_GROUPS.map(g => {
+            const groupModules = modules.filter(m => m.group === g.key);
+            if (groupModules.length === 0) return null;
+            return (
+              <div key={g.key} style={{ marginBottom: 28 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: "#8a978a", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 14 }}>
+                  {g.label}
                 </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: "#e65100" }}>
-                    มีงานถูกส่งคืนจาก Supervisor {returnedTasks.length} รายการ — ต้องประเมินใหม่
-                  </div>
-                  <div style={{ fontSize: 12, color: "#bf6c00", marginTop: 2 }}>
-                    {returnedTasks.map(t => t.supplierName).join(", ")}
-                  </div>
+                <div className="portal-module-grid" style={{ display: "grid", gap: 18 }}>
+                  {groupModules.map((mod) => {
+                    const Icon = mod.icon;
+                    return (
+                      <ModuleCard
+                        key={mod.key}
+                        mod={mod}
+                        Icon={Icon}
+                        onClick={() => handleModule(mod)}
+                        badgeCount={
+                          mod.key === "evaluate" ? returnedTasks.length :
+                            mod.key === "serviceEval" ? pendingServiceEval.length : 0
+                        }
+                      />
+                    );
+                  })}
                 </div>
-                <ArrowRight size={18} style={{ color: "#e65100", flexShrink: 0 }} />
               </div>
-            )}
+            );
+          })}
 
-            {pendingServiceEval.length > 0 && (
-              <div
-                onClick={() => router.push("/service-eval")}
-                style={{
-                  display: "flex", alignItems: "center", gap: 14, padding: "12px 20px",
-                  cursor: "pointer", borderTop: returnedTasks.length > 0 ? "1px solid rgba(191,108,0,0.14)" : "none",
-                }}
-                onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.5)"}
-                onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-              >
-                <div style={{
-                  width: 36, height: 36, borderRadius: "50%", background: "#ef6c00", flexShrink: 0,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}>
-                  <Star size={18} color="#fff" />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: "#e65100" }}>
-                    รอให้คะแนน Buyer {pendingServiceEval.length} รายการ
-                  </div>
-                  <div style={{ fontSize: 12, color: "#bf6c00", marginTop: 2 }}>
-                    จากงานประเมินที่ได้รับการอนุมัติแล้ว
-                  </div>
-                </div>
-                <ArrowRight size={18} style={{ color: "#e65100", flexShrink: 0 }} />
-              </div>
-            )}
+          {/* ── Footer note ── */}
+          <div style={{
+            marginTop: 40, textAlign: "center",
+            fontSize: 12, color: "#aaa",
+          }}>
+            SPES · {new Date().getFullYear()}
           </div>
-        )}
-
-        {/* ── Module cards, grouped by section ── */}
-        {MODULE_GROUPS.map(g => {
-          const groupModules = modules.filter(m => m.group === g.key);
-          if (groupModules.length === 0) return null;
-          return (
-            <div key={g.key} style={{ marginBottom: 28 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#8a978a", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 14 }}>
-                {g.label}
-              </div>
-              <div className="portal-module-grid" style={{ display: "grid", gap: 18 }}>
-                {groupModules.map((mod) => {
-                  const Icon = mod.icon;
-                  return (
-                    <ModuleCard
-                      key={mod.key}
-                      mod={mod}
-                      Icon={Icon}
-                      onClick={() => handleModule(mod)}
-                      badgeCount={
-                        mod.key === "evaluate" ? returnedTasks.length :
-                        mod.key === "serviceEval" ? pendingServiceEval.length : 0
-                      }
-                    />
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-
-        {/* ── Footer note ── */}
-        <div style={{
-          marginTop: 40, textAlign: "center",
-          fontSize: 12, color: "#aaa",
-        }}>
-          SPES · {new Date().getFullYear()}
         </div>
-      </div>
       </div>
     </div>
   );
@@ -465,11 +465,11 @@ export default function PortalPage() {
 
 // ── Circle bg per module ─────────────────────────────────────
 const CIRCLE_BG: Record<string, string> = {
-  evaluate:    "radial-gradient(circle at 38% 35%, #f1f8e9, #a5d6a7 130%)",
+  evaluate: "radial-gradient(circle at 38% 35%, #f1f8e9, #a5d6a7 130%)",
   serviceEval: "radial-gradient(circle at 38% 35%, #fff3e0, #ffcc80 130%)",
-  history:    "radial-gradient(circle at 38% 35%, #e8f4fd, #90caf9 130%)",
-  dashboard:  "radial-gradient(circle at 38% 35%, #f8f0ff, #ce93d8 130%)",
-  admin:      "radial-gradient(circle at 38% 35%, #fff3e0, #ffab91 130%)",
+  history: "radial-gradient(circle at 38% 35%, #e8f4fd, #90caf9 130%)",
+  dashboard: "radial-gradient(circle at 38% 35%, #f8f0ff, #ce93d8 130%)",
+  admin: "radial-gradient(circle at 38% 35%, #fff3e0, #ffab91 130%)",
   supervisor: "radial-gradient(circle at 38% 35%, #f3e8fd, #b39ddb 130%)",
 };
 
@@ -478,144 +478,144 @@ const CARD_ART: Record<string, ReactNode> = {
   evaluate: (
     <svg width="82" height="82" viewBox="0 0 82 82" fill="none">
       <defs>
-        <linearGradient id="ev_body" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#81c784"/><stop offset="100%" stopColor="#2e7d32"/></linearGradient>
-        <linearGradient id="ev_chk"  x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#b9f6ca"/><stop offset="100%" stopColor="#00c853"/></linearGradient>
+        <linearGradient id="ev_body" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#81c784" /><stop offset="100%" stopColor="#2e7d32" /></linearGradient>
+        <linearGradient id="ev_chk" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#b9f6ca" /><stop offset="100%" stopColor="#00c853" /></linearGradient>
       </defs>
       {/* clipboard 3D side */}
-      <rect x="11" y="23" width="6"  height="50" rx="2" fill="#1b5e20"/>
-      <rect x="11" y="69" width="50" height="6"  rx="2" fill="#1b5e20"/>
+      <rect x="11" y="23" width="6" height="50" rx="2" fill="#1b5e20" />
+      <rect x="11" y="69" width="50" height="6" rx="2" fill="#1b5e20" />
       {/* clipboard body */}
-      <rect x="15" y="17" width="48" height="56" rx="7" fill="url(#ev_body)"/>
+      <rect x="15" y="17" width="48" height="56" rx="7" fill="url(#ev_body)" />
       {/* clip */}
-      <rect x="29" y="11" width="22" height="12" rx="6" fill="#1b5e20"/>
-      <rect x="34" y="13" width="12" height="8"  rx="4" fill="#388e3c"/>
+      <rect x="29" y="11" width="22" height="12" rx="6" fill="#1b5e20" />
+      <rect x="34" y="13" width="12" height="8" rx="4" fill="#388e3c" />
       {/* lines on clipboard */}
-      <rect x="23" y="33" width="32" height="5" rx="2.5" fill="rgba(255,255,255,0.9)"/>
-      <rect x="23" y="43" width="22" height="4" rx="2"   fill="rgba(255,255,255,0.65)"/>
-      <rect x="23" y="52" width="28" height="4" rx="2"   fill="rgba(255,255,255,0.65)"/>
-      <rect x="23" y="61" width="16" height="4" rx="2"   fill="rgba(255,255,255,0.4)"/>
+      <rect x="23" y="33" width="32" height="5" rx="2.5" fill="rgba(255,255,255,0.9)" />
+      <rect x="23" y="43" width="22" height="4" rx="2" fill="rgba(255,255,255,0.65)" />
+      <rect x="23" y="52" width="28" height="4" rx="2" fill="rgba(255,255,255,0.65)" />
+      <rect x="23" y="61" width="16" height="4" rx="2" fill="rgba(255,255,255,0.4)" />
       {/* check badge */}
-      <circle cx="61" cy="59" r="15" fill="url(#ev_chk)" stroke="white" strokeWidth="2"/>
-      <path d="M54 59l5 6 10-11" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+      <circle cx="61" cy="59" r="15" fill="url(#ev_chk)" stroke="white" strokeWidth="2" />
+      <path d="M54 59l5 6 10-11" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
       {/* gold stars */}
-      <path d="M67 14l1.3 2.7 3 .4-2.2 2.1.5 3-2.6-1.4-2.6 1.4.5-3-2.2-2.1 3-.4z" fill="#ffd740"/>
-      <path d="M13 10l1 2.1 2.3.3-1.7 1.6.4 2.3-2-1-2 1 .4-2.3-1.7-1.6 2.3-.3z" fill="#ffd740" opacity=".75"/>
+      <path d="M67 14l1.3 2.7 3 .4-2.2 2.1.5 3-2.6-1.4-2.6 1.4.5-3-2.2-2.1 3-.4z" fill="#ffd740" />
+      <path d="M13 10l1 2.1 2.3.3-1.7 1.6.4 2.3-2-1-2 1 .4-2.3-1.7-1.6 2.3-.3z" fill="#ffd740" opacity=".75" />
     </svg>
   ),
   history: (
     <svg width="82" height="82" viewBox="0 0 82 82" fill="none">
       <defs>
-        <linearGradient id="cl_face" x1=".2" y1="0" x2=".8" y2="1"><stop offset="0%" stopColor="#64b5f6"/><stop offset="100%" stopColor="#1565c0"/></linearGradient>
-        <linearGradient id="cl_cal"  x1="0"  y1="0" x2="0"  y2="1"><stop offset="0%" stopColor="#90caf9"/><stop offset="100%" stopColor="#1976d2"/></linearGradient>
+        <linearGradient id="cl_face" x1=".2" y1="0" x2=".8" y2="1"><stop offset="0%" stopColor="#64b5f6" /><stop offset="100%" stopColor="#1565c0" /></linearGradient>
+        <linearGradient id="cl_cal" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#90caf9" /><stop offset="100%" stopColor="#1976d2" /></linearGradient>
       </defs>
       {/* clock shadow */}
-      <circle cx="38" cy="45" r="27" fill="#1565c0" opacity=".3"/>
+      <circle cx="38" cy="45" r="27" fill="#1565c0" opacity=".3" />
       {/* clock face */}
-      <circle cx="36" cy="42" r="27" fill="url(#cl_face)"/>
-      <circle cx="36" cy="42" r="23" fill="none" stroke="rgba(255,255,255,.18)" strokeWidth="1.5"/>
+      <circle cx="36" cy="42" r="27" fill="url(#cl_face)" />
+      <circle cx="36" cy="42" r="23" fill="none" stroke="rgba(255,255,255,.18)" strokeWidth="1.5" />
       {/* ticks */}
-      <line x1="36" y1="18" x2="36" y2="23" stroke="rgba(255,255,255,.7)" strokeWidth="2" strokeLinecap="round"/>
-      <line x1="36" y1="61" x2="36" y2="66" stroke="rgba(255,255,255,.7)" strokeWidth="2" strokeLinecap="round"/>
-      <line x1="12" y1="42" x2="17" y2="42" stroke="rgba(255,255,255,.7)" strokeWidth="2" strokeLinecap="round"/>
-      <line x1="55" y1="42" x2="60" y2="42" stroke="rgba(255,255,255,.7)" strokeWidth="2" strokeLinecap="round"/>
+      <line x1="36" y1="18" x2="36" y2="23" stroke="rgba(255,255,255,.7)" strokeWidth="2" strokeLinecap="round" />
+      <line x1="36" y1="61" x2="36" y2="66" stroke="rgba(255,255,255,.7)" strokeWidth="2" strokeLinecap="round" />
+      <line x1="12" y1="42" x2="17" y2="42" stroke="rgba(255,255,255,.7)" strokeWidth="2" strokeLinecap="round" />
+      <line x1="55" y1="42" x2="60" y2="42" stroke="rgba(255,255,255,.7)" strokeWidth="2" strokeLinecap="round" />
       {/* hands */}
-      <line x1="36" y1="42" x2="36" y2="28" stroke="white" strokeWidth="2.5" strokeLinecap="round"/>
-      <line x1="36" y1="42" x2="47" y2="50" stroke="white" strokeWidth="2"   strokeLinecap="round"/>
-      <circle cx="36" cy="42" r="3" fill="white"/>
+      <line x1="36" y1="42" x2="36" y2="28" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
+      <line x1="36" y1="42" x2="47" y2="50" stroke="white" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="36" cy="42" r="3" fill="white" />
       {/* mini calendar floating */}
-      <rect x="55" y="12" width="22" height="24" rx="5" fill="url(#cl_cal)" stroke="white" strokeWidth="1.5"/>
-      <rect x="55" y="12" width="22" height="8"  rx="5" fill="#1565c0"/>
-      <rect x="58" y="24" width="4" height="4" rx="1" fill="rgba(255,255,255,.75)"/>
-      <rect x="65" y="24" width="4" height="4" rx="1" fill="rgba(255,255,255,.75)"/>
-      <rect x="58" y="31" width="4" height="4" rx="1" fill="rgba(255,255,255,.5)"/>
-      <rect x="65" y="31" width="4" height="4" rx="1" fill="rgba(255,255,255,.75)"/>
+      <rect x="55" y="12" width="22" height="24" rx="5" fill="url(#cl_cal)" stroke="white" strokeWidth="1.5" />
+      <rect x="55" y="12" width="22" height="8" rx="5" fill="#1565c0" />
+      <rect x="58" y="24" width="4" height="4" rx="1" fill="rgba(255,255,255,.75)" />
+      <rect x="65" y="24" width="4" height="4" rx="1" fill="rgba(255,255,255,.75)" />
+      <rect x="58" y="31" width="4" height="4" rx="1" fill="rgba(255,255,255,.5)" />
+      <rect x="65" y="31" width="4" height="4" rx="1" fill="rgba(255,255,255,.75)" />
       {/* undo arrow */}
-      <path d="M10 58 C7 50 11 42 17 39" stroke="white" strokeWidth="1.8" strokeLinecap="round" fill="none" opacity=".7"/>
-      <path d="M13 35 L17 39 L12 43"    stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity=".7"/>
+      <path d="M10 58 C7 50 11 42 17 39" stroke="white" strokeWidth="1.8" strokeLinecap="round" fill="none" opacity=".7" />
+      <path d="M13 35 L17 39 L12 43" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity=".7" />
     </svg>
   ),
   dashboard: (
     <svg width="82" height="82" viewBox="0 0 82 82" fill="none">
       <defs>
-        <linearGradient id="db_b1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#ce93d8"/><stop offset="100%" stopColor="#6a1b9a"/></linearGradient>
-        <linearGradient id="db_b2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#e040fb"/><stop offset="100%" stopColor="#9c27b0"/></linearGradient>
-        <linearGradient id="db_b3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f48fb1"/><stop offset="100%" stopColor="#880e4f"/></linearGradient>
+        <linearGradient id="db_b1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#ce93d8" /><stop offset="100%" stopColor="#6a1b9a" /></linearGradient>
+        <linearGradient id="db_b2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#e040fb" /><stop offset="100%" stopColor="#9c27b0" /></linearGradient>
+        <linearGradient id="db_b3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f48fb1" /><stop offset="100%" stopColor="#880e4f" /></linearGradient>
       </defs>
       {/* panel */}
-      <rect x="6" y="22" width="70" height="52" rx="9" fill="rgba(243,229,245,.7)"/>
+      <rect x="6" y="22" width="70" height="52" rx="9" fill="rgba(243,229,245,.7)" />
       {/* bar 1 */}
-      <rect x="16" y="58" width="12" height="10" rx="1.5" fill="#4a0072"/>
-      <rect x="16" y="46" width="12" height="22" rx="3"   fill="url(#db_b1)"/>
-      <rect x="16" y="44" width="12" height="5"  rx="2"   fill="#e1bee7"/>
+      <rect x="16" y="58" width="12" height="10" rx="1.5" fill="#4a0072" />
+      <rect x="16" y="46" width="12" height="22" rx="3" fill="url(#db_b1)" />
+      <rect x="16" y="44" width="12" height="5" rx="2" fill="#e1bee7" />
       {/* bar 2 */}
-      <rect x="35" y="58" width="12" height="10" rx="1.5" fill="#4a0072"/>
-      <rect x="35" y="36" width="12" height="32" rx="3"   fill="url(#db_b2)"/>
-      <rect x="35" y="34" width="12" height="5"  rx="2"   fill="#f3e5f5"/>
+      <rect x="35" y="58" width="12" height="10" rx="1.5" fill="#4a0072" />
+      <rect x="35" y="36" width="12" height="32" rx="3" fill="url(#db_b2)" />
+      <rect x="35" y="34" width="12" height="5" rx="2" fill="#f3e5f5" />
       {/* bar 3 */}
-      <rect x="54" y="58" width="12" height="10" rx="1.5" fill="#4a0072"/>
-      <rect x="54" y="28" width="12" height="40" rx="3"   fill="url(#db_b3)"/>
-      <rect x="54" y="26" width="12" height="5"  rx="2"   fill="#fce4ec"/>
+      <rect x="54" y="58" width="12" height="10" rx="1.5" fill="#4a0072" />
+      <rect x="54" y="28" width="12" height="40" rx="3" fill="url(#db_b3)" />
+      <rect x="54" y="26" width="12" height="5" rx="2" fill="#fce4ec" />
       {/* trend line */}
-      <path d="M22 50 L41 38 L60 30" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-      <circle cx="22" cy="50" r="3" fill="white"/>
-      <circle cx="41" cy="38" r="3" fill="white"/>
-      <circle cx="60" cy="30" r="3" fill="white"/>
+      <path d="M22 50 L41 38 L60 30" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      <circle cx="22" cy="50" r="3" fill="white" />
+      <circle cx="41" cy="38" r="3" fill="white" />
+      <circle cx="60" cy="30" r="3" fill="white" />
       {/* floating metric card */}
-      <rect x="42" y="6" width="34" height="20" rx="6" fill="white" stroke="rgba(206,147,216,.4)" strokeWidth="1"/>
-      <rect x="48" y="11" width="14" height="5" rx="2.5" fill="#9c27b0"/>
-      <rect x="48" y="18" width="9"  height="3" rx="1.5" fill="#ce93d8"/>
-      <rect x="64" y="18" width="6"  height="3" rx="1.5" fill="#f48fb1"/>
+      <rect x="42" y="6" width="34" height="20" rx="6" fill="white" stroke="rgba(206,147,216,.4)" strokeWidth="1" />
+      <rect x="48" y="11" width="14" height="5" rx="2.5" fill="#9c27b0" />
+      <rect x="48" y="18" width="9" height="3" rx="1.5" fill="#ce93d8" />
+      <rect x="64" y="18" width="6" height="3" rx="1.5" fill="#f48fb1" />
       {/* sparkle */}
-      <path d="M8 16 L9.5 12 L11 16 L15 17.5 L11 19 L9.5 23 L8 19 L4 17.5z" fill="#e040fb" opacity=".65"/>
+      <path d="M8 16 L9.5 12 L11 16 L15 17.5 L11 19 L9.5 23 L8 19 L4 17.5z" fill="#e040fb" opacity=".65" />
     </svg>
   ),
   admin: (
     <svg width="82" height="82" viewBox="0 0 82 82" fill="none">
       <defs>
-        <linearGradient id="ad_shd" x1=".2" y1="0" x2=".8" y2="1"><stop offset="0%" stopColor="#ff7043"/><stop offset="100%" stopColor="#bf360c"/></linearGradient>
-        <linearGradient id="ad_gr"  x1="0"  y1="0" x2="1"  y2="1"><stop offset="0%" stopColor="#ffcc80"/><stop offset="100%" stopColor="#e65100"/></linearGradient>
+        <linearGradient id="ad_shd" x1=".2" y1="0" x2=".8" y2="1"><stop offset="0%" stopColor="#ff7043" /><stop offset="100%" stopColor="#bf360c" /></linearGradient>
+        <linearGradient id="ad_gr" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#ffcc80" /><stop offset="100%" stopColor="#e65100" /></linearGradient>
       </defs>
       {/* shield shadow */}
-      <path d="M42 12 L66 22 L66 50 C66 65 53 74 42 80 C31 74 18 65 18 50 L18 22Z" fill="#bf360c" opacity=".3" transform="translate(2 3)"/>
+      <path d="M42 12 L66 22 L66 50 C66 65 53 74 42 80 C31 74 18 65 18 50 L18 22Z" fill="#bf360c" opacity=".3" transform="translate(2 3)" />
       {/* shield */}
-      <path d="M41 10 L65 20 L65 48 C65 64 53 74 41 80 C29 74 17 64 17 48 L17 20Z" fill="url(#ad_shd)"/>
-      <path d="M41 18 L59 26 L59 48 C59 60 50 68 41 72 C32 68 23 60 23 48 L23 26Z" fill="rgba(255,255,255,.1)" stroke="rgba(255,255,255,.25)" strokeWidth="1"/>
+      <path d="M41 10 L65 20 L65 48 C65 64 53 74 41 80 C29 74 17 64 17 48 L17 20Z" fill="url(#ad_shd)" />
+      <path d="M41 18 L59 26 L59 48 C59 60 50 68 41 72 C32 68 23 60 23 48 L23 26Z" fill="rgba(255,255,255,.1)" stroke="rgba(255,255,255,.25)" strokeWidth="1" />
       {/* checkmark on shield */}
-      <path d="M30 47l9 10 19-21" stroke="white" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M30 47l9 10 19-21" stroke="white" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
       {/* gear */}
-      <circle cx="66" cy="18" r="12" fill="url(#ad_gr)" stroke="white" strokeWidth="1.8"/>
-      <circle cx="66" cy="18" r="5"  fill="rgba(255,255,255,.4)"/>
-      <path d="M66 6v4M66 28v4M54 18h4M74 18h4M58.1 10.1l2.8 2.8M71.1 23.1l2.8 2.8M58.1 25.9l2.8-2.8M71.1 12.9l2.8-2.8" stroke="rgba(255,255,255,.8)" strokeWidth="1.5" strokeLinecap="round"/>
+      <circle cx="66" cy="18" r="12" fill="url(#ad_gr)" stroke="white" strokeWidth="1.8" />
+      <circle cx="66" cy="18" r="5" fill="rgba(255,255,255,.4)" />
+      <path d="M66 6v4M66 28v4M54 18h4M74 18h4M58.1 10.1l2.8 2.8M71.1 23.1l2.8 2.8M58.1 25.9l2.8-2.8M71.1 12.9l2.8-2.8" stroke="rgba(255,255,255,.8)" strokeWidth="1.5" strokeLinecap="round" />
       {/* user pills */}
-      <circle cx="11" cy="26" r="6" fill="rgba(191,54,12,.5)" stroke="white" strokeWidth="1.3"/>
-      <path d="M6 35 C6 30 16 30 16 35" stroke="white" strokeWidth="1.3" strokeLinecap="round" fill="none" opacity=".8"/>
-      <circle cx="11" cy="50" r="6" fill="rgba(191,54,12,.4)" stroke="white" strokeWidth="1.3"/>
-      <path d="M6 59 C6 54 16 54 16 59" stroke="white" strokeWidth="1.3" strokeLinecap="round" fill="none" opacity=".7"/>
+      <circle cx="11" cy="26" r="6" fill="rgba(191,54,12,.5)" stroke="white" strokeWidth="1.3" />
+      <path d="M6 35 C6 30 16 30 16 35" stroke="white" strokeWidth="1.3" strokeLinecap="round" fill="none" opacity=".8" />
+      <circle cx="11" cy="50" r="6" fill="rgba(191,54,12,.4)" stroke="white" strokeWidth="1.3" />
+      <path d="M6 59 C6 54 16 54 16 59" stroke="white" strokeWidth="1.3" strokeLinecap="round" fill="none" opacity=".7" />
     </svg>
   ),
   supervisor: (
     <svg width="82" height="82" viewBox="0 0 82 82" fill="none">
       <defs>
-        <linearGradient id="sv_stamp" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#b388ff"/><stop offset="100%" stopColor="#6a1b9a"/></linearGradient>
-        <linearGradient id="sv_chk"   x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#ea80fc"/><stop offset="100%" stopColor="#aa00ff"/></linearGradient>
+        <linearGradient id="sv_stamp" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#b388ff" /><stop offset="100%" stopColor="#6a1b9a" /></linearGradient>
+        <linearGradient id="sv_chk" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#ea80fc" /><stop offset="100%" stopColor="#aa00ff" /></linearGradient>
       </defs>
       {/* document 3D side */}
-      <rect x="12" y="20" width="6"  height="44" rx="2" fill="#4a148c"/>
+      <rect x="12" y="20" width="6" height="44" rx="2" fill="#4a148c" />
       {/* document body */}
-      <rect x="16" y="14" width="40" height="50" rx="6" fill="rgba(243,229,245,.55)" stroke="#9c27b0" strokeWidth="1.5"/>
-      <rect x="23" y="25" width="26" height="4" rx="1.5" fill="#9c27b0" opacity=".55"/>
-      <rect x="23" y="34" width="20" height="4" rx="1.5" fill="#9c27b0" opacity=".4"/>
-      <rect x="23" y="43" width="24" height="4" rx="1.5" fill="#9c27b0" opacity=".4"/>
+      <rect x="16" y="14" width="40" height="50" rx="6" fill="rgba(243,229,245,.55)" stroke="#9c27b0" strokeWidth="1.5" />
+      <rect x="23" y="25" width="26" height="4" rx="1.5" fill="#9c27b0" opacity=".55" />
+      <rect x="23" y="34" width="20" height="4" rx="1.5" fill="#9c27b0" opacity=".4" />
+      <rect x="23" y="43" width="24" height="4" rx="1.5" fill="#9c27b0" opacity=".4" />
       {/* approval stamp circle, tilted */}
       <g transform="rotate(-14 56 50)">
-        <circle cx="56" cy="50" r="20" fill="url(#sv_stamp)" stroke="white" strokeWidth="2.5"/>
-        <circle cx="56" cy="50" r="14" fill="none" stroke="rgba(255,255,255,.55)" strokeWidth="1.5" strokeDasharray="3 3"/>
-        <path d="M48 50l5.5 6 13-14" stroke="white" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round"/>
+        <circle cx="56" cy="50" r="20" fill="url(#sv_stamp)" stroke="white" strokeWidth="2.5" />
+        <circle cx="56" cy="50" r="14" fill="none" stroke="rgba(255,255,255,.55)" strokeWidth="1.5" strokeDasharray="3 3" />
+        <path d="M48 50l5.5 6 13-14" stroke="white" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
       </g>
       {/* signature flourish */}
-      <path d="M14 70 C20 66 24 72 30 68 C36 64 40 70 46 67" stroke="#7b1fa2" strokeWidth="2" strokeLinecap="round" fill="none" opacity=".75"/>
+      <path d="M14 70 C20 66 24 72 30 68 C36 64 40 70 46 67" stroke="#7b1fa2" strokeWidth="2" strokeLinecap="round" fill="none" opacity=".75" />
       {/* sparkle */}
-      <path d="M66 16l1.3 2.7 3 .4-2.2 2.1.5 3-2.6-1.4-2.6 1.4.5-3-2.2-2.1 3-.4z" fill="#ffd740" opacity=".8"/>
+      <path d="M66 16l1.3 2.7 3 .4-2.2 2.1.5 3-2.6-1.4-2.6 1.4.5-3-2.2-2.1 3-.4z" fill="#ffd740" opacity=".8" />
     </svg>
   ),
 };
@@ -623,7 +623,7 @@ const CARD_ART: Record<string, ReactNode> = {
 // ── ModuleCard ────────────────────────────────────────────────
 function ModuleCard({ mod, Icon, onClick, badgeCount = 0 }: { mod: ModuleDef; Icon: LucideIcon; onClick: () => void; badgeCount?: number }) {
   const [hovered, setHovered] = useState(false);
-  const art      = CARD_ART[mod.key];
+  const art = CARD_ART[mod.key];
   const circleBg = CIRCLE_BG[mod.key] ?? "radial-gradient(circle,#f5f5f5,#e0e0e0)";
 
   return (
@@ -700,7 +700,7 @@ function ModuleCard({ mod, Icon, onClick, badgeCount = 0 }: { mod: ModuleDef; Ic
           <ArrowRight size={13} style={{
             transform: hovered ? "translateX(3px)" : "none",
             transition: "transform .15s",
-          }}/>
+          }} />
         )}
       </div>
     </div>

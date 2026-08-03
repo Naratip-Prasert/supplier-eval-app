@@ -1,0 +1,134 @@
+async function validatePeriodicUpload(req: RequestWithFile, res: Response) {
+  if (!req.file) return res.status(400).json({ message: 'กรุณาแนบไฟล์' });
+  const { evalType } = req.body;
+  if (!['half_year', 'yearly'].includes(evalType)) {
+    return res.status(400).json({ message: 'evalType ต้องเป็น half_year หรือ yearly' });
+  }
+
+  let rows;
+  try {
+    rows = parseFile(req.file.buffer, req.file.originalname);
+  } catch (e: any) {
+    return res.status(400).json({ message: 'ไม่สามารถอ่านไฟล์ได้', error: e.message });
+  }
+
+  if (rows.length === 0) return res.status(400).json({ message: 'ไฟล์ไม่มีข้อมูล' });
+
+  const client = await pool.connect();
+  try {
+    const cycleYear = new Date().getFullYear();
+    const period = evalType === 'half_year' ? `Half-Year ${cycleYear}` : `Yearly ${cycleYear}`;
+    
+    const results = [];
+    let canUpload = true;
+
+    for (const row of rows) {
+      const vendorCode   = String(norm(row, 'Vendor Code') || '').trim();
+      const taxId        = String(norm(row, 'TAX_ID') || '').trim();
+      const supplierName = String(norm(row, 'Supplier Name') || '').trim();
+      const buyerName    = String(norm(row, 'Buyer Name') || '').trim();
+      const buyerEmail   = String(norm(row, 'Buyer Email') || '').trim().toLowerCase();
+      const evalName     = String(norm(row, 'Evaluator Name') || '').trim();
+      const evalEmail    = String(norm(row, 'Evaluator Email') || '').trim().toLowerCase();
+
+      // If everything is completely empty, it might be a blank row in excel, skip it.
+      if (!vendorCode && !taxId && !supplierName && !buyerName && !buyerEmail && !evalName && !evalEmail) {
+        continue;
+      }
+
+      const errors: string[] = [];
+      let supplierId = null;
+
+      // 1. Check empty fields
+      if (!vendorCode) errors.push('Vendor Code ห้ามเว้นว่าง');
+      if (!taxId) errors.push('Tax ID ห้ามเว้นว่าง');
+      if (!supplierName) errors.push('Supplier Name ห้ามเว้นว่าง');
+
+      if (vendorCode && taxId && supplierName) {
+        // 2. Check Exact Match
+        const supResult = await client.query(`
+          SELECT id, vendor_code, tax_id, supplier_name FROM "SPES_suppliers"
+           WHERE vendor_code = $1 OR tax_id = $2 OR supplier_name ILIKE $3
+        `, [vendorCode, taxId, supplierName]);
+
+        if (supResult.rows.length === 0) {
+          errors.push('ไม่พบ Supplier นี้ในระบบ (ชื่อ, รหัส, Tax ID ไม่มีเลย)');
+        } else {
+          // Check if there is a perfect match
+          const exactMatch = supResult.rows.find((s: any) => 
+            s.vendor_code === vendorCode && 
+            s.tax_id === taxId && 
+            s.supplier_name.toLowerCase() === supplierName.toLowerCase()
+          );
+
+          if (exactMatch) {
+            supplierId = exactMatch.id;
+          } else {
+            // Find what's wrong by looking at partial matches
+            const partial = supResult.rows[0];
+            const diffs = [];
+            if (partial.vendor_code !== vendorCode) diffs.push('Vendor Code');
+            if (partial.tax_id !== taxId) diffs.push('Tax ID');
+            if (partial.supplier_name.toLowerCase() !== supplierName.toLowerCase()) diffs.push('Supplier Name');
+            
+            errors.push(`ข้อมูลไม่ตรงกับในระบบ (น่าจะผิดที่: ${diffs.join(', ')})`);
+          }
+        }
+      }
+
+      if (buyerEmail === evalEmail && buyerEmail !== '') {
+        errors.push('Buyer Email และ Evaluator Email ต้องเป็นคนละคนกัน');
+      }
+
+      if (!buyerEmail) errors.push('Buyer Email ห้ามเว้นว่าง');
+      if (!evalEmail) errors.push('Evaluator Email ห้ามเว้นว่าง');
+
+      // 3. Check Duplicate Tasks
+      if (supplierId && errors.length === 0) {
+        const existingSession = await client.query(`
+          SELECT id FROM "SPES_evaluation_sessions"
+           WHERE supplier_id = $1 AND eval_type = $2 AND period = $3 AND status != 'completed'
+           LIMIT 1
+        `, [supplierId, evalType, period]);
+
+        if (existingSession.rows.length > 0) {
+          const sessionId = existingSession.rows[0].id;
+          // Check existing tasks for this session
+          const existingTasks = await client.query(`
+            SELECT role, assigned_email FROM "SPES_evaluation_tasks"
+            WHERE session_id = $1
+          `, [sessionId]);
+
+          const hasSameGCP = existingTasks.rows.some((t: any) => t.role === 'GCP' && t.assigned_email === buyerEmail);
+          const hasSameUSER = existingTasks.rows.some((t: any) => t.role === 'USER' && t.assigned_email === evalEmail);
+
+          if (hasSameGCP && hasSameUSER) {
+            errors.push('งานซ้ำ: Supplier, Buyer และ Evaluator คนเดียวกันเคยถูกมอบหมายงานในรอบนี้ไปแล้ว');
+          }
+          // If only GCP is the same but USER is different, it's allowed!
+        }
+      }
+
+      if (errors.length > 0) canUpload = false;
+
+      results.push({
+        vendorCode,
+        taxId,
+        supplierName,
+        buyerName,
+        buyerEmail,
+        evalName,
+        evalEmail,
+        isValid: errors.length === 0,
+        errors
+      });
+    }
+
+    res.json({ rows: results, canUpload });
+  } catch (err: any) {
+    console.error('POST /api/admin/upload/validate-periodic error:', err);
+    res.status(500).json({ message: 'ตรวจสอบข้อมูลไม่สำเร็จ', error: err.message });
+  } finally {
+    client.release();
+  }
+}

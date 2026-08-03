@@ -66,6 +66,138 @@ function addDays(date: Date | string | number, n: number): Date {
   return d;
 }
 
+// ── POST /api/admin/upload/validate-pre-post ──────────────────────────
+async function validatePrePostUpload(req: RequestWithFile, res: Response) {
+  if (!req.file) return res.status(400).json({ message: 'กรุณาแนบไฟล์' });
+
+  let rows;
+  try {
+    rows = parseFile(req.file.buffer, req.file.originalname);
+  } catch (e: any) {
+    return res.status(400).json({ message: 'ไม่สามารถอ่านไฟล์ได้', error: e.message });
+  }
+
+  if (rows.length === 0) return res.status(400).json({ message: 'ไฟล์ไม่มีข้อมูล' });
+
+  const client = await pool.connect();
+  try {
+    const results = [];
+    let canUpload = true;
+
+    for (const row of rows) {
+      const taxId        = String(norm(row, 'TAX_ID') || '').trim();
+      const supplierName = String(norm(row, 'Supplier Name') || '').trim();
+      const category     = String(norm(row, 'Category') || '').trim();
+      const fnOwner      = String(norm(row, 'Function_Owner') || '').trim();
+      const jobValueRaw  = norm(row, 'Job Value THB');
+      const jobValue     = jobValueRaw != null ? parseFloat(jobValueRaw) : null;
+      const ptaRaw       = norm(row, 'PTA Approve Date');
+      const ptaDate      = toDate(ptaRaw);
+      const buyerName    = String(norm(row, 'Buyer Name') || '').trim();
+      const buyerEmail   = String(norm(row, 'Buyer Email') || '').trim().toLowerCase();
+      const evalName     = String(norm(row, 'Evaluator Name') || '').trim();
+      const evalEmail    = String(norm(row, 'Evaluator Email') || '').trim().toLowerCase();
+      const evalEmpNo    = String(norm(row, 'Evaluator Employee No') || '').trim();
+      const vendorCodeRaw = String(norm(row, 'Vendor Code') || '').trim();
+      const vendorCode   = vendorCodeRaw || taxId || supplierName.substring(0, 50);
+
+      if (!taxId && !supplierName) {
+        continue;
+      }
+
+      const errors: string[] = [];
+      let supplierId = null;
+
+      if (!jobValue || jobValue < 1000000) {
+        errors.push('Job Value ต้องมากกว่าหรือเท่ากับ 1,000,000');
+      }
+
+      if (vendorCode) {
+        const supCheck = await client.query(`SELECT * FROM "SPES_suppliers" WHERE vendor_code = $1 LIMIT 1`, [vendorCode]);
+
+        if (supCheck.rows.length > 0) {
+          const s = supCheck.rows[0];
+          supplierId = s.id;
+          const matchAll = 
+            (s.supplier_name || '') === supplierName &&
+            (s.tax_id || '') === taxId &&
+            (s.category || '') === category &&
+            (s.function_owner || '') === fnOwner &&
+            Number(s.job_value_thb) === Number(jobValue) &&
+            (s.buyer_name || '') === buyerName &&
+            (s.buyer_email || '') === buyerEmail &&
+            (s.evaluator_name || '') === evalName &&
+            (s.evaluator_email || '') === evalEmail;
+
+          if (matchAll) {
+            errors.push('ข้อมูลซ้ำ: ข้อมูลเหมือนกับในระบบทุกประการ (รหัส, ชื่อ, ผู้ซื้อ, ผู้ประเมิน ฯลฯ ตรงกัน 100%)');
+          }
+        }
+      }
+
+      if (buyerEmail === evalEmail && buyerEmail !== '') {
+        errors.push('Buyer Email และ Evaluator Email ต้องเป็นคนละคนกัน');
+      }
+
+      if (!buyerEmail) {
+        errors.push('Buyer Email ห้ามเว้นว่าง');
+      } else {
+        const checkBuyer = await client.query(`SELECT 1 FROM "Master_Data_GCP" WHERE LOWER(email) = $1 LIMIT 1`, [buyerEmail]);
+        if (checkBuyer.rows.length === 0) {
+          errors.push(`ไม่พบ Buyer Email ในระบบ (ต้องมีใน Master Data GCP)`);
+        }
+      }
+
+      if (!evalEmail && !evalEmpNo) {
+        errors.push('ต้องระบุ Evaluator Email หรือ Evaluator Employee No อย่างน้อยหนึ่งอย่าง');
+      } else {
+        let checkEval = { rows: [] as any[] };
+        if (evalEmpNo) {
+          checkEval = await client.query(`SELECT 1 FROM "Master_Data_All" WHERE UPPER(emp_no) = UPPER($1) LIMIT 1`, [evalEmpNo]);
+        }
+        if (checkEval.rows.length === 0 && evalEmail) {
+          checkEval = await client.query(`SELECT 1 FROM "Master_Data_All" WHERE LOWER(email) = $1 LIMIT 1`, [evalEmail]);
+        }
+
+        if (checkEval.rows.length === 0) {
+          if (!evalEmpNo) {
+            errors.push(`ไม่พบ Evaluator ในระบบ โปรดระบุ Evaluator Employee No ในไฟล์ Excel เพื่อดึงข้อมูลอัตโนมัติ`);
+          } else {
+            try {
+              const apiRes = await fetch(`https://ehr.bjc.co.th/API/PUR/api/EmployeeProfile/${evalEmpNo}`);
+              if (!apiRes.ok) {
+                errors.push(`ดึงข้อมูล Evaluator รหัส ${evalEmpNo} ไม่สำเร็จ (API ตอบกลับ ${apiRes.status})`);
+              } else {
+                const empData: any = await apiRes.json();
+                if (!empData || !empData.employeeLocalName) {
+                  errors.push(`ไม่พบรหัสพนักงาน ${evalEmpNo} ในระบบ EmployeeProfile`);
+                }
+              }
+            } catch (err: any) {
+              errors.push(`เชื่อมต่อ EmployeeProfile API ไม่สำเร็จ: ${err.message}`);
+            }
+          }
+        }
+      }
+
+      const status = errors.length === 0 ? 'ผ่าน' : 'พบข้อผิดพลาด';
+      if (errors.length > 0) canUpload = false;
+
+      results.push({
+        vendorCode, taxId, supplierName, buyerName, buyerEmail, evalName, evalEmail,
+        isValid: errors.length === 0,
+        errors
+      });
+    }
+
+    res.status(200).json({ canUpload, rows: results });
+  } catch (err: any) {
+    res.status(500).json({ message: 'ตรวจสอบข้อมูลไม่สำเร็จ', error: err.message });
+  } finally {
+    client.release();
+  }
+}
+
 // ── POST /api/admin/upload/pre-post ──────────────────────────
 async function uploadPrePost(req: RequestWithFile, res: Response) {
   if (!req.file) return res.status(400).json({ message: 'กรุณาแนบไฟล์' });
@@ -120,14 +252,81 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
       const buyerEmail   = String(norm(row, 'Buyer Email') || '').trim().toLowerCase();
       const evalName     = String(norm(row, 'Evaluator Name') || '').trim();
       const evalEmail    = String(norm(row, 'Evaluator Email') || '').trim().toLowerCase();
+      const evalEmpNo    = String(norm(row, 'Evaluator Employee No') || '').trim();
+      const vendorCodeRaw = String(norm(row, 'Vendor Code') || '').trim();
+      const vendorCode   = vendorCodeRaw || taxId || supplierName.substring(0, 50);
 
       if (!taxId && !supplierName) { summary.skipped++; continue; }
       if (!jobValue || jobValue < 1000000) { summary.skipped++; continue; }
 
+      const supCheck = await client.query(`SELECT * FROM "SPES_suppliers" WHERE vendor_code = $1 LIMIT 1`, [vendorCode]);
+      if (supCheck.rows.length > 0) {
+        const s = supCheck.rows[0];
+        const matchAll = 
+            (s.supplier_name || '') === supplierName &&
+            (s.tax_id || '') === taxId &&
+            (s.category || '') === category &&
+            (s.function_owner || '') === fnOwner &&
+            Number(s.job_value_thb) === Number(jobValue) &&
+            (s.buyer_name || '') === buyerName &&
+            (s.buyer_email || '') === buyerEmail &&
+            (s.evaluator_name || '') === evalName &&
+            (s.evaluator_email || '') === evalEmail;
+        if (matchAll) {
+          summary.skipped++;
+          summary.warnings.push(`ข้อมูลซ้ำ: ข้อมูลเหมือนกับในระบบทุกประการสำหรับ "${supplierName}" — ข้ามแถวนี้`);
+          continue;
+        }
+      }
+
       // Determine eval type
       const evalType = ptaDate ? 'post_eval' : 'pre_eval';
 
-      // Upsert supplier
+      // Match buyer (GCP) and evaluator (USER) by email or empNo
+      const gcpMatch = buyerEmail
+        ? await client.query(`SELECT emp_no AS id, name AS full_name, email AS actual_email FROM "Master_Data_GCP" WHERE LOWER(email) = LOWER($1) LIMIT 1`, [buyerEmail])
+        : { rows: [] };
+
+      let buMatch = { rows: [] as any[] };
+      if (evalEmpNo) {
+        buMatch = await client.query(`SELECT emp_no AS id, name AS full_name, email AS actual_email FROM "Master_Data_All" WHERE UPPER(emp_no) = UPPER($1) LIMIT 1`, [evalEmpNo]);
+      }
+      if (buMatch.rows.length === 0 && evalEmail) {
+        buMatch = await client.query(`SELECT emp_no AS id, name AS full_name, email AS actual_email FROM "Master_Data_All" WHERE LOWER(email) = LOWER($1) LIMIT 1`, [evalEmail]);
+      }
+
+      if (buMatch.rows.length === 0 && evalEmpNo) {
+        try {
+          const apiRes = await fetch(`https://ehr.bjc.co.th/API/PUR/api/EmployeeProfile/${evalEmpNo}`);
+          if (apiRes.ok) {
+            const empData: any = await apiRes.json();
+            if (empData && empData.employeeLocalName) {
+              const empNoStr = String(empData.employeeNo).toUpperCase();
+              const name = empData.employeeLocalName || empData.employeeName;
+              const email = empData.email || null;
+              const position = empData.positionTitleENG || empData.positionTitleTHA || null;
+              const team = empData.departmentDescription || null;
+              const cobu = empData.coBuDescription || null;
+              await client.query(`
+                INSERT INTO "Master_Data_User" (emp_no, name, email, position, team, cobu_name, status)
+                VALUES ($1, $2, $3, $4, $5, $6, 'active')
+                ON CONFLICT (emp_no) DO UPDATE SET
+                  name = EXCLUDED.name, email = EXCLUDED.email, position = EXCLUDED.position,
+                  team = EXCLUDED.team, cobu_name = EXCLUDED.cobu_name, status = EXCLUDED.status
+              `, [empNoStr, name, email, position, team, cobu]);
+
+              buMatch = await client.query(`SELECT emp_no AS id, name AS full_name, email AS actual_email FROM "Master_Data_All" WHERE UPPER(emp_no) = UPPER($1) LIMIT 1`, [empNoStr]);
+            }
+          }
+        } catch (err) {}
+      }
+
+      const actualBuyerEmail = gcpMatch.rows[0]?.actual_email || buyerEmail;
+      const actualBuyerName  = gcpMatch.rows[0]?.full_name || buyerName;
+      const actualEvalEmail  = buMatch.rows[0]?.actual_email || evalEmail;
+      const actualEvalName   = buMatch.rows[0]?.full_name || evalName;
+
+      // Upsert supplier using ACTUAL resolved data
       const supUpsert = await client.query(`
         INSERT INTO "SPES_suppliers" (vendor_code, supplier_name, product_type, tax_id, category,
           function_owner, job_value_thb, pta_approve_date, buyer_name, buyer_email,
@@ -145,9 +344,9 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
           evaluator_email = EXCLUDED.evaluator_email,
           updated_at      = NOW()
         RETURNING id, vendor_code, supplier_name
-      `, [taxId || supplierName.substring(0, 50), supplierName, taxId || null,
+      `, [vendorCode, supplierName, taxId || null,
           category || null, fnOwner || null, jobValue, ptaDate || null,
-          buyerName || null, buyerEmail || null, evalName || null, evalEmail || null]);
+          actualBuyerName || null, actualBuyerEmail || null, actualEvalName || null, actualEvalEmail || null]);
 
       const supplier = supUpsert.rows[0];
 
@@ -162,9 +361,7 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
       const period = evalType === 'pre_eval' ? 'New Supplier / ผู้ขายรายใหม่' : 'Post 90 Days';
 
       // Skip if this supplier already has an unfinished round for this exact
-      // eval_type+period — re-uploading the same file (or overlapping rows
-      // across uploads) used to silently spawn a second parallel session +
-      // task pair, letting both get evaluated independently with no warning.
+      // eval_type+period
       const existingOpen = await client.query(`
         SELECT id FROM "SPES_evaluation_sessions"
          WHERE supplier_id = $1 AND eval_type = $2 AND period = $3 AND status != 'completed'
@@ -183,33 +380,20 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
       `, [supplier.id, evalType, period, uploaderId]);
       const sessionId = sessionResult.rows[0].id;
 
-      // Match buyer (GCP) and evaluator (USER) by email
-      const gcpMatch = buyerEmail
-        ? await client.query(`            SELECT emp_no AS id, name AS full_name FROM "Master_Data_All" WHERE LOWER(email) = LOWER($1)
-            LIMIT 1`, [buyerEmail])
-        : { rows: [] };
-      const buMatch = evalEmail
-        ? await client.query(`            SELECT emp_no AS id, name AS full_name FROM "Master_Data_All" WHERE LOWER(email) = LOWER($1)
-            LIMIT 1`, [evalEmail])
-        : { rows: [] };
-
       if (buyerEmail && gcpMatch.rows.length === 0) {
         summary.warnings.push(`ไม่พบ Buyer email "${buyerEmail}" ในระบบ`);
       }
-      if (evalEmail && buMatch.rows.length === 0) {
-        summary.warnings.push(`ไม่พบ Evaluator email "${evalEmail}" ในระบบ`);
+      if (buMatch.rows.length === 0) {
+        summary.warnings.push(`ไม่พบ Evaluator รหัส "${evalEmpNo}" หรือ email "${evalEmail}" ในระบบ`);
       }
-      // Same person can't hold both GCP and USER tasks for the same row —
-      // it silently breaks the supervisor approval trigger later (it needs
-      // one evaluation each from a distinct USER role and a distinct GCP role).
-      if (buyerEmail && evalEmail && buyerEmail === evalEmail) {
-        summary.warnings.push(`Buyer Email และ Evaluator Email เป็นคนเดียวกัน ("${buyerEmail}") สำหรับ "${supplierName}" — งานนี้จะไม่เข้าคิว supervisor ได้ ต้องใช้คนละคน`);
+      if (actualBuyerEmail && actualEvalEmail && actualBuyerEmail.toLowerCase() === actualEvalEmail.toLowerCase()) {
+        summary.warnings.push(`Buyer Email และ Evaluator Email เป็นคนเดียวกัน ("${actualBuyerEmail}") สำหรับ "${supplierName}" — งานนี้จะไม่เข้าคิว supervisor ได้ ต้องใช้คนละคน`);
       }
 
       // Create tasks for GCP and USER
       const taskRows = [
-        { role: 'GCP', email: buyerEmail, name: buyerName, empId: gcpMatch.rows[0]?.id || null, empName: gcpMatch.rows[0]?.full_name || buyerName },
-        { role: 'USER', email: evalEmail,  name: evalName,  empId: buMatch.rows[0]?.id  || null, empName: buMatch.rows[0]?.full_name  || evalName  },
+        { role: 'GCP', email: actualBuyerEmail, name: actualBuyerName, empId: gcpMatch.rows[0]?.id || null, empName: actualBuyerName },
+        { role: 'USER', email: actualEvalEmail,  name: actualEvalName,  empId: buMatch.rows[0]?.id  || null, empName: actualEvalName  },
       ];
 
       for (const t of taskRows) {
@@ -267,6 +451,161 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
   }
 }
 
+async function validatePeriodicUpload(req: RequestWithFile, res: Response) {
+  if (!req.file) return res.status(400).json({ message: 'กรุณาแนบไฟล์' });
+  const { evalType } = req.body;
+  if (!['half_year', 'yearly'].includes(evalType)) {
+    return res.status(400).json({ message: 'evalType ต้องเป็น half_year หรือ yearly' });
+  }
+
+  let rows;
+  try {
+    rows = parseFile(req.file.buffer, req.file.originalname);
+  } catch (e: any) {
+    return res.status(400).json({ message: 'ไม่สามารถอ่านไฟล์ได้', error: e.message });
+  }
+
+  if (rows.length === 0) return res.status(400).json({ message: 'ไฟล์ไม่มีข้อมูล' });
+
+  const client = await pool.connect();
+  try {
+    const cycleYear = new Date().getFullYear();
+    const period = evalType === 'half_year' ? `Half-Year ${cycleYear}` : `Yearly ${cycleYear}`;
+    
+    const results = [];
+    let canUpload = true;
+
+    for (const row of rows) {
+      const vendorCode   = String(norm(row, 'Vendor Code') || '').trim();
+      const taxId        = String(norm(row, 'TAX_ID') || '').trim();
+      const supplierName = String(norm(row, 'Supplier Name') || '').trim();
+      const buyerName    = String(norm(row, 'Buyer Name') || '').trim();
+      const buyerEmail   = String(norm(row, 'Buyer Email') || '').trim().toLowerCase();
+      const evalName     = String(norm(row, 'Evaluator Name') || '').trim();
+      const evalEmail    = String(norm(row, 'Evaluator Email') || '').trim().toLowerCase();
+      const evalEmpNo    = String(norm(row, 'Evaluator Employee No') || '').trim();
+
+      if (!vendorCode && !taxId && !supplierName && !buyerName && !buyerEmail && !evalName && !evalEmail && !evalEmpNo) {
+        continue;
+      }
+
+      const errors: string[] = [];
+      let supplierId = null;
+
+      if (!vendorCode) errors.push('Vendor Code ห้ามเว้นว่าง');
+      if (!taxId) errors.push('Tax ID ห้ามเว้นว่าง');
+      if (!supplierName) errors.push('Supplier Name ห้ามเว้นว่าง');
+
+      if (vendorCode && taxId && supplierName) {
+        const supResult = await client.query(`
+          SELECT id, vendor_code, tax_id, supplier_name FROM "SPES_suppliers"
+           WHERE vendor_code = $1 OR tax_id = $2 OR supplier_name ILIKE $3
+        `, [vendorCode, taxId, supplierName]);
+
+        if (supResult.rows.length === 0) {
+          errors.push('ไม่พบ Supplier นี้ในระบบ (ชื่อ, รหัส, Tax ID ไม่มีเลย)');
+        } else {
+          const exactMatch = supResult.rows.find((s: any) => 
+            s.vendor_code === vendorCode && 
+            s.tax_id === taxId && 
+            s.supplier_name.toLowerCase() === supplierName.toLowerCase()
+          );
+
+          if (exactMatch) {
+            supplierId = exactMatch.id;
+          } else {
+            const partial = supResult.rows[0];
+            const diffs = [];
+            if (partial.vendor_code !== vendorCode) diffs.push('Vendor Code');
+            if (partial.tax_id !== taxId) diffs.push('Tax ID');
+            if (partial.supplier_name.toLowerCase() !== supplierName.toLowerCase()) diffs.push('Supplier Name');
+            
+            errors.push(`ข้อมูลไม่ตรงกับในระบบ (น่าจะผิดที่: ${diffs.join(', ')})`);
+          }
+        }
+      }
+
+      if (buyerEmail === evalEmail && buyerEmail !== '') {
+        errors.push('Buyer Email และ Evaluator Email ต้องเป็นคนละคนกัน');
+      }
+
+      if (!buyerEmail) {
+        errors.push('Buyer Email ห้ามเว้นว่าง');
+      } else {
+        const checkBuyer = await client.query(`SELECT 1 FROM "Master_Data_GCP" WHERE LOWER(email) = $1 LIMIT 1`, [buyerEmail]);
+        if (checkBuyer.rows.length === 0) {
+          errors.push(`ไม่พบ Buyer Email ในระบบ (ต้องมีใน Master Data GCP)`);
+        }
+      }
+
+      if (!evalEmail && !evalEmpNo) {
+        errors.push('ต้องระบุ Evaluator Email หรือ Evaluator Employee No อย่างน้อยหนึ่งอย่าง');
+      } else {
+        let checkEval = { rows: [] };
+        if (evalEmpNo) {
+          checkEval = await client.query(`SELECT 1 FROM "Master_Data_All" WHERE UPPER(emp_no) = UPPER($1) LIMIT 1`, [evalEmpNo]);
+        }
+        if (checkEval.rows.length === 0 && evalEmail) {
+          checkEval = await client.query(`SELECT 1 FROM "Master_Data_All" WHERE LOWER(email) = $1 LIMIT 1`, [evalEmail]);
+        }
+
+        if (checkEval.rows.length === 0) {
+          if (!evalEmpNo) {
+            errors.push(`ไม่พบ Evaluator ในระบบ โปรดระบุ Evaluator Employee No ในไฟล์ Excel เพื่อดึงข้อมูลอัตโนมัติ`);
+          } else {
+            try {
+              const apiRes = await fetch(`https://ehr.bjc.co.th/API/PUR/api/EmployeeProfile/${evalEmpNo}`);
+              if (!apiRes.ok) {
+                errors.push(`ดึงข้อมูล Evaluator รหัส ${evalEmpNo} ไม่สำเร็จ (API ตอบกลับ ${apiRes.status})`);
+              } else {
+                const empData: any = await apiRes.json();
+                if (!empData || !empData.employeeLocalName) {
+                  errors.push(`ไม่พบรหัสพนักงาน ${evalEmpNo} ในระบบ EmployeeProfile`);
+                }
+              }
+            } catch (err: any) {
+              errors.push(`เชื่อมต่อ EmployeeProfile API ไม่สำเร็จ: ${err.message}`);
+            }
+          }
+        }
+      }
+
+      if (supplierId && errors.length === 0) {
+        const existingSession = await client.query(`
+          SELECT id FROM "SPES_evaluation_sessions"
+           WHERE supplier_id = $1 AND eval_type = $2 AND period = $3 AND status != 'completed'
+           LIMIT 1
+        `, [supplierId, evalType, period]);
+
+        if (existingSession.rows.length > 0) {
+          const sessionId = existingSession.rows[0].id;
+          const existingTasks = await client.query(`
+            SELECT role, assigned_email FROM "SPES_evaluation_tasks"
+            WHERE session_id = $1
+          `, [sessionId]);
+
+          const hasSameGCP = existingTasks.rows.some((t: any) => t.role === 'GCP' && t.assigned_email === buyerEmail);
+          const hasSameUSER = existingTasks.rows.some((t: any) => t.role === 'USER' && t.assigned_email === evalEmail);
+
+          if (hasSameGCP && hasSameUSER) {
+            errors.push('งานซ้ำ: Supplier, Buyer และ Evaluator คนเดียวกันเคยถูกมอบหมายงานในรอบนี้ไปแล้ว');
+          }
+        }
+      }
+
+      if (errors.length > 0) canUpload = false;
+
+      results.push({ vendorCode, taxId, supplierName, buyerName, buyerEmail, evalName, evalEmail, isValid: errors.length === 0, errors });
+    }
+    res.json({ rows: results, canUpload });
+  } catch (err: any) {
+    console.error('POST /api/admin/upload/validate-periodic error:', err);
+    res.status(500).json({ message: 'ตรวจสอบข้อมูลไม่สำเร็จ', error: err.message });
+  } finally {
+    client.release();
+  }
+}
+
 // ── POST /api/admin/upload/periodic ──────────────────────────
 async function uploadPeriodic(req: RequestWithFile, res: Response) {
   if (!req.file) return res.status(400).json({ message: 'กรุณาแนบไฟล์' });
@@ -305,12 +644,6 @@ async function uploadPeriodic(req: RequestWithFile, res: Response) {
 
     const periodicDueDays = await getEmailSetting('periodic_due_days');
     const dueDate = addDays(new Date(), periodicDueDays);
-    // Tag with the calendar year so the SAME supplier's half_year/yearly
-    // round next year is a genuinely new period, not a collision with this
-    // year's round under the open-session unique index — without a year
-    // marker, "Half-Year" is indistinguishable across cycles once one round
-    // is completed, which previously let two unrelated rounds end up
-    // resolved as if they were "the same" evaluation period.
     const cycleYear = new Date().getFullYear();
     const period  = evalType === 'half_year' ? `Half-Year ${cycleYear}` : `Yearly ${cycleYear}`;
     const summary: { processed: number; skipped: number; warnings: string[] } =
@@ -318,31 +651,79 @@ async function uploadPeriodic(req: RequestWithFile, res: Response) {
     const invitationTasks: any[] = [];
 
     for (const row of rows) {
+      const vendorCode   = String(norm(row, 'Vendor Code') || '').trim();
       const taxId        = String(norm(row, 'TAX_ID') || '').trim();
       const supplierName = String(norm(row, 'Supplier Name') || '').trim();
       const buyerName    = String(norm(row, 'Buyer Name') || '').trim();
       const buyerEmail   = String(norm(row, 'Buyer Email') || '').trim().toLowerCase();
       const evalName     = String(norm(row, 'Evaluator Name') || '').trim();
       const evalEmail    = String(norm(row, 'Evaluator Email') || '').trim().toLowerCase();
+      const evalEmpNo    = String(norm(row, 'Evaluator Employee No') || '').trim();
 
-      if (!taxId && !supplierName) { summary.skipped++; continue; }
+      if (!vendorCode && !taxId && !supplierName && !buyerName && !buyerEmail && !evalName && !evalEmail && !evalEmpNo) {
+        summary.skipped++;
+        continue;
+      }
 
-      // Find existing supplier by tax_id or name
+      // 1. Resolve User identities first
+      const gcpMatch = buyerEmail
+        ? await client.query(`SELECT emp_no AS id, name AS full_name, email AS actual_email FROM "Master_Data_GCP" WHERE LOWER(email) = LOWER($1) LIMIT 1`, [buyerEmail])
+        : { rows: [] };
+
+      let buMatch = { rows: [] as any[] };
+      if (evalEmpNo) {
+        buMatch = await client.query(`SELECT emp_no AS id, name AS full_name, email AS actual_email FROM "Master_Data_All" WHERE UPPER(emp_no) = UPPER($1) LIMIT 1`, [evalEmpNo]);
+      }
+      if (buMatch.rows.length === 0 && evalEmail) {
+        buMatch = await client.query(`SELECT emp_no AS id, name AS full_name, email AS actual_email FROM "Master_Data_All" WHERE LOWER(email) = LOWER($1) LIMIT 1`, [evalEmail]);
+      }
+
+      if (buMatch.rows.length === 0 && evalEmpNo) {
+        try {
+          const apiRes = await fetch(`https://ehr.bjc.co.th/API/PUR/api/EmployeeProfile/${evalEmpNo}`);
+          if (apiRes.ok) {
+            const empData: any = await apiRes.json();
+            if (empData && empData.employeeLocalName) {
+              const empNoStr = String(empData.employeeNo).toUpperCase();
+              const name = empData.employeeLocalName || empData.employeeName;
+              const email = empData.email || null;
+              const position = empData.positionTitleENG || empData.positionTitleTHA || null;
+              const team = empData.departmentDescription || null;
+              const cobu = empData.coBuDescription || null;
+              await client.query(`
+                INSERT INTO "Master_Data_User" (emp_no, name, email, position, team, cobu_name, status)
+                VALUES ($1, $2, $3, $4, $5, $6, 'active')
+                ON CONFLICT (emp_no) DO UPDATE SET
+                  name = EXCLUDED.name, email = EXCLUDED.email, position = EXCLUDED.position,
+                  team = EXCLUDED.team, cobu_name = EXCLUDED.cobu_name, status = EXCLUDED.status
+              `, [empNoStr, name, email, position, team, cobu]);
+
+              buMatch = await client.query(`SELECT emp_no AS id, name AS full_name, email AS actual_email FROM "Master_Data_All" WHERE UPPER(emp_no) = UPPER($1) LIMIT 1`, [empNoStr]);
+            }
+          }
+        } catch (err) {}
+      }
+
+      const actualBuyerEmail = gcpMatch.rows[0]?.actual_email || buyerEmail;
+      const actualBuyerName  = gcpMatch.rows[0]?.full_name || buyerName;
+      const actualEvalEmail  = buMatch.rows[0]?.actual_email || evalEmail;
+      const actualEvalName   = buMatch.rows[0]?.full_name || evalName;
+
+      // 2. Find/Update Supplier
       const supResult = await client.query(`
         SELECT id, vendor_code, supplier_name FROM "SPES_suppliers"
-         WHERE (tax_id = $1 OR supplier_name ILIKE $2) AND is_active = TRUE
+         WHERE vendor_code = $1 AND tax_id = $2 AND supplier_name ILIKE $3 AND is_active = TRUE
          LIMIT 1
-      `, [taxId || '', supplierName]);
+      `, [vendorCode, taxId, supplierName]);
 
       if (supResult.rows.length === 0) {
-        summary.warnings.push(`ไม่พบ supplier "${supplierName || taxId}" ในระบบ`);
+        summary.warnings.push(`ไม่พบ supplier "${supplierName || taxId}" ในระบบ (หรือข้อมูลไม่ตรง 100%)`);
         summary.skipped++;
         continue;
       }
       const supplier = supResult.rows[0];
 
-      // Optionally update buyer/evaluator info
-      if (buyerEmail || evalEmail) {
+      if (actualBuyerEmail || actualEvalEmail) {
         await client.query(`
           UPDATE "SPES_suppliers" SET
             buyer_name = COALESCE($1, buyer_name),
@@ -350,46 +731,50 @@ async function uploadPeriodic(req: RequestWithFile, res: Response) {
             evaluator_name = COALESCE($3, evaluator_name),
             evaluator_email = COALESCE($4, evaluator_email)
           WHERE id = $5
-        `, [buyerName || null, buyerEmail || null, evalName || null, evalEmail || null, supplier.id]);
+        `, [actualBuyerName || null, actualBuyerEmail || null, actualEvalName || null, actualEvalEmail || null, supplier.id]);
       }
 
-      // Skip if this supplier already has an unfinished round for this exact
-      // eval_type+period — see same check in /upload/pre-post for why.
       const existingOpen = await client.query(`
         SELECT id FROM "SPES_evaluation_sessions"
          WHERE supplier_id = $1 AND eval_type = $2 AND period = $3 AND status != 'completed'
          LIMIT 1
       `, [supplier.id, evalType, period]);
+
+      let sessionId;
       if (existingOpen.rows.length > 0) {
-        summary.skipped++;
-        summary.warnings.push(`"${supplierName || supplier.supplier_name}" มีรอบประเมิน (${period}) ที่ยังไม่เสร็จสิ้นอยู่แล้ว — ข้ามแถวนี้เพื่อไม่สร้างงานซ้ำ`);
-        continue;
+        sessionId = existingOpen.rows[0].id;
+        
+        const existingTasks = await client.query(`
+          SELECT role, assigned_email FROM "SPES_evaluation_tasks"
+          WHERE session_id = $1
+        `, [sessionId]);
+
+        const hasSameGCP = existingTasks.rows.some((t: any) => t.role === 'GCP' && t.assigned_email === actualBuyerEmail);
+        const hasSameUSER = existingTasks.rows.some((t: any) => t.role === 'USER' && t.assigned_email === actualEvalEmail);
+
+        if (hasSameGCP && hasSameUSER) {
+          summary.skipped++;
+          summary.warnings.push(`"${supplierName}" มีรอบประเมิน (${period}) ซ้ำกับงานเดิม (Buyer & Evaluator ซ้ำ) — ข้ามแถวนี้`);
+          continue;
+        }
+      } else {
+        const sessionResult = await client.query(`
+          INSERT INTO "SPES_evaluation_sessions" (supplier_id, eval_type, period, status, initiated_by)
+          VALUES ($1, $2, $3, 'pending', $4) RETURNING id
+        `, [supplier.id, evalType, period, uploaderId]);
+        sessionId = sessionResult.rows[0].id;
       }
 
-      const sessionResult = await client.query(`
-        INSERT INTO "SPES_evaluation_sessions" (supplier_id, eval_type, period, status, initiated_by)
-        VALUES ($1, $2, $3, 'pending', $4) RETURNING id
-      `, [supplier.id, evalType, period, uploaderId]);
-      const sessionId = sessionResult.rows[0].id;
-
-      const gcpMatch = buyerEmail
-        ? await client.query(`            SELECT emp_no AS id, name AS full_name FROM "Master_Data_All" WHERE LOWER(email) = LOWER($1)
-            LIMIT 1`, [buyerEmail])
-        : { rows: [] };
-      const buMatch = evalEmail
-        ? await client.query(`            SELECT emp_no AS id, name AS full_name FROM "Master_Data_All" WHERE LOWER(email) = LOWER($1)
-            LIMIT 1`, [evalEmail])
-        : { rows: [] };
 
       if (buyerEmail && gcpMatch.rows.length === 0) summary.warnings.push(`ไม่พบ Buyer email "${buyerEmail}"`);
-      if (evalEmail  && buMatch.rows.length === 0)  summary.warnings.push(`ไม่พบ Evaluator email "${evalEmail}"`);
-      if (buyerEmail && evalEmail && buyerEmail === evalEmail) {
-        summary.warnings.push(`Buyer Email และ Evaluator Email เป็นคนเดียวกัน ("${buyerEmail}") สำหรับ "${supplierName}" — งานนี้จะไม่เข้าคิว supervisor ได้ ต้องใช้คนละคน`);
+      if (buMatch.rows.length === 0) summary.warnings.push(`ไม่พบ Evaluator รหัส "${evalEmpNo}" หรือ email "${evalEmail}"`);
+      if (actualBuyerEmail && actualEvalEmail && actualBuyerEmail.toLowerCase() === actualEvalEmail.toLowerCase()) {
+        summary.warnings.push(`Buyer Email และ Evaluator Email เป็นคนเดียวกัน ("${actualBuyerEmail}") สำหรับ "${supplierName}" — งานนี้จะไม่เข้าคิว supervisor ได้ ต้องใช้คนละคน`);
       }
 
       const taskRows = [
-        { role: 'GCP', email: buyerEmail, name: buyerName, empId: gcpMatch.rows[0]?.id || null, empName: gcpMatch.rows[0]?.full_name || buyerName },
-        { role: 'USER', email: evalEmail,  name: evalName,  empId: buMatch.rows[0]?.id  || null, empName: buMatch.rows[0]?.full_name  || evalName  },
+        { role: 'GCP', email: actualBuyerEmail, name: actualBuyerName, empId: gcpMatch.rows[0]?.id || null, empName: actualBuyerName },
+        { role: 'USER', email: actualEvalEmail,  name: actualEvalName,  empId: buMatch.rows[0]?.id  || null, empName: actualEvalName  },
       ];
 
       for (const t of taskRows) {
@@ -1083,8 +1468,23 @@ async function uploadSuppliers(req: RequestWithFile, res: Response) {
   }
 }
 
+
 module.exports = {
-  uploadPrePost, uploadPeriodic, createAdHocEvaluation, listTasks, remindTask, updateTask,
-  deleteSession, remindAllTasks, bulkDeleteSessions, listBatches, listServiceEvaluations,
-  listSuppliersAdmin, updateSupplierAdmin, createSupplierAdmin, uploadSuppliers,
+  uploadPrePost,
+  validatePrePostUpload,
+  validatePeriodicUpload,
+  uploadPeriodic,
+  createAdHocEvaluation,
+  listTasks,
+  remindTask,
+  updateTask,
+  deleteSession,
+  bulkDeleteSessions,
+  remindAllTasks,
+  listBatches,
+  listServiceEvaluations,
+  listSuppliersAdmin,
+  updateSupplierAdmin,
+  createSupplierAdmin,
+  uploadSuppliers
 };

@@ -301,7 +301,7 @@ async function syncMasterDataGCP() {
   try {
     const res = await fetch('https://ehr.bjc.co.th/API/PUR/api/EmployeeProfile/bjc-bcp-active-with-contact');
     if (!res.ok) throw new Error(`API returned ${res.status}`);
-    const data = await res.json();
+    const data: any = await res.json();
 
     await client.query('BEGIN');
 
