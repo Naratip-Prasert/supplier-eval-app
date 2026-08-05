@@ -100,6 +100,10 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
       VALUES ($1, 'pre_post_eval', $2, $3, 'processing') RETURNING id
     `, [uploaderId, req.file.originalname, rows.length]);
     batchId = batchResult.rows[0].id;
+    const resolutions = req.body.resolutions ? JSON.parse(req.body.resolutions) : {};
+    const analyzeOnly = req.body.analyzeOnly === 'true';
+    const conflicts: any[] = [];
+    const analysis: any[] = [];
 
     const summary: { processed: number; skipped: number; pre_eval: number; post_eval: number; warnings: string[] } =
       { processed: 0, skipped: 0, pre_eval: 0, post_eval: 0, warnings: [] };
@@ -108,7 +112,9 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
     const preEvalDueDays  = await getEmailSetting('pre_eval_due_days');
     const postEvalDueDays = await getEmailSetting('post_eval_due_days');
 
+    let rowIdx = 0;
     for (const row of rows) {
+      rowIdx++;
       const taxId        = String(norm(row, 'TAX_ID') || '').trim();
       const supplierName = String(norm(row, 'Supplier Name') || '').trim();
       const category     = String(norm(row, 'Category') || '').trim();
@@ -122,7 +128,11 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
       const evalName     = String(norm(row, 'Evaluator Name') || '').trim();
       const evalEmail    = String(norm(row, 'Evaluator Email') || '').trim().toLowerCase();
 
-      if (!taxId && !supplierName) { summary.skipped++; continue; }
+      if (!taxId && !supplierName) { 
+        summary.skipped++; 
+        analysis.push({ rowIdx, action: 'SKIP_NO_DATA', row: { supplierName } });
+        continue; 
+      }
 
       // Determine eval type
       const evalType = ptaDate ? 'post_eval' : 'pre_eval';
@@ -152,21 +162,49 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
             category || null, fnOwner || null, jobValue, ptaDate || null,
             resolvedBuyerName, buyerEmail || null, resolvedEvalName, evalEmail || null]);
         supplier = supInsert.rows[0];
+        analysis.push({ rowIdx, action: 'CREATE_PRE_EVAL', row: { taxId, supplierName, jobValue, buyerEmail, evalEmail, ptaDate } });
       } else {
         // post_eval: try to update the latest matching vendor_code, or insert if none exists
         const latestMatch = await client.query(`
-          SELECT id FROM "SPES2_suppliers" 
+          SELECT 
+            id, 
+            job_value_thb AS "jobValue", 
+            pta_approve_date AS "ptaDate",
+            vendor_code AS "vendorCode",
+            supplier_name AS "supplierName",
+            buyer_email AS "buyerEmail",
+            evaluator_email AS "evaluatorEmail",
+            created_at AS "createdAt"
+          FROM "SPES2_suppliers" 
           WHERE vendor_code = $1 
             AND buyer_email IS NOT DISTINCT FROM $2 
             AND evaluator_email IS NOT DISTINCT FROM $3
-          ORDER BY created_at DESC LIMIT 1
+          ORDER BY created_at DESC
         `, [
           taxId || supplierName.substring(0, 50),
           buyerEmail || null,
           evalEmail || null
         ]);
 
-        if (latestMatch.rows.length > 0) {
+        let targetId = null;
+        if (latestMatch.rows.length > 1) {
+          const rowKey = String(rowIdx);
+          if (resolutions[rowKey]) {
+            targetId = resolutions[rowKey];
+          } else {
+            conflicts.push({
+              rowIdx,
+              row: { taxId, supplierName, jobValue, buyerEmail, evalEmail, ptaDate },
+              matches: latestMatch.rows
+            });
+            analysis.push({ rowIdx, action: 'CONFLICT', row: { taxId, supplierName, jobValue, buyerEmail, evalEmail, ptaDate }, matches: latestMatch.rows });
+            continue;
+          }
+        } else if (latestMatch.rows.length === 1) {
+          targetId = latestMatch.rows[0].id;
+        }
+
+        if (targetId) {
           const supUpdate = await client.query(`
             UPDATE "SPES2_suppliers" SET
               supplier_name   = $1,
@@ -183,8 +221,9 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
             RETURNING id, vendor_code, supplier_name
           `, [supplierName, category || null, fnOwner || null, jobValue, ptaDate || null,
               resolvedBuyerName, buyerEmail || null, resolvedEvalName, evalEmail || null,
-              latestMatch.rows[0].id]);
+              targetId]);
           supplier = supUpdate.rows[0];
+          analysis.push({ rowIdx, action: 'UPDATE_POST_EVAL', row: { taxId, supplierName, jobValue, buyerEmail, evalEmail, ptaDate } });
         } else {
           // Fallback insert if not found
           const supInsert = await client.query(`
@@ -197,6 +236,7 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
               category || null, fnOwner || null, jobValue, ptaDate || null,
               resolvedBuyerName, buyerEmail || null, resolvedEvalName, evalEmail || null]);
           supplier = supInsert.rows[0];
+          analysis.push({ rowIdx, action: 'CREATE_POST_EVAL', row: { taxId, supplierName, jobValue, buyerEmail, evalEmail, ptaDate } });
         }
       }
 
@@ -204,6 +244,8 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
       if (evalType === 'pre_eval' && (!jobValue || jobValue < 1000000)) {
         summary.processed++;
         summary.warnings.push(`"${supplierName}" ถูกเพิ่มเข้าสู่ระบบ (Supplier Directory) แต่ไม่สร้างงานประเมินเนื่องจาก Job Value < 1 ล้านและไม่มี PTA Date`);
+        const act = analysis.find(a => a.rowIdx === rowIdx);
+        if (act) act.action = 'SKIP_TASK_LOW_VALUE';
         continue;
       }
 
@@ -229,6 +271,8 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
       if (existingOpen.rows.length > 0) {
         summary.skipped++;
         summary.warnings.push(`"${supplierName}" มีรอบประเมิน (${period}) ที่ยังไม่เสร็จสิ้นอยู่แล้ว — ข้ามแถวนี้เพื่อไม่สร้างงานซ้ำ`);
+        const act = analysis.find(a => a.rowIdx === rowIdx);
+        if (act) act.action = 'SKIP_EXISTING_OPEN';
         continue;
       }
 
@@ -282,6 +326,21 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
 
       evalType === 'pre_eval' ? summary.pre_eval++ : summary.post_eval++;
       summary.processed++;
+    }
+
+    // Check for conflicts before committing
+    if (conflicts.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ 
+        message: 'พบรายการที่ตรงกับหลายโปรเจกต์ โปรดระบุโปรเจกต์ที่ต้องการอัปเดต', 
+        conflicts,
+        analysis
+      });
+    }
+
+    if (analyzeOnly) {
+      await client.query('ROLLBACK');
+      return res.status(200).json({ ok: true, analysis });
     }
 
     // Update batch status
@@ -575,6 +634,11 @@ async function createAdHocEvaluation(req: Request, res: Response) {
         eval_type_label: 'Ad-hoc Evaluation (กรณีพิเศษ)',
         supplier,
       });
+    }
+
+    if (conflicts.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ message: 'พบรายการที่ตรงกับหลายโปรเจกต์ โปรดระบุโปรเจกต์ที่ต้องการอัปเดต', conflicts });
     }
 
     await client.query('COMMIT');

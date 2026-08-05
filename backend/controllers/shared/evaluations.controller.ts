@@ -125,7 +125,7 @@ async function createEvaluation(req: Request, res: Response) {
     // USER below. Log it so a misattributed submitter is at least
     // traceable instead of vanishing without a trace.
     if (!['USER', 'GCP', 'ADMIN'].includes(employee.role)) {
-      console.warn(`[evaluations] role "${employee.role}" ไม่ใช่ role มาตรฐานสำหรับส่งผลประเมิน — บันทึกเป็น USER แทน (employeeId=${employee.id})`);
+      console.warn(`[evaluations] role "${employee.role}" ไม่ใช่ role มาตรฐานสำหรับส่งผลประเมิน — บันทึกเป็น USER แทน (employeeId=${employee.empId})`);
     }
     let evalRole = ['USER', 'GCP', 'ADMIN'].includes(employee.role) ? employee.role : 'USER';
 
@@ -162,7 +162,7 @@ async function createEvaluation(req: Request, res: Response) {
             AND (assigned_employee_id = $2
                  OR LOWER(assigned_email) = LOWER((SELECT email FROM "Master_Data_All" WHERE emp_no = $2 LIMIT 1)))
           LIMIT 1`,
-        [sessionId, employee.id]
+        [sessionId, employee.empId]
       );
       if (taskRoleResult.rows.length > 0 && ['USER', 'GCP'].includes(taskRoleResult.rows[0].role)) {
         evalRole = taskRoleResult.rows[0].role;
@@ -219,7 +219,7 @@ async function createEvaluation(req: Request, res: Response) {
         const newSession = await client.query(
           `INSERT INTO "SPES2_evaluation_sessions" (supplier_id, eval_type, period, initiated_by)
             VALUES ($1, $2, $3, $4) RETURNING id`,
-          [supplier.id, evalType, period, employee.id]
+          [supplier.id, evalType, period, employee.empId]
         );
         sessionId = newSession.rows[0].id;
       }
@@ -293,7 +293,7 @@ async function createEvaluation(req: Request, res: Response) {
               OR LOWER(assigned_email) = LOWER((SELECT email FROM "Master_Data_All" WHERE emp_no = $2 LIMIT 1)))
          AND status != 'completed'
        RETURNING id, assigned_email, assigned_name, due_date, thankyou_sent_at
-    `, [sessionId, employee.id]).catch(() => ({ rows: [] }));
+    `, [sessionId, employee.empId]).catch(() => ({ rows: [] }));
 
     // 9. Insert evaluation record (raw_scores stores every criterion submitted)
     const evalResult = await client.query(
@@ -301,7 +301,7 @@ async function createEvaluation(req: Request, res: Response) {
          (session_id, employee_id, role, product_type, status, total_score, grade, submitted_at, raw_scores, module_code, custom_module_items)
        VALUES ($1, $2, $3, $4, 'saved', $5, $6, NOW(), $7, $8, $9)
        RETURNING id`,
-      [sessionId, employee.id, evalRole, productType, totalScore, grade, JSON.stringify(scores),
+      [sessionId, employee.empId, evalRole, productType, totalScore, grade, JSON.stringify(scores),
        moduleCode || null, customModuleItems ? JSON.stringify(customModuleItems) : null]
     );
     const evaluationId = evalResult.rows[0].id;
