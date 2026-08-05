@@ -12,6 +12,7 @@ type RequestWithFile = Request & { file?: { buffer: Buffer; originalname: string
 const pool   = require('../../db');
 const XLSX   = require('xlsx');
 const { sendInvitationEmail, sendReminderEmail, getEmailSetting } = require('../../utils/emailService');
+const { syncSupplierNamesWithMaster } = require('../../utils/cronJobs');
 
 // ── Parse uploaded file → array of row objects ────────────────
 function parseFile(buffer: Buffer, originalname: string): any[] {
@@ -127,6 +128,18 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
       // Determine eval type
       const evalType = ptaDate ? 'post_eval' : 'pre_eval';
 
+      // Match buyer (GCP) and evaluator (USER) by email against Master_Data_All
+      // to ensure we use the correct, current name when saving to SPES_suppliers
+      const gcpMatch = buyerEmail
+        ? await client.query(`SELECT emp_no AS id, name AS full_name FROM "Master_Data_All" WHERE LOWER(email) = LOWER($1) LIMIT 1`, [buyerEmail])
+        : { rows: [] };
+      const buMatch = evalEmail
+        ? await client.query(`SELECT emp_no AS id, name AS full_name FROM "Master_Data_All" WHERE LOWER(email) = LOWER($1) LIMIT 1`, [evalEmail])
+        : { rows: [] };
+
+      const resolvedBuyerName = gcpMatch.rows[0]?.full_name || buyerName || null;
+      const resolvedEvalName = buMatch.rows[0]?.full_name || evalName || null;
+
       // Upsert supplier
       const supUpsert = await client.query(`
         INSERT INTO "SPES_suppliers" (vendor_code, supplier_name, product_type, tax_id, category,
@@ -147,7 +160,7 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
         RETURNING id, vendor_code, supplier_name
       `, [taxId || supplierName.substring(0, 50), supplierName, taxId || null,
           category || null, fnOwner || null, jobValue, ptaDate || null,
-          buyerName || null, buyerEmail || null, evalName || null, evalEmail || null]);
+          resolvedBuyerName, buyerEmail || null, resolvedEvalName, evalEmail || null]);
 
       const supplier = supUpsert.rows[0];
 
@@ -183,16 +196,6 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
       `, [supplier.id, evalType, period, uploaderId]);
       const sessionId = sessionResult.rows[0].id;
 
-      // Match buyer (GCP) and evaluator (USER) by email
-      const gcpMatch = buyerEmail
-        ? await client.query(`            SELECT emp_no AS id, name AS full_name FROM "Master_Data_All" WHERE LOWER(email) = LOWER($1)
-            LIMIT 1`, [buyerEmail])
-        : { rows: [] };
-      const buMatch = evalEmail
-        ? await client.query(`            SELECT emp_no AS id, name AS full_name FROM "Master_Data_All" WHERE LOWER(email) = LOWER($1)
-            LIMIT 1`, [evalEmail])
-        : { rows: [] };
-
       if (buyerEmail && gcpMatch.rows.length === 0) {
         summary.warnings.push(`ไม่พบ Buyer email "${buyerEmail}" ในระบบ`);
       }
@@ -208,8 +211,8 @@ async function uploadPrePost(req: RequestWithFile, res: Response) {
 
       // Create tasks for GCP and USER
       const taskRows = [
-        { role: 'GCP', email: buyerEmail, name: buyerName, empId: gcpMatch.rows[0]?.id || null, empName: gcpMatch.rows[0]?.full_name || buyerName },
-        { role: 'USER', email: evalEmail,  name: evalName,  empId: buMatch.rows[0]?.id  || null, empName: buMatch.rows[0]?.full_name  || evalName  },
+        { role: 'GCP', email: buyerEmail, name: resolvedBuyerName, empId: gcpMatch.rows[0]?.id || null, empName: resolvedBuyerName },
+        { role: 'USER', email: evalEmail, name: resolvedEvalName, empId: buMatch.rows[0]?.id  || null, empName: resolvedEvalName },
       ];
 
       for (const t of taskRows) {
@@ -341,6 +344,18 @@ async function uploadPeriodic(req: RequestWithFile, res: Response) {
       }
       const supplier = supResult.rows[0];
 
+      // Match buyer (GCP) and evaluator (USER) by email against Master_Data_All
+      // to ensure we use the correct, current name when saving to SPES_suppliers
+      const gcpMatch = buyerEmail
+        ? await client.query(`SELECT emp_no AS id, name AS full_name FROM "Master_Data_All" WHERE LOWER(email) = LOWER($1) LIMIT 1`, [buyerEmail])
+        : { rows: [] };
+      const buMatch = evalEmail
+        ? await client.query(`SELECT emp_no AS id, name AS full_name FROM "Master_Data_All" WHERE LOWER(email) = LOWER($1) LIMIT 1`, [evalEmail])
+        : { rows: [] };
+
+      const resolvedBuyerName = gcpMatch.rows[0]?.full_name || buyerName || null;
+      const resolvedEvalName = buMatch.rows[0]?.full_name || evalName || null;
+
       // Optionally update buyer/evaluator info
       if (buyerEmail || evalEmail) {
         await client.query(`
@@ -350,7 +365,7 @@ async function uploadPeriodic(req: RequestWithFile, res: Response) {
             evaluator_name = COALESCE($3, evaluator_name),
             evaluator_email = COALESCE($4, evaluator_email)
           WHERE id = $5
-        `, [buyerName || null, buyerEmail || null, evalName || null, evalEmail || null, supplier.id]);
+        `, [resolvedBuyerName, buyerEmail || null, resolvedEvalName, evalEmail || null, supplier.id]);
       }
 
       // Skip if this supplier already has an unfinished round for this exact
@@ -372,15 +387,6 @@ async function uploadPeriodic(req: RequestWithFile, res: Response) {
       `, [supplier.id, evalType, period, uploaderId]);
       const sessionId = sessionResult.rows[0].id;
 
-      const gcpMatch = buyerEmail
-        ? await client.query(`            SELECT emp_no AS id, name AS full_name FROM "Master_Data_All" WHERE LOWER(email) = LOWER($1)
-            LIMIT 1`, [buyerEmail])
-        : { rows: [] };
-      const buMatch = evalEmail
-        ? await client.query(`            SELECT emp_no AS id, name AS full_name FROM "Master_Data_All" WHERE LOWER(email) = LOWER($1)
-            LIMIT 1`, [evalEmail])
-        : { rows: [] };
-
       if (buyerEmail && gcpMatch.rows.length === 0) summary.warnings.push(`ไม่พบ Buyer email "${buyerEmail}"`);
       if (evalEmail  && buMatch.rows.length === 0)  summary.warnings.push(`ไม่พบ Evaluator email "${evalEmail}"`);
       if (buyerEmail && evalEmail && buyerEmail === evalEmail) {
@@ -388,8 +394,8 @@ async function uploadPeriodic(req: RequestWithFile, res: Response) {
       }
 
       const taskRows = [
-        { role: 'GCP', email: buyerEmail, name: buyerName, empId: gcpMatch.rows[0]?.id || null, empName: gcpMatch.rows[0]?.full_name || buyerName },
-        { role: 'USER', email: evalEmail,  name: evalName,  empId: buMatch.rows[0]?.id  || null, empName: buMatch.rows[0]?.full_name  || evalName  },
+        { role: 'GCP', email: buyerEmail, name: resolvedBuyerName, empId: gcpMatch.rows[0]?.id || null, empName: resolvedBuyerName },
+        { role: 'USER', email: evalEmail, name: resolvedEvalName, empId: buMatch.rows[0]?.id  || null, empName: resolvedEvalName },
       ];
 
       for (const t of taskRows) {
@@ -920,8 +926,28 @@ async function listSuppliersAdmin(req: Request, res: Response) {
   }
 }
 
+async function syncSupplierNames(req: Request, res: Response) {
+  try {
+    const result = await syncSupplierNamesWithMaster();
+    res.json({ message: 'ซิงก์ข้อมูลเสร็จสิ้น', ...result });
+  } catch (err: any) {
+    console.error('[syncSupplierNames] Error:', err);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
+}
+
 module.exports = {
-  uploadPrePost, uploadPeriodic, createAdHocEvaluation, listTasks, remindTask, updateTask,
-  deleteSession, remindAllTasks, bulkDeleteSessions, listBatches, listServiceEvaluations,
+  uploadPrePost,
+  uploadPeriodic,
+  createAdHocEvaluation,
+  listTasks,
+  remindTask,
+  updateTask,
+  deleteSession,
+  bulkDeleteSessions,
+  remindAllTasks,
+  listBatches,
+  listServiceEvaluations,
   listSuppliersAdmin,
+  syncSupplierNames
 };

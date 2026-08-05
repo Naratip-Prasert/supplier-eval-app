@@ -399,6 +399,52 @@ async function syncMasterDataUser() {
   }
 }
 
+async function syncSupplierNamesWithMaster() {
+  console.log('[cron] Starting syncSupplierNamesWithMaster...');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    
+    // Update buyer_name where email matches and name differs
+    const buyerRes = await client.query(`
+      UPDATE "SPES_suppliers" s
+      SET buyer_name = m.name
+      FROM (SELECT DISTINCT ON (LOWER(email)) LOWER(email) AS email, name FROM "Master_Data_All" ORDER BY LOWER(email)) m
+      WHERE LOWER(s.buyer_email) = m.email
+        AND COALESCE(s.buyer_name, '') != m.name
+    `);
+    
+    // Update evaluator_name where email matches and name differs
+    const evalRes = await client.query(`
+      UPDATE "SPES_suppliers" s
+      SET evaluator_name = m.name
+      FROM (SELECT DISTINCT ON (LOWER(email)) LOWER(email) AS email, name FROM "Master_Data_All" ORDER BY LOWER(email)) m
+      WHERE LOWER(s.evaluator_email) = m.email
+        AND COALESCE(s.evaluator_name, '') != m.name
+    `);
+
+    // Update assigned_name in evaluation_tasks for non-completed tasks
+    const taskRes = await client.query(`
+      UPDATE "SPES_evaluation_tasks" t
+      SET assigned_name = m.name
+      FROM (SELECT DISTINCT ON (LOWER(email)) LOWER(email) AS email, name FROM "Master_Data_All" ORDER BY LOWER(email)) m
+      WHERE LOWER(t.assigned_email) = m.email
+        AND COALESCE(t.assigned_name, '') != m.name
+        AND t.status != 'completed'
+    `);
+
+    await client.query('COMMIT');
+    console.log(`[cron] syncSupplierNamesWithMaster finished: ${buyerRes.rowCount} buyers updated, ${evalRes.rowCount} evaluators updated, ${taskRes.rowCount} tasks updated.`);
+    return { buyersUpdated: buyerRes.rowCount, evaluatorsUpdated: evalRes.rowCount, tasksUpdated: taskRes.rowCount };
+  } catch (e: any) {
+    await client.query('ROLLBACK');
+    console.error('[cron] syncSupplierNamesWithMaster error:', e.message);
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 // Re-override startCronJobsFull to include master data sync
 const _origStart = startCronJobsFull;
 function startCronJobsWithSync() {
@@ -407,8 +453,9 @@ function startCronJobsWithSync() {
   cron.schedule('0 2 * * *', async () => {
     await syncMasterDataGCP();
     await syncMasterDataUser();
+    await syncSupplierNamesWithMaster();
   }, { timezone: 'Asia/Bangkok' });
   console.log('✅ Master Data Sync cron jobs started (daily 02:00 Bangkok)');
 }
 
-module.exports = { startCronJobs: startCronJobsWithSync, syncMasterDataGCP, syncMasterDataUser };
+module.exports = { startCronJobs: startCronJobsWithSync, syncMasterDataGCP, syncMasterDataUser, syncSupplierNamesWithMaster };
