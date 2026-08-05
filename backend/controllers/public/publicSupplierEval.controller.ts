@@ -18,8 +18,8 @@ async function loadToken(token: string) {
     `SELECT t.id, t.session_id AS "sessionId", t.supplier_id AS "supplierId",
             t.expires_at AS "expiresAt", t.used_at AS "usedAt",
             s.supplier_name AS "supplierName"
-       FROM "SPES_supplier_eval_tokens" t
-       JOIN "SPES_suppliers" s ON s.id = t.supplier_id
+       FROM "SPES2_supplier_eval_tokens" t
+       JOIN "SPES2_suppliers" s ON s.id = t.supplier_id
       WHERE t.token = $1`,
     [token]
   );
@@ -39,22 +39,22 @@ async function getToken(req: Request, res: Response) {
     const [targetsResult, catResult, itemResult] = await Promise.all([
       pool.query(
         `SELECT ev.role, e.emp_no AS "employeeId", e.name AS "fullName"
-           FROM "SPES_evaluations" ev
+           FROM "SPES2_evaluations" ev
            JOIN "Master_Data_All" e ON e.emp_no = ev.employee_id
           WHERE ev.session_id = $1 AND ev.role IN ('USER', 'GCP') AND ev.status = 'saved'`,
         [row.sessionId]
       ),
       pool.query(
         `SELECT id, name_th AS "nameTh", total_weight AS "totalWeight", display_order AS "displayOrder"
-           FROM "SPES_evaluation_main_criteria"
+           FROM "SPES2_evaluation_main_criteria"
           WHERE code LIKE 'SVC%' AND is_active = TRUE
           ORDER BY display_order`
       ),
       pool.query(
         `SELECT s.id, s.category_id AS "categoryId", s.code, s.name_th AS "nameTh",
                 s.default_weight AS "defaultWeight", s.display_order AS "displayOrder"
-           FROM "SPES_evaluation_sub_criteria" s
-           JOIN "SPES_evaluation_main_criteria" m ON m.id = s.category_id
+           FROM "SPES2_evaluation_sub_criteria" s
+           JOIN "SPES2_evaluation_main_criteria" m ON m.id = s.category_id
           WHERE s.criteria_set = 'service' AND s.is_active = TRUE AND m.is_active = TRUE
           ORDER BY s.display_order`
       ),
@@ -67,7 +67,7 @@ async function getToken(req: Request, res: Response) {
     const itemIds = itemResult.rows.map((r: any) => r.id);
     const levelResult = itemIds.length
       ? await pool.query(
-          `SELECT criterion_id AS "criterionId", level, description FROM "SPES_score_level_descriptions"
+          `SELECT criterion_id AS "criterionId", level, description FROM "SPES2_score_level_descriptions"
             WHERE criterion_id = ANY($1::uuid[]) ORDER BY criterion_id, level`,
           [itemIds]
         )
@@ -112,8 +112,8 @@ async function submitToken(req: Request, res: Response) {
       `SELECT t.id, t.session_id AS "sessionId", t.supplier_id AS "supplierId",
               t.expires_at AS "expiresAt", t.used_at AS "usedAt",
               s.supplier_name AS "supplierName"
-         FROM "SPES_supplier_eval_tokens" t
-         JOIN "SPES_suppliers" s ON s.id = t.supplier_id
+         FROM "SPES2_supplier_eval_tokens" t
+         JOIN "SPES2_suppliers" s ON s.id = t.supplier_id
         WHERE t.token = $1
         FOR UPDATE OF t`,
       [req.params.token]
@@ -125,10 +125,10 @@ async function submitToken(req: Request, res: Response) {
 
     // Claim the token now, before inserting anything — closes the window a
     // concurrent request could otherwise slip through.
-    await client.query(`UPDATE "SPES_supplier_eval_tokens" SET used_at = NOW() WHERE id = $1`, [row.id]);
+    await client.query(`UPDATE "SPES2_supplier_eval_tokens" SET used_at = NOW() WHERE id = $1`, [row.id]);
 
     const criteriaResult = await client.query(
-      `SELECT code, default_weight FROM "SPES_evaluation_sub_criteria"
+      `SELECT code, default_weight FROM "SPES2_evaluation_sub_criteria"
         WHERE criteria_set = 'service' AND is_active = TRUE`
     );
     const criteriaMap: Record<string, { default_weight: number }> = {};
@@ -145,7 +145,7 @@ async function submitToken(req: Request, res: Response) {
 
       const direction = role === 'USER' ? 'supplier_to_user' : 'supplier_to_gcp';
       const insertRes = await client.query(
-        `INSERT INTO "SPES_service_evaluations"
+        `INSERT INTO "SPES2_service_evaluations"
            (session_id, direction, evaluator_supplier_id, target_employee_id, total_score, grade, raw_scores)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (session_id, direction, target_employee_id) DO NOTHING

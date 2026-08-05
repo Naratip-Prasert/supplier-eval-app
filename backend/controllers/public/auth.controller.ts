@@ -53,9 +53,9 @@ async function login(req: Request, res: Response) {
       }
     }
 
-    // Overwrite role if in SPES_Roles
+    // Overwrite role if in SPES2_Roles
     if (foundEmp) {
-      const roleResult = await pool.query(`SELECT role FROM "SPES_Roles" WHERE UPPER(emp_no) = UPPER($1)`, [foundEmp.emp_no]);
+      const roleResult = await pool.query(`SELECT role FROM "SPES2_Roles" WHERE UPPER(emp_no) = UPPER($1)`, [foundEmp.emp_no]);
       if (roleResult.rows.length > 0) {
         computedRole = roleResult.rows[0].role;
       }

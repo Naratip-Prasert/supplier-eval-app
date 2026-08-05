@@ -151,7 +151,7 @@ pool.connect()
     // boundaries) and nothing else in the app ever writes these rows, so
     // this UPSERT is the only thing keeping them right.
     await client.query(`
-      INSERT INTO "SPES_grade_thresholds" (grade, min_score, max_score, label_th, label_en, color_hex)
+      INSERT INTO "SPES2_grade_thresholds" (grade, min_score, max_score, label_th, label_en, color_hex)
       VALUES
         ('A', 90,    100,   'ผ่านการรับรอง',    'Approved',             '#1b5e20'),
         ('B', 80,    89.99, 'ผ่านเงื่อนไข',     'Conditional',          '#1565c0'),
@@ -171,7 +171,7 @@ pool.connect()
     // ESG sub-groups (Environment/Social/Governance) from the Parameter page
     // instead of those 3 groups being permanently hardcoded in constants.js.
     await client.query(`
-      ALTER TABLE "SPES_evaluation_main_criteria" ADD COLUMN IF NOT EXISTS group_labels JSONB;
+      ALTER TABLE "SPES2_evaluation_main_criteria" ADD COLUMN IF NOT EXISTS group_labels JSONB;
     `).catch((err: any) => console.warn('group_labels column migration warning:', err.message));
 
     // ── DEAD-CODE REMOVAL NOTE (2026-07-08) ──────────────────────
@@ -205,7 +205,7 @@ pool.connect()
       .catch((err: any) => console.warn('email template seed warning:', err.message));
 
     // Create default ADMIN account if none exists.
-    // (Removed: Auth is now handled via EHR API and Master_Data_GCP / SPES_Roles)
+    // (Removed: Auth is now handled via EHR API and Master_Data_GCP / SPES2_Roles)
 
     client.release();
     console.log('✅ PostgreSQL connected');

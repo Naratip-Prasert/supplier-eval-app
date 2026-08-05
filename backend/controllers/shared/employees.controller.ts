@@ -22,7 +22,7 @@ async function listEmployees(req: Request, res: Response) {
          NULL             AS "createdAt",
          NULL             AS "profilePicture"
        FROM "Master_Data_All" e
-       LEFT JOIN "SPES_Roles" r ON r.emp_no = e.emp_no`
+       LEFT JOIN "SPES2_Roles" r ON r.emp_no = e.emp_no`
     );
     res.json(result.rows);
   } catch (err: any) {
@@ -43,7 +43,7 @@ async function getMe(req: Request, res: Response) {
               e.team           AS "department",
               e.position       AS "jobTitle"
          FROM "Master_Data_All" e
-         LEFT JOIN "SPES_Roles" r ON r.emp_no = e.emp_no
+         LEFT JOIN "SPES2_Roles" r ON r.emp_no = e.emp_no
         WHERE e.emp_no = $1`,
       [req.user!.empId]
     );
@@ -86,7 +86,7 @@ async function updateMe(req: Request, res: Response) {
               e.team        AS "department",
               e.position    AS "jobTitle"
          FROM "Master_Data_All" e
-         LEFT JOIN "SPES_Roles" r ON r.emp_no = e.emp_no
+         LEFT JOIN "SPES2_Roles" r ON r.emp_no = e.emp_no
         WHERE e.emp_no = $1`,
       [req.user!.empId]
     );
@@ -122,7 +122,7 @@ async function getEmployee(req: Request, res: Response) {
          e.position     AS "jobTitle",
          NULL           AS "jobTitleCode"
        FROM "Master_Data_All" e
-       LEFT JOIN "SPES_Roles" r ON r.emp_no = e.emp_no
+       LEFT JOIN "SPES2_Roles" r ON r.emp_no = e.emp_no
        WHERE e.emp_no = $1`,
       [(req.params.employeeId as string).trim()]
     );
@@ -148,10 +148,10 @@ async function updateEmployee(req: Request, res: Response) {
     return res.status(400).json({ message: 'ไม่มีข้อมูลที่จะอัปเดต' });
   }
   try {
-    // updateEmployee changes role. Role is stored in SPES_Roles.
+    // updateEmployee changes role. Role is stored in SPES2_Roles.
     if (role !== undefined) {
       const result = await pool.query(
-        `INSERT INTO "SPES_Roles" (emp_no, role)
+        `INSERT INTO "SPES2_Roles" (emp_no, role)
          VALUES ($1, $2)
          ON CONFLICT (emp_no) DO UPDATE SET role = EXCLUDED.role
          RETURNING emp_no`,

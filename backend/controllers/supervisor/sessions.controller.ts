@@ -33,11 +33,11 @@ async function listSessions(req: Request, res: Response) {
          es.completed_at    AS "completedAt",
          initiator.emp_no   AS "initiatedBy",
          COALESCE(
-           (SELECT sr.review_due FROM "SPES_supervisor_reviews" sr WHERE sr.session_id = es.id ORDER BY sr.created_at DESC LIMIT 1),
-           (SELECT MAX(et.due_date) FROM "SPES_evaluation_tasks" et WHERE et.session_id = es.id)
+           (SELECT sr.review_due FROM "SPES2_supervisor_reviews" sr WHERE sr.session_id = es.id ORDER BY sr.created_at DESC LIMIT 1),
+           (SELECT MAX(et.due_date) FROM "SPES2_evaluation_tasks" et WHERE et.session_id = es.id)
          ) AS "dueDate"
-       FROM "SPES_evaluation_sessions" es
-       JOIN "SPES_suppliers" s ON s.id = es.supplier_id
+       FROM "SPES2_evaluation_sessions" es
+       JOIN "SPES2_suppliers" s ON s.id = es.supplier_id
        LEFT JOIN "Master_Data_All" initiator ON initiator.emp_no = es.initiated_by
        WHERE ($1::text IS NULL OR s.vendor_code = $1)
          AND ($2::text IS NULL OR es.status = $2)
@@ -63,7 +63,7 @@ async function listSessions(req: Request, res: Response) {
          emp.emp_no       AS "employeeId",
          emp.name         AS "fullName",
          NULL             AS "profilePicture"
-       FROM "SPES_evaluations" ev
+       FROM "SPES2_evaluations" ev
        JOIN "Master_Data_All" emp ON emp.emp_no = ev.employee_id
        WHERE ev.session_id = ANY($1)`,
       [sessionIds]
@@ -106,11 +106,11 @@ async function getSession(req: Request, res: Response) {
          es.created_at      AS "createdAt",
          es.completed_at    AS "completedAt",
          COALESCE(
-           (SELECT sr.review_due FROM "SPES_supervisor_reviews" sr WHERE sr.session_id = es.id ORDER BY sr.created_at DESC LIMIT 1),
-           (SELECT MAX(et.due_date) FROM "SPES_evaluation_tasks" et WHERE et.session_id = es.id)
+           (SELECT sr.review_due FROM "SPES2_supervisor_reviews" sr WHERE sr.session_id = es.id ORDER BY sr.created_at DESC LIMIT 1),
+           (SELECT MAX(et.due_date) FROM "SPES2_evaluation_tasks" et WHERE et.session_id = es.id)
          ) AS "dueDate"
-       FROM "SPES_evaluation_sessions" es
-       JOIN "SPES_suppliers" s ON s.id = es.supplier_id
+       FROM "SPES2_evaluation_sessions" es
+       JOIN "SPES2_suppliers" s ON s.id = es.supplier_id
        WHERE es.id = $1`,
       [req.params.id]
     );
@@ -134,7 +134,7 @@ async function getSession(req: Request, res: Response) {
          NULL            AS "profilePicture",
          emp.team        AS "department",
          emp.position    AS "jobTitle"
-       FROM "SPES_evaluations" ev
+       FROM "SPES2_evaluations" ev
        JOIN "Master_Data_All" emp ON emp.emp_no = ev.employee_id
        WHERE ev.session_id = $1
        ORDER BY ev.role`,
@@ -154,9 +154,9 @@ async function getSession(req: Request, res: Response) {
          evs.score,
          evs.note,
          evs.weighted_score   AS "weightedScore"
-       FROM "SPES_evaluation_scores" evs
-       JOIN "SPES_evaluation_sub_criteria"   ec  ON ec.id  = evs.criterion_id
-       JOIN "SPES_evaluation_main_criteria" cat ON cat.id = ec.category_id
+       FROM "SPES2_evaluation_scores" evs
+       JOIN "SPES2_evaluation_sub_criteria"   ec  ON ec.id  = evs.criterion_id
+       JOIN "SPES2_evaluation_main_criteria" cat ON cat.id = ec.category_id
        WHERE evs.evaluation_id = ANY($1)
        ORDER BY evs.evaluation_id, ec.display_order`,
       [evalIds]

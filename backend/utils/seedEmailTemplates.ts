@@ -97,7 +97,7 @@ const SETTINGS: { key: string; value: number; labelTh: string }[] = [
 async function seedEmailTemplates(client: PoolClient): Promise<void> {
   for (const t of TEMPLATES) {
     await client.query(
-      `INSERT INTO "SPES_email_templates" (email_type, subject, title_th, body_text, button_label)
+      `INSERT INTO "SPES2_email_templates" (email_type, subject, title_th, body_text, button_label)
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (email_type) DO NOTHING`,
       [t.emailType, t.subject, t.titleTh, t.bodyText, t.buttonLabel]
@@ -105,7 +105,7 @@ async function seedEmailTemplates(client: PoolClient): Promise<void> {
   }
   for (const s of SETTINGS) {
     await client.query(
-      `INSERT INTO "SPES_email_settings" (key, value, label_th)
+      `INSERT INTO "SPES2_email_settings" (key, value, label_th)
        VALUES ($1, $2, $3)
        ON CONFLICT (key) DO NOTHING`,
       [s.key, s.value, s.labelTh]

@@ -22,7 +22,7 @@ async function listEmailTemplates(req: Request, res: Response) {
   const result = await pool.query(
     `SELECT email_type AS "emailType", subject, title_th AS "titleTh",
             body_text AS "bodyText", button_label AS "buttonLabel", updated_at AS "updatedAt"
-       FROM "SPES_email_templates" ORDER BY email_type`
+       FROM "SPES2_email_templates" ORDER BY email_type`
   );
   res.json(result.rows);
 }
@@ -44,7 +44,7 @@ async function updateEmailTemplate(req: Request, res: Response) {
   const updatedBy = employeeResult.rows[0]?.id || null;
 
   const result = await pool.query(
-    `UPDATE "SPES_email_templates"
+    `UPDATE "SPES2_email_templates"
         SET subject = $1, title_th = $2, body_text = $3, button_label = $4,
             updated_at = NOW(), updated_by = $5
       WHERE email_type = $6
@@ -60,7 +60,7 @@ async function updateEmailTemplate(req: Request, res: Response) {
 async function listEmailSettings(req: Request, res: Response) {
   const result = await pool.query(
     `SELECT key, value, label_th AS "labelTh", updated_at AS "updatedAt"
-       FROM "SPES_email_settings" ORDER BY key`
+       FROM "SPES2_email_settings" ORDER BY key`
   );
   res.json(result.rows);
 }
@@ -77,7 +77,7 @@ async function updateEmailSetting(req: Request, res: Response) {
   }
 
   const result = await pool.query(
-    `UPDATE "SPES_email_settings" SET value = $1, updated_at = NOW() WHERE key = $2
+    `UPDATE "SPES2_email_settings" SET value = $1, updated_at = NOW() WHERE key = $2
      RETURNING key, value, label_th AS "labelTh", updated_at AS "updatedAt"`,
     [value, key]
   );

@@ -6,7 +6,7 @@
 // ============================================================
 "use client";
 
-import { useState, useEffect, useCallback, useRef, Suspense, type ReactNode } from "react";
+import React, { useState, useEffect, useCallback, useRef, Suspense, useMemo, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Header, useClickOutside } from "@/components";
 import { PaginationBar } from "@/components/shared/PaginationBar";
@@ -22,7 +22,7 @@ import { FilterChips, toggleInSet } from "@/components/shared/FilterChips";
 import { SortableTh, nextSort, type SortState } from "@/components/shared/SortableTh";
 import {
   Users, ClipboardList, Upload, Building2,
-  ArrowLeft, Search, RefreshCw, X,
+  ArrowLeft, Search, RefreshCw, X, ChevronDown, ChevronRight,
   AlertCircle, SlidersHorizontal, Star, Mail, type LucideIcon,
 } from "lucide-react";
 import { ROLE_THEME, GRADE_COLOR } from "@/styles/theme";
@@ -422,6 +422,7 @@ interface SupplierRow {
   evaluatorEmail?: string | null;
   contactEmail?: string | null;
   isActive: boolean;
+  createdAt: string;
 }
 
 const PRODUCT_TYPE_LABEL: Record<string, string> = { goods: "สินค้า", services: "บริการ", both: "สินค้า+บริการ" };
@@ -437,6 +438,7 @@ function SuppliersTab() {
   const [minValue, setMinValue] = useState("");
   const [maxValue, setMaxValue] = useState("");
   const [page, setPage] = useState(1);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -492,9 +494,24 @@ function SuppliersTab() {
     return matchSearch && matchType && matchStatus && matchValue;
   });
 
-  const totalPages  = Math.max(1, Math.ceil(filtered.length / SUPPLIERS_PAGE_SIZE));
+  const groupedSuppliers = useMemo(() => {
+    const groups = new Map<string, SupplierRow[]>();
+    for (const r of filtered) {
+      const key = r.vendorCode || r.supplierName || String(r.id);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(r);
+    }
+    // Sort each group so newest (highest ID or newest ptaApproveDate) is first
+    const arr = Array.from(groups.values());
+    for (const group of arr) {
+      group.sort((a, b) => b.id - a.id);
+    }
+    return arr;
+  }, [filtered]);
+
+  const totalPages  = Math.max(1, Math.ceil(groupedSuppliers.length / SUPPLIERS_PAGE_SIZE));
   const pageClamped = Math.min(page, totalPages);
-  const pageRows    = filtered.slice((pageClamped - 1) * SUPPLIERS_PAGE_SIZE, pageClamped * SUPPLIERS_PAGE_SIZE);
+  const pageGroups  = groupedSuppliers.slice((pageClamped - 1) * SUPPLIERS_PAGE_SIZE, pageClamped * SUPPLIERS_PAGE_SIZE);
 
   return (
     <div>
@@ -583,7 +600,7 @@ function SuppliersTab() {
 
       {rows !== null && rows.length > 0 && (
         <div style={{ fontSize: 12, color: "#aaa", marginBottom: 10 }}>
-          แสดง {filtered.length} จาก {rows.length} รายการ
+          แสดง {groupedSuppliers.length} บริษัท ({filtered.length} โปรเจกต์)
         </div>
       )}
 
@@ -592,51 +609,101 @@ function SuppliersTab() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ background: "#fafafa", textAlign: "left" }}>
+                <th style={{ width: 40, padding: "10px 16px" }}></th>
                 <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap" }}>Supplier</th>
+                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap" }}>Tax ID</th>
                 <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap" }}>ประเภท</th>
                 <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap" }}>หมวดหมู่</th>
-                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap", textAlign: "right" }}>มูลค่างาน (THB)</th>
-                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap" }}>PTA Approve</th>
-                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap" }}>Buyer</th>
-                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap" }}>Evaluator</th>
-                <th style={{ padding: "10px 16px", color: "#888", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap" }}>สถานะ</th>
               </tr>
             </thead>
             <tbody>
-              {pageRows.map(r => (
-                <tr key={r.vendorCode} style={{ borderTop: "1px solid #f0f0f0" }}>
-                  <td style={{ padding: "10px 16px" }}>
-                    <div style={{ fontWeight: 600, color: "#2a2a2a" }}>{r.supplierName}</div>
-                    <div style={{ fontSize: 11, color: "#aaa", fontFamily: "monospace" }}>{r.vendorCode}{r.taxId ? ` · ${r.taxId}` : ""}</div>
-                  </td>
-                  <td style={{ padding: "10px 16px", color: "#666", whiteSpace: "nowrap" }}>{PRODUCT_TYPE_LABEL[r.productType] ?? r.productType}</td>
-                  <td style={{ padding: "10px 16px", color: "#666" }}>
-                    {r.category ?? "—"}
-                    {r.functionOwner && <div style={{ fontSize: 11, color: "#bbb" }}>{r.functionOwner}</div>}
-                  </td>
-                  <td style={{ padding: "10px 16px", color: "#333", textAlign: "right", whiteSpace: "nowrap" }}>
-                    {r.jobValueThb != null ? r.jobValueThb.toLocaleString("th-TH") : "—"}
-                  </td>
-                  <td style={{ padding: "10px 16px", color: "#666", whiteSpace: "nowrap" }}>{formatThaiDate(r.ptaApproveDate)}</td>
-                  <td style={{ padding: "10px 16px" }}>
-                    <div style={{ color: "#2a2a2a" }}>{r.buyerName ?? "—"}</div>
-                    {r.buyerEmail && <div style={{ fontSize: 11, color: "#aaa" }}>{r.buyerEmail}</div>}
-                  </td>
-                  <td style={{ padding: "10px 16px" }}>
-                    <div style={{ color: "#2a2a2a" }}>{r.evaluatorName ?? "—"}</div>
-                    {r.evaluatorEmail && <div style={{ fontSize: 11, color: "#aaa" }}>{r.evaluatorEmail}</div>}
-                  </td>
-                  <td style={{ padding: "10px 16px" }}>
-                    <span style={{
-                      background: r.isActive ? "#e8f5e9" : "#f5f5f5",
-                      color: r.isActive ? "#1b5e20" : "#999",
-                      borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap",
-                    }}>
-                      {r.isActive ? "ใช้งานอยู่" : "ปิดใช้งาน"}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {pageGroups.map(group => {
+                const main = group[0];
+                const key = main.vendorCode || String(main.id);
+                const isExpanded = expandedGroups.has(key);
+                return (
+                  <React.Fragment key={key}>
+                    <tr 
+                      style={{ borderTop: "1px solid #f0f0f0", cursor: "pointer", background: isExpanded ? "#f8f9fa" : "#fff" }}
+                      onClick={() => {
+                        setExpandedGroups(prev => {
+                          const next = new Set(prev);
+                          if (next.has(key)) next.delete(key);
+                          else next.add(key);
+                          return next;
+                        });
+                      }}
+                    >
+                      <td style={{ padding: "10px 16px", color: "#aaa" }}>
+                        {isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                      </td>
+                      <td style={{ padding: "10px 16px" }}>
+                        <div style={{ fontWeight: 600, color: "#2a2a2a" }}>{main.supplierName}</div>
+                        <div style={{ fontSize: 11, color: "#aaa", fontFamily: "monospace" }}>{main.vendorCode}</div>
+                      </td>
+                      <td style={{ padding: "10px 16px", color: "#666", fontFamily: "monospace" }}>
+                        {main.taxId || "—"}
+                      </td>
+                      <td style={{ padding: "10px 16px", color: "#666", whiteSpace: "nowrap" }}>{PRODUCT_TYPE_LABEL[main.productType] ?? main.productType}</td>
+                      <td style={{ padding: "10px 16px", color: "#666" }}>
+                        {main.category ?? "—"}
+                        {main.functionOwner && <div style={{ fontSize: 11, color: "#bbb" }}>{main.functionOwner}</div>}
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr>
+                        <td colSpan={5} style={{ padding: 0, background: "#fafbfc", borderBottom: "1px solid #f0f0f0" }}>
+                          <div style={{ padding: "16px 20px 24px 56px" }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: "#555", marginBottom: 12, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                              โปรเจกต์ (TORs) ของบริษัทนี้ ({group.length})
+                            </div>
+                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                              <thead>
+                                <tr style={{ borderBottom: "1.5px solid #eaeaea", textAlign: "left" }}>
+                                  <th style={{ padding: "8px 12px", color: "#777", fontWeight: 600 }}>วันที่เพิ่มข้อมูล</th>
+                                  <th style={{ padding: "8px 12px", color: "#777", fontWeight: 600 }}>มูลค่างาน (THB)</th>
+                                  <th style={{ padding: "8px 12px", color: "#777", fontWeight: 600 }}>PTA Approve</th>
+                                  <th style={{ padding: "8px 12px", color: "#777", fontWeight: 600 }}>Buyer (GCP)</th>
+                                  <th style={{ padding: "8px 12px", color: "#777", fontWeight: 600 }}>Evaluator (USER)</th>
+                                  <th style={{ padding: "8px 12px", color: "#777", fontWeight: 600 }}>สถานะ</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {group.map(r => (
+                                  <tr key={r.id} style={{ borderBottom: "1px solid #f2f2f2" }}>
+                                    <td style={{ padding: "10px 12px", color: "#666" }}>{formatThaiDate(r.createdAt)}</td>
+                                    <td style={{ padding: "10px 12px", color: "#333", fontWeight: 500 }}>
+                                      {r.jobValueThb != null ? r.jobValueThb.toLocaleString("th-TH") : "—"}
+                                    </td>
+                                    <td style={{ padding: "10px 12px", color: "#666" }}>{formatThaiDate(r.ptaApproveDate)}</td>
+                                    <td style={{ padding: "10px 12px" }}>
+                                      <div style={{ color: "#222" }}>{r.buyerName ?? "—"}</div>
+                                      {r.buyerEmail && <div style={{ fontSize: 11, color: "#888" }}>{r.buyerEmail}</div>}
+                                    </td>
+                                    <td style={{ padding: "10px 12px" }}>
+                                      <div style={{ color: "#222" }}>{r.evaluatorName ?? "—"}</div>
+                                      {r.evaluatorEmail && <div style={{ fontSize: 11, color: "#888" }}>{r.evaluatorEmail}</div>}
+                                    </td>
+                                    <td style={{ padding: "10px 12px" }}>
+                                      <span style={{
+                                        background: r.isActive ? "#e8f5e9" : "#f5f5f5",
+                                        color: r.isActive ? "#1b5e20" : "#999",
+                                        borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap",
+                                      }}>
+                                        {r.isActive ? "ใช้งานอยู่" : "ปิดใช้งาน"}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -646,7 +713,7 @@ function SuppliersTab() {
         <PaginationBar
           page={pageClamped}
           totalPages={totalPages}
-          total={filtered.length}
+          total={groupedSuppliers.length}
           pageSize={SUPPLIERS_PAGE_SIZE}
           onPrev={() => setPage(p => Math.max(1, p - 1))}
           onNext={() => setPage(p => Math.min(totalPages, p + 1))}

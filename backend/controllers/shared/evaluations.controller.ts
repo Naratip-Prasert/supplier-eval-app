@@ -45,7 +45,7 @@ async function computeScoreAndGrade(
   // Round to 1dp for grade lookup — matches .toFixed(1) display precision
   const scoreFor1dp = Math.round(totalScore * 10) / 10;
   const gradeRow = await client.query(
-    'SELECT grade FROM "SPES_grade_thresholds" WHERE $1 >= min_score AND $1 <= max_score LIMIT 1',
+    'SELECT grade FROM "SPES2_grade_thresholds" WHERE $1 >= min_score AND $1 <= max_score LIMIT 1',
     [scoreFor1dp]
   );
   const grade = gradeRow.rows[0]?.grade ?? 'D';
@@ -95,7 +95,7 @@ async function createEvaluation(req: Request, res: Response) {
 
     // 1. Validate employee
     const empResult = await client.query(
-      `SELECT e.emp_no AS id, COALESCE(r.role, 'USER') AS role FROM "Master_Data_All" e LEFT JOIN "SPES_Roles" r ON r.emp_no = e.emp_no WHERE UPPER(e.emp_no) = UPPER($1)`,
+      `SELECT e.emp_no AS id, COALESCE(r.role, 'USER') AS role FROM "Master_Data_All" e LEFT JOIN "SPES2_Roles" r ON r.emp_no = e.emp_no WHERE UPPER(e.emp_no) = UPPER($1)`,
       [employeeId]
     );
     if (empResult.rows.length === 0) {
@@ -107,7 +107,7 @@ async function createEvaluation(req: Request, res: Response) {
 
     // 2. Validate supplier
     const supResult = await client.query(
-      `SELECT id FROM "SPES_suppliers" WHERE vendor_code = $1 AND is_active = TRUE`,
+      `SELECT id FROM "SPES2_suppliers" WHERE vendor_code = $1 AND is_active = TRUE`,
       [vendorCode]
     );
     if (supResult.rows.length === 0) {
@@ -138,7 +138,7 @@ async function createEvaluation(req: Request, res: Response) {
     // anyone who happens to submit a matching (supplier, period, evalType).
     if (taskSessionId) {
       const taskSessionResult = await client.query(
-        `SELECT id, eval_type FROM "SPES_evaluation_sessions"
+        `SELECT id, eval_type FROM "SPES2_evaluation_sessions"
           WHERE id = $1 AND supplier_id = $2 AND status IN ('pending', 'in_progress', 'returned')`,
         [taskSessionId, supplier.id]
       );
@@ -157,7 +157,7 @@ async function createEvaluation(req: Request, res: Response) {
       // halves, leaving the session stuck at "in_progress" forever even
       // after both people have submitted.
       const taskRoleResult = await client.query(
-        `SELECT role FROM "SPES_evaluation_tasks"
+        `SELECT role FROM "SPES2_evaluation_tasks"
           WHERE session_id = $1
             AND (assigned_employee_id = $2
                  OR LOWER(assigned_email) = LOWER((SELECT email FROM "Master_Data_All" WHERE emp_no = $2 LIMIT 1)))
@@ -169,7 +169,7 @@ async function createEvaluation(req: Request, res: Response) {
       }
 
       const dupResult = await client.query(
-        `SELECT id FROM "SPES_evaluations" WHERE session_id = $1 AND role = $2`,
+        `SELECT id FROM "SPES2_evaluations" WHERE session_id = $1 AND role = $2`,
         [sessionId, evalRole]
       );
       if (dupResult.rows.length > 0) {
@@ -192,12 +192,12 @@ async function createEvaluation(req: Request, res: Response) {
       // so without this guard a manual submission could attach itself to a
       // session that's meant to be filled only by its assigned task.
       const sessionResult = await client.query(
-        `SELECT id FROM "SPES_evaluation_sessions" es
+        `SELECT id FROM "SPES2_evaluation_sessions" es
           WHERE supplier_id = $1
             AND period      = $2
             AND eval_type   = $3
             AND status IN ('pending', 'in_progress', 'returned')
-            AND NOT EXISTS (SELECT 1 FROM "SPES_evaluation_tasks" et WHERE et.session_id = es.id)
+            AND NOT EXISTS (SELECT 1 FROM "SPES2_evaluation_tasks" et WHERE et.session_id = es.id)
           ORDER BY created_at DESC
           LIMIT 1`,
         [supplier.id, period, evalType]
@@ -207,7 +207,7 @@ async function createEvaluation(req: Request, res: Response) {
         sessionId = sessionResult.rows[0].id;
 
         const dupResult = await client.query(
-          `SELECT id FROM "SPES_evaluations" WHERE session_id = $1 AND role = $2`,
+          `SELECT id FROM "SPES2_evaluations" WHERE session_id = $1 AND role = $2`,
           [sessionId, evalRole]
         );
         if (dupResult.rows.length > 0) {
@@ -217,7 +217,7 @@ async function createEvaluation(req: Request, res: Response) {
         }
       } else {
         const newSession = await client.query(
-          `INSERT INTO "SPES_evaluation_sessions" (supplier_id, eval_type, period, initiated_by)
+          `INSERT INTO "SPES2_evaluation_sessions" (supplier_id, eval_type, period, initiated_by)
             VALUES ($1, $2, $3, $4) RETURNING id`,
           [supplier.id, evalType, period, employee.id]
         );
@@ -248,8 +248,8 @@ async function createEvaluation(req: Request, res: Response) {
     const codes = Object.keys(scores);
     const criteriaResult = await client.query(
       `SELECT sc.id, sc.code, sc.default_weight, sc.name_th, mc.name_th AS category_name_th
-         FROM "SPES_evaluation_sub_criteria" sc
-         JOIN "SPES_evaluation_main_criteria" mc ON mc.id = sc.category_id
+         FROM "SPES2_evaluation_sub_criteria" sc
+         JOIN "SPES2_evaluation_main_criteria" mc ON mc.id = sc.category_id
         WHERE sc.code = ANY($1) AND sc.is_active = TRUE AND sc.criteria_set = ANY($2)`,
       [codes, criteriaSets]
     );
@@ -286,7 +286,7 @@ async function createEvaluation(req: Request, res: Response) {
 
     // 8. Mark evaluation_task as completed if task-based assignment exists
     const completedTask = await client.query(`
-      UPDATE "SPES_evaluation_tasks"
+      UPDATE "SPES2_evaluation_tasks"
          SET status = 'completed'
        WHERE session_id = $1
          AND (assigned_employee_id = $2
@@ -297,7 +297,7 @@ async function createEvaluation(req: Request, res: Response) {
 
     // 9. Insert evaluation record (raw_scores stores every criterion submitted)
     const evalResult = await client.query(
-      `INSERT INTO "SPES_evaluations"
+      `INSERT INTO "SPES2_evaluations"
          (session_id, employee_id, role, product_type, status, total_score, grade, submitted_at, raw_scores, module_code, custom_module_items)
        VALUES ($1, $2, $3, $4, 'saved', $5, $6, NOW(), $7, $8, $9)
        RETURNING id`,
@@ -320,7 +320,7 @@ async function createEvaluation(req: Request, res: Response) {
       const attachmentName = entry.attachmentName ?? null;
 
       await client.query(
-        `INSERT INTO "SPES_evaluation_scores" (evaluation_id, criterion_id, weight, score, note, name_th_snapshot, category_name_th_snapshot, attachment_path, attachment_name)
+        `INSERT INTO "SPES2_evaluation_scores" (evaluation_id, criterion_id, weight, score, note, name_th_snapshot, category_name_th_snapshot, attachment_path, attachment_name)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [evaluationId, criterion.id, weight, score, note, criterion.name_th, criterion.category_name_th, attachmentPath, attachmentName]
       );
@@ -333,20 +333,20 @@ async function createEvaluation(req: Request, res: Response) {
     const task = completedTask.rows[0];
     if (task && !task.thankyou_sent_at) {
       pool.query(
-        `SELECT supplier_name, vendor_code FROM "SPES_suppliers" s
-           JOIN "SPES_evaluation_sessions" es ON es.supplier_id = s.id WHERE es.id = $1`,
+        `SELECT supplier_name, vendor_code FROM "SPES2_suppliers" s
+           JOIN "SPES2_evaluation_sessions" es ON es.supplier_id = s.id WHERE es.id = $1`,
         [sessionId]
       ).then(async (supRes: any) => {
         if (supRes.rows.length === 0) return;
         await sendThankyouEmail(task, supRes.rows[0]);
-        await pool.query(`UPDATE "SPES_evaluation_tasks" SET thankyou_sent_at = NOW() WHERE id = $1`, [task.id]);
+        await pool.query(`UPDATE "SPES2_evaluation_tasks" SET thankyou_sent_at = NOW() WHERE id = $1`, [task.id]);
       }).catch((e: any) => console.warn('[evaluations] thankyou email error:', e.message));
     }
 
     // After commit: check if both USER+GCP have submitted for this session
     // If yes → create supervisor_review and notify supervisors (fire-and-forget)
     pool.query(
-      `SELECT COUNT(*) AS cnt FROM "SPES_evaluations" WHERE session_id = $1 AND status = 'saved'`,
+      `SELECT COUNT(*) AS cnt FROM "SPES2_evaluations" WHERE session_id = $1 AND status = 'saved'`,
       [sessionId]
     ).then(async (r: any) => {
       if (parseInt(r.rows[0].cnt, 10) < 2) return;
@@ -360,7 +360,7 @@ async function createEvaluation(req: Request, res: Response) {
       // one pending review per session instead of a duplicate + duplicate
       // supervisor notification.
       await pool.query(`
-        INSERT INTO "SPES_supervisor_reviews" (session_id, review_due)
+        INSERT INTO "SPES2_supervisor_reviews" (session_id, review_due)
         VALUES ($1, $2)
         ON CONFLICT (session_id) WHERE status = 'pending' DO NOTHING
       `, [sessionId, reviewDue]);
@@ -368,8 +368,8 @@ async function createEvaluation(req: Request, res: Response) {
       // Fetch session + supplier for email
       const sessionInfo = await pool.query(`
         SELECT es.eval_type, es.final_score, s.supplier_name, s.vendor_code
-          FROM "SPES_evaluation_sessions" es
-          JOIN "SPES_suppliers" s ON s.id = es.supplier_id
+          FROM "SPES2_evaluation_sessions" es
+          JOIN "SPES2_suppliers" s ON s.id = es.supplier_id
          WHERE es.id = $1
       `, [sessionId]);
 
@@ -379,7 +379,7 @@ async function createEvaluation(req: Request, res: Response) {
       // Notify all active supervisors
       const supervisors = await pool.query(`
         SELECT e.email, e.name AS full_name FROM "Master_Data_All" e
-         JOIN "SPES_Roles" r ON r.emp_no = e.emp_no
+         JOIN "SPES2_Roles" r ON r.emp_no = e.emp_no
          WHERE r.role = 'SUPERVISOR' AND e.email IS NOT NULL
       `);
       for (const sup of supervisors.rows) {
@@ -428,8 +428,8 @@ async function listSessions(req: Request, res: Response) {
          es.final_grade   AS "finalGrade",
          es.created_at    AS "createdAt",
          es.completed_at  AS "completedAt"
-       FROM "SPES_evaluation_sessions" es
-       JOIN "SPES_suppliers" s ON s.id = es.supplier_id
+       FROM "SPES2_evaluation_sessions" es
+       JOIN "SPES2_suppliers" s ON s.id = es.supplier_id
        ORDER BY es.created_at DESC`
     );
     res.json(result.rows);
@@ -461,9 +461,9 @@ async function listAllEvaluations(req: Request, res: Response) {
          emp.name           AS "evaluatorName",
          emp.emp_no         AS "evaluatorId",
          NULL               AS "evaluatorPicture"
-       FROM "SPES_evaluations" ev
-       JOIN "SPES_evaluation_sessions" es  ON es.id  = ev.session_id
-       JOIN "SPES_suppliers"           s   ON s.id   = es.supplier_id
+       FROM "SPES2_evaluations" ev
+       JOIN "SPES2_evaluation_sessions" es  ON es.id  = ev.session_id
+       JOIN "SPES2_suppliers"           s   ON s.id   = es.supplier_id
        JOIN "Master_Data_All"          emp ON emp.emp_no = ev.employee_id
        ORDER BY ev.submitted_at DESC
        LIMIT 500`
@@ -493,9 +493,9 @@ async function listMyEvaluations(req: Request, res: Response) {
          es.status          AS "sessionStatus",
          es.final_score     AS "finalScore",
          es.final_grade     AS "finalGrade"
-       FROM "SPES_evaluations" ev
-       JOIN "SPES_evaluation_sessions" es ON es.id = ev.session_id
-       JOIN "SPES_suppliers"           s  ON s.id  = es.supplier_id
+       FROM "SPES2_evaluations" ev
+       JOIN "SPES2_evaluation_sessions" es ON es.id = ev.session_id
+       JOIN "SPES2_suppliers"           s  ON s.id  = es.supplier_id
        JOIN "Master_Data_All"          emp ON emp.emp_no = ev.employee_id
        WHERE UPPER(emp.emp_no) = UPPER($1)
        ORDER BY ev.submitted_at DESC
@@ -536,12 +536,12 @@ async function myTasks(req: Request, res: Response) {
         s.vendor_code       AS "vendorCode",
         s.supplier_name     AS "supplierName",
         s.product_type      AS "productType",
-        (SELECT r.notes FROM "SPES_supervisor_reviews" r
+        (SELECT r.notes FROM "SPES2_supervisor_reviews" r
           WHERE r.session_id = es.id AND r.status = 'returned'
           ORDER BY r.created_at DESC LIMIT 1)      AS "supervisorNotes"
-      FROM "SPES_evaluation_tasks" et
-      JOIN "SPES_evaluation_sessions" es ON es.id = et.session_id
-      JOIN "SPES_suppliers" s             ON s.id = et.supplier_id
+      FROM "SPES2_evaluation_tasks" et
+      JOIN "SPES2_evaluation_sessions" es ON es.id = et.session_id
+      JOIN "SPES2_suppliers" s             ON s.id = et.supplier_id
       WHERE (
         UPPER(et.assigned_employee_id) = UPPER($1)
         OR LOWER(et.assigned_email) = LOWER($2)
@@ -579,16 +579,16 @@ async function myTimeline(req: Request, res: Response) {
         s.vendor_code       AS "vendorCode",
         s.supplier_name     AS "supplierName",
         s.product_type      AS "productType",
-        (SELECT r.notes FROM "SPES_supervisor_reviews" r
+        (SELECT r.notes FROM "SPES2_supervisor_reviews" r
           WHERE r.session_id = es.id AND r.status = 'returned'
           ORDER BY r.created_at DESC LIMIT 1)      AS "supervisorNotes",
         COALESCE(
-          (SELECT r.review_due FROM "SPES_supervisor_reviews" r WHERE r.session_id = es.id ORDER BY r.created_at DESC LIMIT 1),
+          (SELECT r.review_due FROM "SPES2_supervisor_reviews" r WHERE r.session_id = es.id ORDER BY r.created_at DESC LIMIT 1),
           et.due_date
         ) AS "dueDate"
-      FROM "SPES_evaluation_tasks" et
-      JOIN "SPES_evaluation_sessions" es ON es.id = et.session_id
-      JOIN "SPES_suppliers" s             ON s.id = et.supplier_id
+      FROM "SPES2_evaluation_tasks" et
+      JOIN "SPES2_evaluation_sessions" es ON es.id = et.session_id
+      JOIN "SPES2_suppliers" s             ON s.id = et.supplier_id
       WHERE (
         UPPER(et.assigned_employee_id) = UPPER($1)
         OR LOWER(et.assigned_email) = LOWER($2)
@@ -619,9 +619,9 @@ async function byVendor(req: Request, res: Response) {
          ev.submitted_at    AS "submittedAt",
          es.final_score     AS "finalScore",
          es.final_grade     AS "finalGrade"
-       FROM "SPES_evaluations" ev
-       JOIN "SPES_evaluation_sessions" es ON es.id = ev.session_id
-       JOIN "SPES_suppliers"           s  ON s.id  = es.supplier_id
+       FROM "SPES2_evaluations" ev
+       JOIN "SPES2_evaluation_sessions" es ON es.id = ev.session_id
+       JOIN "SPES2_suppliers"           s  ON s.id  = es.supplier_id
        WHERE s.vendor_code = $1 AND ev.status = 'saved'
        ORDER BY ev.submitted_at DESC
        LIMIT 20`,
@@ -663,10 +663,10 @@ async function getById(req: Request, res: Response) {
          es.final_score   AS "finalScore",
          es.final_grade   AS "finalGrade",
          ev.raw_scores    AS "rawScores"
-       FROM "SPES_evaluations" ev
+       FROM "SPES2_evaluations" ev
        JOIN "Master_Data_All" emp ON emp.emp_no = ev.employee_id
-       JOIN "SPES_evaluation_sessions" es  ON es.id  = ev.session_id
-       JOIN "SPES_suppliers"          s   ON s.id    = es.supplier_id
+       JOIN "SPES2_evaluation_sessions" es  ON es.id  = ev.session_id
+       JOIN "SPES2_suppliers"          s   ON s.id    = es.supplier_id
        WHERE ev.id = $1`,
       [req.params.id]
     );
@@ -688,9 +688,9 @@ async function getById(req: Request, res: Response) {
          evs.attachment_path AS "attachmentPath",
          evs.attachment_name AS "attachmentName",
          evs.weighted_score AS "weightedScore"
-       FROM "SPES_evaluation_scores" evs
-       JOIN "SPES_evaluation_sub_criteria"  ec  ON ec.id  = evs.criterion_id
-       JOIN "SPES_evaluation_main_criteria" cat ON cat.id = ec.category_id
+       FROM "SPES2_evaluation_scores" evs
+       JOIN "SPES2_evaluation_sub_criteria"  ec  ON ec.id  = evs.criterion_id
+       JOIN "SPES2_evaluation_main_criteria" cat ON cat.id = ec.category_id
        WHERE evs.evaluation_id = $1
        ORDER BY ec.display_order`,
       [req.params.id]
