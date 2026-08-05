@@ -438,12 +438,36 @@ function SuppliersTab() {
   const [maxValue, setMaxValue] = useState("");
   const [page, setPage] = useState(1);
 
-  useEffect(() => {
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const loadSuppliers = useCallback(() => {
+    // We don't setRows(null) to avoid full flicker on re-sync, but we could.
     authFetch("/api/admin/suppliers")
       .then(r => r.json())
       .then(d => setRows(Array.isArray(d) ? d : []))
       .catch(() => setRows([]));
   }, []);
+
+  useEffect(() => { loadSuppliers(); }, [loadSuppliers]);
+
+  const handleSyncNames = async () => {
+    if (!window.confirm("ยืนยันการซิงก์ข้อมูล Buyer และ Evaluator จาก Master Data?")) return;
+    setIsSyncing(true);
+    try {
+      const res = await authFetch("/api/admin/suppliers/sync-names", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`ซิงก์ข้อมูลสำเร็จ\n- อัปเดต Buyer: ${data.buyersUpdated} รายการ\n- อัปเดต Evaluator: ${data.evaluatorsUpdated} รายการ\n- อัปเดต Tasks (ที่ยังไม่เสร็จ): ${data.tasksUpdated || 0} รายการ`);
+        loadSuppliers();
+      } else {
+        alert("เกิดข้อผิดพลาด: " + data.message);
+      }
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   // Any filter change should snap back to page 1 — otherwise a narrower
   // result set can leave the view stuck on a now-nonexistent later page.
@@ -475,6 +499,19 @@ function SuppliersTab() {
   return (
     <div>
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
+        <button
+          onClick={handleSyncNames}
+          disabled={isSyncing}
+          style={{
+            display: "flex", alignItems: "center", gap: 6, padding: "8px 12px",
+            background: "#3949ab", color: "#fff", border: "none", borderRadius: 8,
+            cursor: isSyncing ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600,
+            opacity: isSyncing ? 0.7 : 1, whiteSpace: "nowrap"
+          }}
+        >
+          <RefreshCw size={14} className={isSyncing ? "spin-icon" : ""} />
+          {isSyncing ? "กำลังซิงก์..." : "ซิงก์รายชื่อกับ Master"}
+        </button>
         <div style={{ position: "relative", width: 320, flexShrink: 0 }}>
           <Search size={15} style={{ position: "absolute", left: 12, top: 11, color: "#aaa" }} />
           <input
